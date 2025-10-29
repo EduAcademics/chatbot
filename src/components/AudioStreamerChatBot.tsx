@@ -77,13 +77,9 @@ const AudioStreamerChatBot = ({
   const [attendanceData, setAttendanceData] = useState<any[]>([]); // <-- add for editable attendance
   const [attendanceStep, setAttendanceStep] = useState<'class_info' | 'student_details' | 'completed'>('class_info'); // <-- add for step tracking
   const [pendingClassInfo, setPendingClassInfo] = useState<{ class_: string; section: string; date: string } | null>(null); // <-- add for pending class info
-  const [isProcessingImage, setIsProcessingImage] = useState(false); // <-- add for image processing state
+  const [, setIsProcessingImage] = useState(false); // <-- add for image processing state
   // Debug wrapper for setAttendanceData
-  const setAttendanceDataDebug = (newData: any[]) => {
-    console.log("setAttendanceData called with:", newData);
-    console.trace("setAttendanceData call stack");
-    setAttendanceData(newData);
-  };
+
   const [classInfo, setClassInfo] = useState<any>(null); // <-- add for class info
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null); // Track which message is being edited
   const [showClassInfoModal, setShowClassInfoModal] = useState(false); // <-- add for class info modal
