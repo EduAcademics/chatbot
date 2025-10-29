@@ -141,6 +141,7 @@ const AudioStreamerChatBot = ({
         // ignore
       }
     };
+
     fetchUserSession();
   }, [userId]);
 
