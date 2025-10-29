@@ -20,6 +20,7 @@ import ClassInfoModal from "./ClassInfoModal";
 type TabType = "answer" | "references" | "query";
 type FlowType = "none" | "query" | "attendance" | "voice_attendance"; // <-- add voice attendance
 const apiBase = import.meta.env.VITE_API_BASE_URL;
+const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   darkMode,
   userId,
@@ -76,7 +77,7 @@ const AudioStreamerChatBot = ({
   const [attendanceData, setAttendanceData] = useState<any[]>([]); // <-- add for editable attendance
   const [attendanceStep, setAttendanceStep] = useState<'class_info' | 'student_details' | 'completed'>('class_info'); // <-- add for step tracking
   const [pendingClassInfo, setPendingClassInfo] = useState<{ class_: string; section: string; date: string } | null>(null); // <-- add for pending class info
-
+  const [isProcessingImage, setIsProcessingImage] = useState(false); // <-- add for image processing state
   // Debug wrapper for setAttendanceData
   const setAttendanceDataDebug = (newData: any[]) => {
     console.log("setAttendanceData called with:", newData);
@@ -173,7 +174,7 @@ const AudioStreamerChatBot = ({
     const processor = audioContext.createScriptProcessor(4096, 1, 1);
     processorRef.current = processor;
 
-    const socket = new WebSocket("ws://localhost:8000/ws/speech_to_text");
+    const socket = new WebSocket(`${wsBase}/ws/speech_to_text`);
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -247,7 +248,7 @@ const AudioStreamerChatBot = ({
     const formData = new FormData();
     formData.append("file", file);
     formData.append("session_id", sessionId || userId);
-    const resp = await fetch("http://localhost:8000/v1/ai/upload-file", {
+    const resp = await fetch(`${apiBase}/v1/ai/upload-file`, {
       method: "POST",
       body: formData,
     });
@@ -265,7 +266,7 @@ const AudioStreamerChatBot = ({
       formData.append("section", classInfo.section);
       formData.append("date", classInfo.date);
 
-      const resp = await fetch("http://localhost:8000/v1/ai/process-attendance-image", {
+      const resp = await fetch(`${apiBase}/v1/ai/process-attendance-image`, {
         method: "POST",
         body: formData,
       });
@@ -338,7 +339,7 @@ const AudioStreamerChatBot = ({
     if (activeFlow === "query") {
       // Query handler API
       try {
-        const resp = await fetch("http://localhost:8000/v1/ai/query-handler", {
+        const resp = await fetch(`${apiBase}/v1/ai/query-handler`, {
           method: "POST",
           headers: {
             "x-academic-session": "2025-26",
@@ -389,7 +390,7 @@ const AudioStreamerChatBot = ({
       if (attendanceStep === 'class_info') {
         // First step: Collect class information
         try {
-          const resp = await fetch("http://localhost:8000/v1/ai/chat", {
+          const resp = await fetch(`${apiBase}/v1/ai/chat`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -525,7 +526,7 @@ const AudioStreamerChatBot = ({
       } else if (attendanceStep === 'student_details') {
         // Second step: Collect student details
         try {
-          const resp = await fetch("http://localhost:8000/v1/ai/chat", {
+          const resp = await fetch(`${apiBase}/v1/ai/chat`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -689,7 +690,7 @@ const AudioStreamerChatBot = ({
       if (attendanceStep === 'class_info') {
         // First step: Process voice input for class information
         try {
-          const resp = await fetch("http://localhost:8000/v1/ai/process-voice-class-info", {
+          const resp = await fetch(`${apiBase}/v1/ai/process-voice-class-info`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -728,7 +729,7 @@ const AudioStreamerChatBot = ({
       } else if (attendanceStep === 'student_details') {
         // Second step: Process voice input for student attendance
         try {
-          const resp = await fetch("http://localhost:8000/v1/ai/process-voice-attendance", {
+          const resp = await fetch(`${apiBase}/v1/ai/process-voice-attendance`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -837,7 +838,7 @@ const AudioStreamerChatBot = ({
   const handlePlayTTS = async (idx: number, text: string) => {
     setTtsLoading(idx);
     try {
-      const resp = await fetch("http://localhost:8000/v1/ai/text-to-speech", {
+      const resp = await fetch(`${apiBase}/v1/ai/text-to-speech`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -883,7 +884,7 @@ const AudioStreamerChatBot = ({
   ) => {
     const feedbackCommentValue = comment ?? "";
     try {
-      const resp = await fetch("http://localhost:8000/v1/ai/feedback", {
+      const resp = await fetch(`${apiBase}/v1/ai/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1290,7 +1291,7 @@ const AudioStreamerChatBot = ({
       console.log(`🎯 Date being sent to backend: '${dataToSave.classInfo?.date}'`);
 
       // Send approval message to backend with the current data
-      const resp = await fetch("http://localhost:8000/v1/ai/chat", {
+      const resp = await fetch(`${apiBase}/v1/ai/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

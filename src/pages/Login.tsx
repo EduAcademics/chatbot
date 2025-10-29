@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
-import { FiUser, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
-
+import { useState } from 'react';
+import { FiEye, FiEyeOff, FiLock, FiUser } from 'react-icons/fi';
+const apiBase = import.meta.env.VITE_API_BASE_URL;
 const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -11,7 +10,7 @@ const Login = () => {
     email: '',
     password: ''
   });
-  const navigate = useNavigate();
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,7 +18,7 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/v1/auth/login', {
+      const response = await fetch(`${apiBase}/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -58,8 +57,8 @@ const Login = () => {
           animate={{ y: [0, -18, 0], rotate: [-10, 10, -10], opacity: [0.7, 1, 0.7] }}
           transition={{ repeat: Infinity, duration: 7, ease: "easeInOut" }}
         >
-          <rect x="10" y="15" width="40" height="30" rx="6" fill="#fbbf24" stroke="#f59e42" strokeWidth="2"/>
-          <rect x="15" y="20" width="30" height="20" rx="3" fill="#fff" stroke="#fbbf24" strokeWidth="1"/>
+          <rect x="10" y="15" width="40" height="30" rx="6" fill="#fbbf24" stroke="#f59e42" strokeWidth="2" />
+          <rect x="15" y="20" width="30" height="20" rx="3" fill="#fff" stroke="#fbbf24" strokeWidth="1" />
         </motion.svg>
         {/* Pencil */}
         <motion.svg
@@ -72,9 +71,9 @@ const Login = () => {
           animate={{ y: [0, 14, 0], rotate: [8, -8, 8], opacity: [0.7, 1, 0.7] }}
           transition={{ repeat: Infinity, duration: 6, ease: "easeInOut", delay: 1.5 }}
         >
-          <rect x="10" y="30" width="28" height="8" rx="3" fill="#f87171" stroke="#b91c1c" strokeWidth="1"/>
-          <polygon points="38,30 46,25 46,33 38,38" fill="#fde68a" stroke="#f59e42" strokeWidth="1"/>
-          <polygon points="10,30 6,29 6,39 10,38" fill="#fff" stroke="#d1d5db" strokeWidth="1"/>
+          <rect x="10" y="30" width="28" height="8" rx="3" fill="#f87171" stroke="#b91c1c" strokeWidth="1" />
+          <polygon points="38,30 46,25 46,33 38,38" fill="#fde68a" stroke="#f59e42" strokeWidth="1" />
+          <polygon points="10,30 6,29 6,39 10,38" fill="#fff" stroke="#d1d5db" strokeWidth="1" />
         </motion.svg>
         {/* Paper plane */}
         <motion.svg
@@ -87,8 +86,8 @@ const Login = () => {
           animate={{ y: [0, -12, 0], rotate: [0, 12, 0], opacity: [0.7, 1, 0.7] }}
           transition={{ repeat: Infinity, duration: 8, ease: "easeInOut", delay: 3 }}
         >
-          <polygon points="5,27 49,7 27,49" fill="#60a5fa" stroke="#2563eb" strokeWidth="2"/>
-          <polyline points="27,49 22,32 49,7" fill="none" stroke="#2563eb" strokeWidth="2"/>
+          <polygon points="5,27 49,7 27,49" fill="#60a5fa" stroke="#2563eb" strokeWidth="2" />
+          <polyline points="27,49 22,32 49,7" fill="none" stroke="#2563eb" strokeWidth="2" />
         </motion.svg>
         {/* Ruler */}
         <motion.svg
@@ -101,9 +100,9 @@ const Login = () => {
           animate={{ x: [0, 20, 0], y: [0, -8, 0], rotate: [-5, 10, -5], opacity: [0.6, 1, 0.6] }}
           transition={{ repeat: Infinity, duration: 9, ease: "easeInOut", delay: 2 }}
         >
-          <rect x="2" y="2" width="66" height="14" rx="3" fill="#a7f3d0" stroke="#059669" strokeWidth="2"/>
+          <rect x="2" y="2" width="66" height="14" rx="3" fill="#a7f3d0" stroke="#059669" strokeWidth="2" />
           {[...Array(12)].map((_, i) => (
-            <rect key={i} x={6 + i*5} y="4" width="1" height={i % 2 === 0 ? "10" : "6"} fill="#059669"/>
+            <rect key={i} x={6 + i * 5} y="4" width="1" height={i % 2 === 0 ? "10" : "6"} fill="#059669" />
           ))}
         </motion.svg>
         {/* Globe */}
@@ -117,9 +116,9 @@ const Login = () => {
           animate={{ y: [0, 10, 0], scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
           transition={{ repeat: Infinity, duration: 10, ease: "easeInOut", delay: 4 }}
         >
-          <circle cx="24" cy="24" r="18" fill="#a5b4fc" stroke="#6366f1" strokeWidth="2"/>
-          <ellipse cx="24" cy="24" rx="12" ry="18" fill="none" stroke="#6366f1" strokeWidth="1"/>
-          <ellipse cx="24" cy="24" rx="18" ry="6" fill="none" stroke="#6366f1" strokeWidth="1"/>
+          <circle cx="24" cy="24" r="18" fill="#a5b4fc" stroke="#6366f1" strokeWidth="2" />
+          <ellipse cx="24" cy="24" rx="12" ry="18" fill="none" stroke="#6366f1" strokeWidth="1" />
+          <ellipse cx="24" cy="24" rx="18" ry="6" fill="none" stroke="#6366f1" strokeWidth="1" />
         </motion.svg>
         {/* Bouncing Ball */}
         <motion.svg
@@ -132,8 +131,8 @@ const Login = () => {
           animate={{ y: [0, 30, 0], opacity: [0.8, 1, 0.8] }}
           transition={{ repeat: Infinity, duration: 3, ease: "easeInOut", delay: 2.5 }}
         >
-          <circle cx="14" cy="14" r="12" fill="#f472b6" stroke="#be185d" strokeWidth="2"/>
-          <path d="M14 2 A12 12 0 0 1 26 14" stroke="#fff" strokeWidth="2" fill="none"/>
+          <circle cx="14" cy="14" r="12" fill="#f472b6" stroke="#be185d" strokeWidth="2" />
+          <path d="M14 2 A12 12 0 0 1 26 14" stroke="#fff" strokeWidth="2" fill="none" />
         </motion.svg>
         {/* Chalk dust effect */}
         <div className="chalk-dust">
@@ -159,14 +158,14 @@ const Login = () => {
         </div>
       </div>
 
-      <motion.div 
+      <motion.div
         className="login-card chalk-border"
         initial={{ opacity: 0, y: 20, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         whileHover={{ scale: 1.025, boxShadow: "0 8px 32px rgba(99,102,241,0.18)" }}
         transition={{ duration: 0.5 }}
       >
-        <motion.h1 
+        <motion.h1
           className="login-title"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -174,9 +173,9 @@ const Login = () => {
         >
           Login AI ChatBot
         </motion.h1>
-        
+
         {error && (
-          <motion.div 
+          <motion.div
             className="error-message"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

@@ -1,7 +1,7 @@
 import { useState } from "react";
-
-const UserInfoBox = ({ onUserFetched }: { 
-  onUserFetched: (userId: string, roles: string, email: string) => void 
+const apiBase = import.meta.env.VITE_API_BASE_URL;
+const UserInfoBox = ({ onUserFetched }: {
+  onUserFetched: (userId: string, roles: string, email: string) => void
 }) => {
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
@@ -11,11 +11,11 @@ const UserInfoBox = ({ onUserFetched }: {
   const handleFetch = async () => {
     setError(null);
     try {
-      const resp = await fetch("http://localhost:8000/v1/user/fetch", {
+      const resp = await fetch(`${apiBase}/v1/user/fetch`, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("token")}` 
+          "Authorization": `Bearer ${localStorage.getItem("token")}`
         },
         body: JSON.stringify({ email }), // <-- only pass email
       });
@@ -27,7 +27,8 @@ const UserInfoBox = ({ onUserFetched }: {
         // Log the fetched values
         console.log("Fetched user info:", {
           user_id: data.user_id,
-          user_roles: data.user_roles});
+          user_roles: data.user_roles
+        });
       } else {
         setError(data.message || "User not found");
       }
