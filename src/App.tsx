@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { FiSun, FiMoon, FiLogOut } from "react-icons/fi";
+import { motion } from "framer-motion";
+import { FiLogOut } from "react-icons/fi";
 import Login from "./pages/Login";
 import AudioStreamerChatBot from "./components/AudioStreamerChatBot";
 import UserInfoBox from "./components/UserInfoBox";
+
 // import AttendanceTest from "./pages/AttendanceTest";
 
 function App() {
-  const [darkMode, setDarkMode] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem("token"));
   const [userId, setUserId] = useState<string | null>(null);
   const [roles, setRoles] = useState<string>("");
@@ -17,8 +18,6 @@ function App() {
     setIsAuthenticated(!!localStorage.getItem("token"));
   }, []);
 
-  // Log current state values
-  console.log("App State in app.tsx:", { userId, roles, isAuthenticated, darkMode });
 
 
   const handleLogout = () => {
@@ -27,8 +26,9 @@ function App() {
   };
 
   return (
-    <BrowserRouter>
-      <Routes>
+    <>
+      <BrowserRouter>
+        <Routes>
         <Route path="/login" element={!isAuthenticated ? <Login /> : <Navigate to="/" />} />
         {/* <Route path="/test-attendance" element={<AttendanceTest />} /> */}
         <Route
@@ -36,70 +36,24 @@ function App() {
           element={
             isAuthenticated ? (
               <>
-                <h2
-                  style={{
-                    position: "absolute",
-                    top: "1rem",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    margin: 0,
-                    fontSize: "clamp(1rem, 2vw, 1.4rem)",
-                    color: darkMode ? "#f0f0f0" : "#222",
-                    opacity: 0.9,
-                    fontWeight: 500,
-                    zIndex: 10,
-                  }}
-                >
-                  🧠 GenAI Chat Assistant
-                </h2>
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "1rem",
-                    right: "1rem",
-                    zIndex: 10,
-                    display: "flex",
-                    gap: "0.5rem",
-                  }}
-                >
-                  <button
-                    onClick={() => setDarkMode(!darkMode)}
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      backgroundColor: darkMode ? "#333" : "#ddd",
-                      color: darkMode ? "#f0f2f5" : "#000",
-                      border: "none",
-                      borderRadius: "50%",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "1.2rem",
-                    }}
-                    title={darkMode ? "Light Mode" : "Dark Mode"}
-                  >
-                    {darkMode ? <FiSun /> : <FiMoon />}
-                  </button>
-                  <button
+                <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-[#C9A882] px-4 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
+                  <span className="text-2xl">
+                    🤖
+                  </span>
+                  <h2 className="m-0 text-[clamp(0.9rem,2vw,1.1rem)] text-white font-semibold tracking-[-0.3px]">
+                    Sofisto AI
+                  </h2>
+                </div>
+                <div className="absolute top-4 right-4 z-10 flex gap-2.5">
+                  <motion.button
                     onClick={handleLogout}
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      backgroundColor: darkMode ? "#333" : "#ddd",
-                      color: darkMode ? "#f0f2f5" : "#000",
-                      border: "none",
-                      borderRadius: "50%",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "1.2rem",
-                    }}
+                    className="w-11 h-11 bg-[#C9A882] text-white border-none rounded-full cursor-pointer flex items-center justify-center text-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all hover:scale-110 hover:bg-red-100 hover:text-red-600 hover:shadow-[0_4px_12px_rgba(220,38,38,0.2)]"
                     title="Logout"
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
                   >
                     <FiLogOut />
-                  </button>
+                  </motion.button>
                 </div>
                 {!userId ? (
                   <UserInfoBox onUserFetched={(id, r, email) => { 
@@ -109,7 +63,6 @@ function App() {
                   }} />
                 ) : (
                   <AudioStreamerChatBot 
-                    darkMode={darkMode} 
                     userId={userId} 
                     roles={roles} 
                     email={userEmail} 
@@ -124,6 +77,7 @@ function App() {
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </BrowserRouter>
+    </>
   );
 }
 

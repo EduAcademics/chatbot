@@ -8,3 +8,4 @@ export default defineConfig({
     allowedHosts: ["chat.eduacademics.com"],
   },
 });
+

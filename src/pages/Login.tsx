@@ -1,16 +1,32 @@
 import { motion } from 'framer-motion';
-import { useState } from 'react';
-import { FiEye, FiEyeOff, FiLock, FiUser } from 'react-icons/fi';
-const apiBase = import.meta.env.VITE_API_BASE_URL;
+import { useState, useEffect } from 'react';
+import { FiEye, FiEyeOff, FiLock, FiMail, FiCheck } from 'react-icons/fi';
+import { authAPI } from '../services/api';
+
 const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [emailFocused, setEmailFocused] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+  const [emailValid, setEmailValid] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
 
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  useEffect(() => {
+    if (formData.email) {
+      setEmailValid(validateEmail(formData.email));
+    } else {
+      setEmailValid(false);
+    }
+  }, [formData.email]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,20 +34,9 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${apiBase}/v1/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
-      }
-
+      const data = await authAPI.login(formData);
       localStorage.setItem('token', data.token);
-      window.location.href = '/'; // Change this to force page reload
+      window.location.href = '/';
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -39,509 +44,286 @@ const Login = () => {
     }
   };
 
-  // Button should be disabled if either field is empty
   const isFormValid = formData.email.trim() !== '' && formData.password.trim() !== '';
 
   return (
-    <div className="login-container">
-      {/* Enhanced School-themed animated SVGs */}
-      <div className="school-anim-bg" aria-hidden="true">
-        {/* Book */}
-        <motion.svg
-          className="anim-book"
-          width="60"
-          height="60"
-          viewBox="0 0 60 60"
-          fill="none"
-          initial={{ y: 0, rotate: -10, opacity: 0.7 }}
-          animate={{ y: [0, -18, 0], rotate: [-10, 10, -10], opacity: [0.7, 1, 0.7] }}
-          transition={{ repeat: Infinity, duration: 7, ease: "easeInOut" }}
-        >
-          <rect x="10" y="15" width="40" height="30" rx="6" fill="#fbbf24" stroke="#f59e42" strokeWidth="2" />
-          <rect x="15" y="20" width="30" height="20" rx="3" fill="#fff" stroke="#fbbf24" strokeWidth="1" />
-        </motion.svg>
-        {/* Pencil */}
-        <motion.svg
-          className="anim-pencil"
-          width="50"
-          height="50"
-          viewBox="0 0 50 50"
-          fill="none"
-          initial={{ y: 0, rotate: 8, opacity: 0.7 }}
-          animate={{ y: [0, 14, 0], rotate: [8, -8, 8], opacity: [0.7, 1, 0.7] }}
-          transition={{ repeat: Infinity, duration: 6, ease: "easeInOut", delay: 1.5 }}
-        >
-          <rect x="10" y="30" width="28" height="8" rx="3" fill="#f87171" stroke="#b91c1c" strokeWidth="1" />
-          <polygon points="38,30 46,25 46,33 38,38" fill="#fde68a" stroke="#f59e42" strokeWidth="1" />
-          <polygon points="10,30 6,29 6,39 10,38" fill="#fff" stroke="#d1d5db" strokeWidth="1" />
-        </motion.svg>
-        {/* Paper plane */}
-        <motion.svg
-          className="anim-plane"
-          width="54"
-          height="54"
-          viewBox="0 0 54 54"
-          fill="none"
-          initial={{ y: 0, rotate: 0, opacity: 0.7 }}
-          animate={{ y: [0, -12, 0], rotate: [0, 12, 0], opacity: [0.7, 1, 0.7] }}
-          transition={{ repeat: Infinity, duration: 8, ease: "easeInOut", delay: 3 }}
-        >
-          <polygon points="5,27 49,7 27,49" fill="#60a5fa" stroke="#2563eb" strokeWidth="2" />
-          <polyline points="27,49 22,32 49,7" fill="none" stroke="#2563eb" strokeWidth="2" />
-        </motion.svg>
-        {/* Ruler */}
-        <motion.svg
-          className="anim-ruler"
-          width="70"
-          height="18"
-          viewBox="0 0 70 18"
-          fill="none"
-          initial={{ x: 0, y: 0, rotate: -5, opacity: 0.6 }}
-          animate={{ x: [0, 20, 0], y: [0, -8, 0], rotate: [-5, 10, -5], opacity: [0.6, 1, 0.6] }}
-          transition={{ repeat: Infinity, duration: 9, ease: "easeInOut", delay: 2 }}
-        >
-          <rect x="2" y="2" width="66" height="14" rx="3" fill="#a7f3d0" stroke="#059669" strokeWidth="2" />
-          {[...Array(12)].map((_, i) => (
-            <rect key={i} x={6 + i * 5} y="4" width="1" height={i % 2 === 0 ? "10" : "6"} fill="#059669" />
-          ))}
-        </motion.svg>
-        {/* Globe */}
-        <motion.svg
-          className="anim-globe"
-          width="48"
-          height="48"
-          viewBox="0 0 48 48"
-          fill="none"
-          initial={{ y: 0, scale: 1, opacity: 0.7 }}
-          animate={{ y: [0, 10, 0], scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
-          transition={{ repeat: Infinity, duration: 10, ease: "easeInOut", delay: 4 }}
-        >
-          <circle cx="24" cy="24" r="18" fill="#a5b4fc" stroke="#6366f1" strokeWidth="2" />
-          <ellipse cx="24" cy="24" rx="12" ry="18" fill="none" stroke="#6366f1" strokeWidth="1" />
-          <ellipse cx="24" cy="24" rx="18" ry="6" fill="none" stroke="#6366f1" strokeWidth="1" />
-        </motion.svg>
-        {/* Bouncing Ball */}
-        <motion.svg
-          className="anim-ball"
-          width="28"
-          height="28"
-          viewBox="0 0 28 28"
-          fill="none"
-          initial={{ y: 0, opacity: 0.8 }}
-          animate={{ y: [0, 30, 0], opacity: [0.8, 1, 0.8] }}
-          transition={{ repeat: Infinity, duration: 3, ease: "easeInOut", delay: 2.5 }}
-        >
-          <circle cx="14" cy="14" r="12" fill="#f472b6" stroke="#be185d" strokeWidth="2" />
-          <path d="M14 2 A12 12 0 0 1 26 14" stroke="#fff" strokeWidth="2" fill="none" />
-        </motion.svg>
-        {/* Chalk dust effect */}
-        <div className="chalk-dust">
-          {[...Array(18)].map((_, i) => (
-            <motion.span
-              key={i}
-              className="dust"
-              initial={{ opacity: 0, x: 0, y: 0, scale: 0.7 }}
-              animate={{
-                opacity: [0, 0.7, 0],
-                x: [0, Math.sin(i) * 30, 0],
-                y: [0, -30 - i * 2, 0],
-                scale: [0.7, 1.2, 0.7]
-              }}
-              transition={{
-                repeat: Infinity,
-                duration: 3 + (i % 4),
-                delay: i * 0.3,
-                ease: "easeInOut"
-              }}
-            />
-          ))}
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f8f6f3] via-[#faf8f6] to-[#efeae4] px-4 py-6 md:py-10 relative overflow-hidden">
+      {/* Animated background elements - inspired by modern design */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {/* Floating gradient orbs */}
+        <motion.div
+          className="absolute top-1/4 left-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-[#D4A574]/20 to-[#C9A882]/10 rounded-full blur-3xl"
+          animate={{
+            x: [0, 30, 0],
+            y: [0, -20, 0],
+            scale: [1, 1.1, 1],
+          }}
+          transition={{
+            duration: 8,
+            repeat: Infinity,
+            ease: "easeInOut",
+          }}
+        />
+      <motion.div
+          className="absolute bottom-1/4 right-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-[#C9A882]/20 to-[#D4A574]/10 rounded-full blur-3xl"
+          animate={{
+            x: [0, -30, 0],
+            y: [0, 20, 0],
+            scale: [1, 1.1, 1],
+          }}
+          transition={{
+            duration: 10,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 1,
+          }}
+        />
+        {/* Decorative grid pattern */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(212,165,116,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(212,165,116,0.03)_1px,transparent_1px)] bg-[size:50px_50px] md:bg-[size:80px_80px]" />
       </div>
 
+      {/* Chatbot illustration - decorative element */}
       <motion.div
-        className="login-card chalk-border"
-        initial={{ opacity: 0, y: 20, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        whileHover={{ scale: 1.025, boxShadow: "0 8px 32px rgba(99,102,241,0.18)" }}
-        transition={{ duration: 0.5 }}
+        className="absolute top-10 right-4 md:top-20 md:right-20 w-20 h-20 md:w-32 md:h-32 opacity-10 md:opacity-20"
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: [0.1, 0.2, 0.1], scale: [1, 1.05, 1] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       >
+        <div className="w-full h-full bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-full flex items-center justify-center text-4xl md:text-6xl">
+          🤖
+        </div>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+        className="relative w-full max-w-md bg-white/80 backdrop-blur-2xl rounded-3xl md:rounded-[2rem] shadow-2xl border border-white/60 px-6 py-8 md:px-10 md:py-12 z-10
+          before:absolute before:inset-0 before:rounded-3xl md:before:rounded-[2rem] before:bg-gradient-to-br before:from-[#D4A574]/5 before:via-transparent before:to-transparent before:pointer-events-none"
+      >
+        {/* Header with chatbot icon */}
+        <div className="flex flex-col items-center mb-4 md:mb-5">
+          <motion.div
+            className="w-14 h-14 md:w-18 md:h-18 mb-3 bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-2xl flex items-center justify-center shadow-lg"
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+          >
+            <span className="text-2xl md:text-3xl">🤖</span>
+          </motion.div>
         <motion.h1
-          className="login-title"
+            className="text-center bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] bg-clip-text text-transparent text-xl md:text-2xl font-bold mb-1"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 0.4 }}
+        >
+          Welcome Back
+        </motion.h1>
+        <motion.p
+            className="text-center text-[#8B7355] text-xs md:text-sm mb-4 md:mb-5 font-normal"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
+            transition={{ delay: 0.4 }}
         >
-          Login AI ChatBot
-        </motion.h1>
+            Sign in to continue to Sofisto AI
+        </motion.p>
+        </div>
 
         {error && (
           <motion.div
-            className="error-message"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            className="bg-red-50 border-l-4 border-red-400 text-red-700 p-3 rounded-lg mb-4 text-sm font-medium shadow-sm"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
           >
-            {error}
+            <div className="flex items-center gap-2">
+              <span className="text-red-500">⚠</span>
+              <span>{error}</span>
+            </div>
           </motion.div>
         )}
 
-        <form onSubmit={handleSubmit} autoComplete="off">
-          <div className={`input-group floating-label ${formData.email ? 'filled' : ''}`}>
-            <FiUser className="input-icon" />
+        <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4 md:space-y-4">
+          <motion.div 
+            className="relative"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.4 }}
+          >
+            <label className="block text-sm font-medium text-[#8B7355] mb-1.5 ml-1">
+              Email Address
+            </label>
+            <div className="relative">
+              <div
+                className={`absolute left-4 top-1/2 -translate-y-1/2 z-[2] pointer-events-none transition-colors duration-300 flex items-center justify-center ${
+                  emailFocused 
+                    ? 'text-[#D4A574] drop-shadow-[0_0_8px_rgba(212,165,116,0.4)]' 
+                    : 'text-[#C9A882]/70'
+                }`}
+              >
+                <motion.div
+                  animate={{
+                    scale: emailFocused ? 1.15 : 1,
+                  }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                >
+                  <FiMail size={20} className="md:w-5 md:h-5" />
+                </motion.div>
+              </div>
+              
+              {emailValid && formData.email && (
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 z-[2] pointer-events-none flex items-center justify-center">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0, rotate: -180 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    className="w-5 h-5 md:w-6 md:h-6 bg-green-500 rounded-full flex items-center justify-center shadow-lg"
+                  >
+                    <FiCheck size={12} className="text-white" />
+                  </motion.div>
+                </div>
+              )}
+              
             <input
               type="email"
-              id="login-email"
-              placeholder=" "
+                placeholder="Enter your email address"
               value={formData.email}
               onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
               required
               autoFocus
+                onFocus={() => setEmailFocused(true)}
+                onBlur={() => setEmailFocused(false)}
+                className={`w-full pl-12 md:pl-14 ${emailValid && formData.email ? 'pr-12 md:pr-14' : 'pr-4'} py-3.5 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base outline-none transition-all duration-300
+                  ${
+                    emailFocused
+                      ? 'border-2 border-[#D4A574] bg-gradient-to-br from-[#fffefb] to-white shadow-[0_0_0_4px_rgba(212,165,116,0.1),0_4px_12px_rgba(212,165,116,0.15)]'
+                      : emailValid && formData.email
+                      ? 'border-2 border-green-400 bg-white shadow-[0_0_0_2px_rgba(34,197,94,0.1),0_2px_8px_rgba(34,197,94,0.1)]'
+                      : 'border border-[#E8E0D6] bg-white/90 hover:bg-white hover:border-[#D4A574]/50 shadow-sm'
+                  } text-[#5a4a3a] placeholder:text-[#C9A882]/50`}
             />
-            <label htmlFor="login-email">Email</label>
           </div>
 
-          <div className={`input-group floating-label ${formData.password ? 'filled' : ''}`}>
-            <FiLock className="input-icon" />
+            {formData.email && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -5 }}
+                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                className={`mt-2 text-xs font-medium flex items-center gap-1 ${
+                  emailValid ? 'text-green-600' : 'text-red-500'
+                }`}
+              >
+                <span>{emailValid ? '✓' : '✗'}</span>
+                <span>{emailValid ? 'Valid email format' : 'Please enter a valid email address'}</span>
+              </motion.div>
+            )}
+          </motion.div>
+
+          <motion.div 
+            className="relative"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6, duration: 0.4 }}
+          >
+            <label className="block text-sm font-medium text-[#8B7355] mb-1.5 ml-1">
+              Password
+            </label>
+            <div className="relative">
+              <div
+                className={`absolute left-4 top-1/2 -translate-y-1/2 z-[2] pointer-events-none transition-colors duration-300 flex items-center justify-center ${
+                  passwordFocused 
+                    ? 'text-[#D4A574] drop-shadow-[0_0_8px_rgba(212,165,116,0.4)]' 
+                    : 'text-[#C9A882]/70'
+                }`}
+              >
+                <motion.div
+                  animate={{
+                    scale: passwordFocused ? 1.15 : 1,
+                  }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                >
+                  <FiLock size={20} className="md:w-5 md:h-5" />
+                </motion.div>
+              </div>
+              
             <input
               type={showPassword ? "text" : "password"}
-              id="login-password"
-              placeholder=" "
+              placeholder="Enter your password"
               value={formData.password}
               onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
               required
-            />
-            <label htmlFor="login-password">Password</label>
-            <button
+                onFocus={() => setPasswordFocused(true)}
+                onBlur={() => setPasswordFocused(false)}
+                className={`w-full pl-12 md:pl-14 pr-12 md:pr-14 py-3.5 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base outline-none transition-all duration-300
+                  ${
+                    passwordFocused
+                      ? 'border-2 border-[#D4A574] bg-gradient-to-br from-[#fffefb] to-white shadow-[0_0_0_4px_rgba(212,165,116,0.1),0_4px_12px_rgba(212,165,116,0.15)]'
+                      : 'border border-[#E8E0D6] bg-white/90 hover:bg-white hover:border-[#D4A574]/50 shadow-sm'
+                  } text-[#5a4a3a] placeholder:text-[#C9A882]/50`}
+              />
+              
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 z-[3] flex items-center justify-center">
+                <motion.button
               type="button"
-              className="password-toggle"
-              tabIndex={-1}
               onClick={() => setShowPassword(!showPassword)}
               aria-label={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? <FiEyeOff /> : <FiEye />}
-            </button>
+                  className="bg-transparent border-none text-[#8B7355] cursor-pointer p-2 rounded-lg flex items-center justify-center transition-colors
+                    hover:text-[#D4A574] hover:bg-[#D4A574]/10"
+                  whileHover={{ scale: 1.1, rotate: showPassword ? 0 : 5 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  {showPassword ? <FiEyeOff size={20} className="md:w-5 md:h-5" /> : <FiEye size={20} className="md:w-5 md:h-5" />}
+                </motion.button>
+              </div>
           </div>
+          </motion.div>
 
           <motion.button
-            className="login-button"
             type="submit"
             disabled={isLoading || !isFormValid}
-            whileHover={isFormValid && !isLoading ? { scale: 1.04, boxShadow: "0 6px 20px #6366f155" } : {}}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.8 }}
+            className={`group relative w-full py-4 md:py-4.5 rounded-xl md:rounded-2xl text-white border-none font-semibold text-base md:text-lg transition-all duration-300 flex items-center justify-center gap-3 overflow-hidden
+              ${
+                isFormValid && !isLoading
+                  ? 'bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] cursor-pointer shadow-lg shadow-[#D4A574]/30 hover:shadow-xl hover:shadow-[#D4A574]/40'
+                  : 'bg-[#E0D5C4] cursor-not-allowed opacity-60 shadow-none'
+              }`}
+            whileHover={isFormValid && !isLoading ? { scale: 1.02, y: -2 } : {}}
             whileTap={isFormValid && !isLoading ? { scale: 0.98 } : {}}
-            style={{
-              opacity: isFormValid && !isLoading ? 1 : 0.6,
-              cursor: isFormValid && !isLoading ? 'pointer' : 'not-allowed'
-            }}
           >
-            {isLoading ? 'Logging in...' : 'Login'}
+            {/* Shimmer effect on hover */}
+            {isFormValid && !isLoading && (
+              <motion.div
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                initial={{ x: '-100%' }}
+                whileHover={{ x: '100%' }}
+                transition={{ duration: 0.6, ease: "easeInOut" }}
+              />
+            )}
+            
+            {isLoading ? (
+              <>
+                <motion.span
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="w-5 h-5 md:w-6 md:h-6 border-2 border-white/30 border-t-white rounded-full"
+                />
+                <span className="relative z-10">Signing in...</span>
+              </>
+            ) : (
+              <>
+                <span className="relative z-10">Sign In</span>
+                <motion.span
+                  animate={{ x: [0, 4, 0] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                  className="relative z-10 text-xl"
+                >
+                  →
+                </motion.span>
+              </>
+            )}
           </motion.button>
         </form>
       </motion.div>
-
-      <style>{`
-        .login-container {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: linear-gradient(135deg, #e0e7ff 0%, #f5f7fa 100%);
-          padding: 1rem;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .login-container::before {
-          content: '';
-          position: absolute;
-          width: 200%;
-          height: 200%;
-          left: 50%;
-          top: 50%;
-          transform: translate(-50%, -50%);
-          background: radial-gradient(circle, rgba(99,102,241,0.13) 0%, transparent 60%);
-          animation: pulse 15s infinite;
-          z-index: 0;
-        }
-
-        @keyframes pulse {
-          0% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
-          50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.2; }
-          100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
-        }
-
-        .login-card {
-          background: rgba(255, 255, 255, 0.95);
-          backdrop-filter: blur(16px);
-          padding: 2.5rem 2rem 2rem 2rem;
-          border-radius: 1.25rem;
-          box-shadow: 0 8px 32px rgba(99,102,241,0.08), 0 2px 8px rgba(0,0,0,0.06);
-          width: 100%;
-          max-width: 410px;
-          position: relative;
-          z-index: 1;
-          transition: box-shadow 0.3s, transform 0.2s;
-        }
-
-        .login-card:hover {
-          box-shadow: 0 12px 36px rgba(99,102,241,0.18), 0 4px 16px rgba(0,0,0,0.08);
-          transform: translateY(-2px) scale(1.025);
-        }
-
-        .login-title {
-          text-align: center;
-          color: #1a1a1a;
-          font-size: 2rem;
-          margin-bottom: 2.2rem;
-          letter-spacing: 0.01em;
-          font-weight: 700;
-          text-shadow: 0 2px 8px #6366f11a;
-        }
-
-        .input-group {
-          position: relative;
-          margin-bottom: 1.7rem;
-          transition: transform 0.2s;
-          display: flex;
-          align-items: center;
-        }
-
-        .input-group:hover {
-          transform: translateY(-2px) scale(1.01);
-        }
-
-        .input-icon {
-          position: absolute;
-          left: 1rem;
-          top: 50%;
-          transform: translateY(-50%);
-          color: #6366f1;
-          font-size: 1.2rem;
-          z-index: 2;
-          pointer-events: none;
-        }
-
-        .floating-label input {
-          width: 100%;
-          padding: 1.1rem 1rem 1.1rem 2.7rem;
-          border: 2px solid #e5e7eb;
-          border-radius: 0.7rem;
-          font-size: 1.05rem;
-          background: rgba(255,255,255,0.98);
-          transition: border 0.2s, box-shadow 0.2s;
-          box-shadow: 0 1px 4px #6366f10a;
-        }
-
-        .floating-label input:focus {
-          outline: none;
-          border-color: #6366f1;
-          box-shadow: 0 0 0 4px #6366f122;
-        }
-
-        .floating-label label {
-          position: absolute;
-          left: 2.7rem;
-          top: 50%;
-          transform: translateY(-50%);
-          color: #9ca3af;
-          font-size: 1rem;
-          pointer-events: none;
-          background: transparent;
-          transition: 0.18s cubic-bezier(.4,0,.2,1);
-          padding: 0 0.2rem;
-          z-index: 3;
-        }
-
-        .floating-label input:focus + label,
-        .floating-label.filled label {
-          top: 0.2rem;
-          left: 2.5rem;
-          font-size: 0.82rem;
-          color: #6366f1;
-          background: #fff;
-          padding: 0 0.3rem;
-          border-radius: 0.2rem;
-        }
-
-        .password-toggle {
-          position: absolute;
-          right: 1rem;
-          top: 50%;
-          transform: translateY(-50%);
-          background: none;
-          border: none;
-          color: #6b7280;
-          cursor: pointer;
-          padding: 0;
-          font-size: 1.15rem;
-          z-index: 4;
-          transition: color 0.18s;
-        }
-
-        .password-toggle:hover {
-          color: #6366f1;
-        }
-
-        .login-button {
-          width: 100%;
-          padding: 0.9rem;
-          background: linear-gradient(90deg, #6366f1 0%, #60a5fa 100%);
-          color: white;
-          border: none;
-          border-radius: 0.7rem;
-          font-size: 1.08rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s, box-shadow 0.3s;
-          position: relative;
-          overflow: hidden;
-          box-shadow: 0 2px 8px #6366f122;
-          letter-spacing: 0.01em;
-        }
-
-        .login-button:disabled {
-          background: linear-gradient(90deg, #a5b4fc 0%, #bae6fd 100%);
-          color: #e5e7eb;
-          cursor: not-allowed;
-          box-shadow: none;
-        }
-
-        .login-button::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: -100%;
-          width: 100%;
-          height: 100%;
-          background: linear-gradient(
-            90deg,
-            transparent,
-            rgba(255, 255, 255, 0.18),
-            transparent
-          );
-          transition: 0.5s;
-        }
-
-        .login-button:hover:not(:disabled)::before {
-          left: 100%;
-        }
-
-        .login-button:hover:not(:disabled) {
-          transform: translateY(-2px) scale(1.04);
-          box-shadow: 0 8px 24px #6366f133;
-        }
-
-        .error-message {
-          background: #fee2e2;
-          color: #dc2626;
-          padding: 0.75rem;
-          border-radius: 0.5rem;
-          margin-bottom: 1.5rem;
-          font-size: 0.95rem;
-          box-shadow: 0 1px 4px #dc262622;
-        }
-
-        .school-anim-bg {
-          position: absolute;
-          inset: 0;
-          width: 100vw;
-          height: 100vh;
-          pointer-events: none;
-          z-index: 0;
-        }
-
-        .anim-book {
-          position: absolute;
-          left: 8vw;
-          top: 18vh;
-          opacity: 0.7;
-          filter: drop-shadow(0 2px 8px #fbbf2433);
-        }
-
-        .anim-pencil {
-          position: absolute;
-          right: 10vw;
-          bottom: 15vh;
-          opacity: 0.7;
-          filter: drop-shadow(0 2px 8px #f8717133);
-        }
-
-        .anim-plane {
-          position: absolute;
-          left: 60vw;
-          top: 8vh;
-          opacity: 0.7;
-          filter: drop-shadow(0 2px 8px #60a5fa33);
-        }
-
-        .anim-ruler {
-          position: absolute;
-          left: 20vw;
-          bottom: 8vh;
-          opacity: 0.6;
-          filter: drop-shadow(0 2px 8px #a7f3d033);
-        }
-
-        .anim-globe {
-          position: absolute;
-          right: 12vw;
-          top: 10vh;
-          opacity: 0.7;
-          filter: drop-shadow(0 2px 8px #a5b4fc33);
-        }
-
-        .anim-ball {
-          position: absolute;
-          left: 45vw;
-          bottom: 10vh;
-          opacity: 0.8;
-          filter: drop-shadow(0 2px 8px #f472b633);
-        }
-
-        .chalk-dust {
-          position: absolute;
-          left: 0; top: 0; width: 100%; height: 100%;
-          pointer-events: none;
-          z-index: 1;
-        }
-
-        .chalk-dust .dust {
-          position: absolute;
-          left: 50vw;
-          top: 60vh;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: #fff;
-          opacity: 0.5;
-          filter: blur(2px);
-        }
-
-        .login-card.chalk-border {
-          box-shadow:
-            0 0 0 4px #fff,
-            0 0 0 8px #6366f1,
-            0 8px 32px rgba(99,102,241,0.08),
-            0 2px 8px rgba(0,0,0,0.06);
-          border: 2.5px dashed #fff;
-          position: relative;
-          z-index: 2;
-          animation: chalk-glow 2.5s infinite alternate;
-        }
-
-        @keyframes chalk-glow {
-          0% { box-shadow: 0 0 0 4px #fff, 0 0 0 8px #6366f1, 0 8px 32px rgba(99,102,241,0.08), 0 2px 8px rgba(0,0,0,0.06);}
-          100% { box-shadow: 0 0 0 8px #fff, 0 0 0 12px #6366f1, 0 8px 32px rgba(99,102,241,0.12), 0 2px 8px rgba(0,0,0,0.10);}
-        }
-
-        @media (max-width: 640px) {
-          .login-card {
-            padding: 1.5rem 0.8rem 1.2rem 0.8rem;
-          }
-
-          .login-title {
-            font-size: 1.4rem;
-          }
-        }
-      `}</style>
     </div>
   );
 };

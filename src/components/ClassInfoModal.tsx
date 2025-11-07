@@ -5,14 +5,12 @@ interface ClassInfoModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (classInfo: { class_: string; section: string; date: string }) => void;
-  darkMode: boolean;
 }
 
 const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
   isOpen,
   onClose,
-  onConfirm,
-  darkMode
+  onConfirm
 }) => {
   const [class_, setClass] = useState('');
   const [section, setSection] = useState('');
@@ -33,77 +31,27 @@ const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
   console.log("ClassInfoModal is rendering, isOpen:", isOpen);
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0, 0, 0, 0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999
-    }}>
-      <div style={{
-        background: darkMode ? '#1a1a1a' : '#ffffff',
-        borderRadius: '12px',
-        padding: '2rem',
-        maxWidth: '400px',
-        width: '90%',
-        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
-        border: `1px solid ${darkMode ? '#333' : '#e5e7eb'}`
-      }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '1.5rem'
-        }}>
-          <h2 style={{
-            color: darkMode ? '#f3f4f6' : '#111827',
-            margin: 0,
-            fontSize: '1.25rem',
-            fontWeight: '600'
-          }}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
+      <div className="bg-white border border-gray-200 rounded-xl p-8 max-w-[400px] w-[90%] shadow-[0_10px_25px_rgba(0,0,0,0.2)]">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-gray-900 m-0 text-xl font-semibold">
             Class Information
           </h2>
           <button
             onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: darkMode ? '#9ca3af' : '#6b7280',
-              cursor: 'pointer',
-              padding: '0.5rem',
-              borderRadius: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
+            className="text-gray-500 hover:text-gray-700 bg-transparent border-none cursor-pointer p-2 rounded-md flex items-center justify-center transition-colors"
           >
             <FiX size={20} />
           </button>
         </div>
 
-        <p style={{
-          color: darkMode ? '#9ca3af' : '#6b7280',
-          margin: '0 0 1.5rem 0',
-          fontSize: '0.875rem',
-          lineHeight: '1.5'
-        }}>
+        <p className="text-gray-500 m-0 mb-6 text-sm leading-relaxed">
           Please provide class information to process the attendance image:
         </p>
 
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{
-              display: 'block',
-              color: darkMode ? '#f3f4f6' : '#111827',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              marginBottom: '0.5rem'
-            }}>
+          <div className="mb-4">
+            <label className="text-gray-900 block text-sm font-medium mb-2">
               Class *
             </label>
             <input
@@ -112,27 +60,12 @@ const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
               onChange={(e) => setClass(e.target.value)}
               placeholder="e.g., 10, 12, NURSERY"
               required
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: `1px solid ${darkMode ? '#444' : '#d1d5db'}`,
-                borderRadius: '8px',
-                background: darkMode ? '#2a2a2a' : '#ffffff',
-                color: darkMode ? '#f3f4f6' : '#111827',
-                fontSize: '0.875rem',
-                outline: 'none'
-              }}
+              className="w-full px-3 py-3 rounded-lg text-sm outline-none transition-all bg-white text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
 
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{
-              display: 'block',
-              color: darkMode ? '#f3f4f6' : '#111827',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              marginBottom: '0.5rem'
-            }}>
+          <div className="mb-4">
+            <label className="text-gray-900 block text-sm font-medium mb-2">
               Section *
             </label>
             <input
@@ -141,27 +74,12 @@ const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
               onChange={(e) => setSection(e.target.value)}
               placeholder="e.g., A, B, C"
               required
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: `1px solid ${darkMode ? '#444' : '#d1d5db'}`,
-                borderRadius: '8px',
-                background: darkMode ? '#2a2a2a' : '#ffffff',
-                color: darkMode ? '#f3f4f6' : '#111827',
-                fontSize: '0.875rem',
-                outline: 'none'
-              }}
+              className="w-full px-3 py-3 rounded-lg text-sm outline-none transition-all bg-white text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{
-              display: 'block',
-              color: darkMode ? '#f3f4f6' : '#111827',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              marginBottom: '0.5rem'
-            }}>
+          <div className="mb-6">
+            <label className="text-gray-900 block text-sm font-medium mb-2">
               Date *
             </label>
             <input
@@ -169,56 +87,26 @@ const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
               value={date}
               onChange={(e) => setDate(e.target.value)}
               required
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: `1px solid ${darkMode ? '#444' : '#d1d5db'}`,
-                borderRadius: '8px',
-                background: darkMode ? '#2a2a2a' : '#ffffff',
-                color: darkMode ? '#f3f4f6' : '#111827',
-                fontSize: '0.875rem',
-                outline: 'none'
-              }}
+              className="w-full px-3 py-3 rounded-lg text-sm outline-none transition-all bg-white text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             />
           </div>
 
-          <div style={{
-            display: 'flex',
-            gap: '0.75rem',
-            justifyContent: 'flex-end'
-          }}>
+          <div className="flex gap-3 justify-end">
             <button
               type="button"
               onClick={onClose}
-              style={{
-                padding: '0.75rem 1.5rem',
-                borderRadius: '8px',
-                border: `1px solid ${darkMode ? '#444' : '#d1d5db'}`,
-                background: 'transparent',
-                color: darkMode ? '#f3f4f6' : '#111827',
-                cursor: 'pointer',
-                fontSize: '0.875rem',
-                fontWeight: '500',
-                transition: 'all 0.2s'
-              }}
+              className="px-6 py-3 rounded-lg text-sm font-medium transition-all border border-gray-300 bg-transparent text-gray-900 hover:bg-gray-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!class_ || !section || !date}
-              style={{
-                padding: '0.75rem 1.5rem',
-                borderRadius: '8px',
-                border: 'none',
-                background: darkMode ? '#3b82f6' : '#2563eb',
-                color: 'white',
-                cursor: class_ && section && date ? 'pointer' : 'not-allowed',
-                fontSize: '0.875rem',
-                fontWeight: '500',
-                transition: 'all 0.2s',
-                opacity: class_ && section && date ? 1 : 0.5
-              }}
+              className={`px-6 py-3 rounded-lg text-sm font-medium transition-all ${
+                class_ && section && date
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                  : 'bg-blue-400 text-white cursor-not-allowed opacity-50'
+              }`}
             >
               Process Image
             </button>

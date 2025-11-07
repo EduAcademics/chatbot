@@ -1,14 +1,4 @@
-#root {
-  max-width: 100vw;
-  min-height: 100vh;
-  margin: 0 auto;
-  padding: 0;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-}
+/* Removed conflicting #root styles - using Tailwind CSS instead */
 
 .logo {
   height: 6em;
