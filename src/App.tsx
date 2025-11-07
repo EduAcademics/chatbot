@@ -36,14 +36,6 @@ function App() {
           element={
             isAuthenticated ? (
               <>
-                <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-[#C9A882] px-4 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
-                  <span className="text-2xl">
-                    🤖
-                  </span>
-                  <h2 className="m-0 text-[clamp(0.9rem,2vw,1.1rem)] text-white font-semibold tracking-[-0.3px]">
-                    Sofisto AI
-                  </h2>
-                </div>
                 <div className="absolute top-4 right-4 z-10 flex gap-2.5">
                   <motion.button
                     onClick={handleLogout}

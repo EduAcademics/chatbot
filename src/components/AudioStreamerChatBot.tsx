@@ -1776,6 +1776,7 @@ const AudioStreamerChatBot = ({
   // Scroll chat to bottom on new message
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const correctionBoxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (chatBoxRef.current) {
@@ -1817,6 +1818,32 @@ const AudioStreamerChatBot = ({
       }
     };
   }, []);
+
+  // Close correction box when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      
+      // Check if click is inside a correction box
+      const isInsideCorrectionBox = target.closest('.correction-box');
+      
+      // Check if click is on any action button (to allow toggling)
+      const isActionButton = target.closest('.bot-action-btn');
+      
+      // If click is outside correction box and not on an action button, close it
+      if (showCorrectionBox !== null && !isInsideCorrectionBox && !isActionButton) {
+        setShowCorrectionBox(null);
+      }
+    };
+
+    if (showCorrectionBox !== null) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showCorrectionBox]);
 
   // Add these styles to your existing styles
   const additionalStyles = `
@@ -1992,62 +2019,66 @@ const AudioStreamerChatBot = ({
     }
     .correction-box {
       position: absolute;
-      bottom: clamp(42px, 8vh, 50px);
+      top: calc(100% + 0.5rem);
       right: 0;
       background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 254, 251, 0.95) 100%);
       color: #8B7355;
-      border-radius: 12px;
-      box-shadow: 0 4px 16px rgba(212, 165, 116, 0.2);
-      padding: clamp(0.75rem, 2vw, 1.125rem);
-      min-width: min(220px, 80vw);
-      max-width: 90vw;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(212, 165, 116, 0.2);
+      padding: 0.5rem 0.625rem;
+      min-width: 200px;
+      max-width: min(280px, 85vw);
+      width: max-content;
       display: flex;
       flex-direction: column;
-      gap: clamp(0.5rem, 1.5vw, 0.625rem);
-      z-index: 10;
+      gap: 0.4rem;
+      z-index: 100;
       border: 1px solid rgba(212, 165, 116, 0.25);
-      font-size: clamp(0.85rem, 2vw, 1rem);
+      font-size: 0.8rem;
       backdrop-filter: blur(8px);
+      margin-top: 0.25rem;
     }
     .correction-title {
       font-weight: 600;
-      font-size: 0.95rem;
-      margin-bottom: 0.2rem;
+      font-size: 0.8rem;
+      margin-bottom: 0.1rem;
       color: #8B7355;
     }
     .correction-input {
-      padding: 0.5rem 0.75rem;
-      border-radius: 10px;
+      padding: 0.375rem 0.5rem;
+      border-radius: 6px;
       border: 1.5px solid rgba(212, 165, 116, 0.3);
-      font-size: 0.95rem;
+      font-size: 0.8rem;
       background: rgba(255, 255, 255, 0.95);
       color: #8B7355;
-      margin-bottom: 0.3rem;
+      margin-bottom: 0.2rem;
       outline: none;
       transition: all 0.3s ease;
+      width: 100%;
+      box-sizing: border-box;
     }
     .correction-input:focus {
       border-color: #D4A574;
       background: rgba(255, 255, 255, 1);
-      box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.15), 0 2px 6px rgba(212, 165, 116, 0.1);
+      box-shadow: 0 0 0 2px rgba(212, 165, 116, 0.15), 0 1px 4px rgba(212, 165, 116, 0.1);
     }
     .correction-btn {
-      padding: 0.5rem 1rem;
-      border-radius: 10px;
+      padding: 0.375rem 0.75rem;
+      border-radius: 6px;
       border: none;
       background: linear-gradient(135deg, #D4A574 0%, #C9A882 100%);
       color: #fff;
       font-weight: 500;
       cursor: pointer;
-      font-size: 0.95rem;
+      font-size: 0.8rem;
       transition: all 0.3s ease;
       margin-left: auto;
-      box-shadow: 0 2px 8px rgba(212, 165, 116, 0.25);
+      box-shadow: 0 1px 6px rgba(212, 165, 116, 0.25);
     }
     .correction-btn:hover {
       background: linear-gradient(135deg, #C9A882 0%, #b89772 100%);
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(212, 165, 116, 0.35);
+      box-shadow: 0 2px 8px rgba(212, 165, 116, 0.35);
     }
     .correction-btn:disabled {
       opacity: 0.5;
@@ -2732,6 +2763,14 @@ const AudioStreamerChatBot = ({
         }
 
         @media (max-width: 600px) {
+          .correction-box {
+            max-width: min(260px, 90vw);
+            min-width: 180px;
+            right: auto;
+            left: 0;
+            padding: 0.45rem 0.55rem;
+            gap: 0.35rem;
+          }
           .chatbot-topbar {
             max-width: 160px;
             padding: 0.5rem 0.625rem;
@@ -2777,6 +2816,23 @@ const AudioStreamerChatBot = ({
         }
 
         @media (max-width: 480px) {
+          .correction-box {
+            max-width: min(240px, 95vw);
+            min-width: 160px;
+            padding: 0.4rem 0.5rem;
+            gap: 0.3rem;
+          }
+          .correction-title {
+            font-size: 0.75rem;
+          }
+          .correction-input {
+            padding: 0.3rem 0.45rem;
+            font-size: 0.75rem;
+          }
+          .correction-btn {
+            padding: 0.3rem 0.6rem;
+            font-size: 0.75rem;
+          }
           .chatbot-topbar {
             max-width: 140px;
             padding: 0.45rem 0.5rem;
@@ -3709,14 +3765,15 @@ const AudioStreamerChatBot = ({
                                         </span>
                                       )}
                                     </button>
-                                    <div className="relative">
+                                    <div style={{ position: 'relative' }}>
                                       <button
                                         className={getThumbsDownClass(msg)}
                                         title="Rejected"
                                         disabled={msg.feedback === "Approved"}
-                                        onClick={() =>
-                                          setShowCorrectionBox(idx)
-                                        }
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setShowCorrectionBox(showCorrectionBox === idx ? null : idx);
+                                        }}
                                       >
                                         <FiThumbsDown />
                                         {msg.feedback === "Rejected" && (
@@ -3727,7 +3784,7 @@ const AudioStreamerChatBot = ({
                                       </button>
                                       {showCorrectionBox === idx &&
                                         msg.feedback !== "Approved" && (
-                                          <div className="correction-box">
+                                          <div className="correction-box" ref={correctionBoxRef}>
                                             <div className="correction-title">
                                               Rejection Reason:
                                             </div>
@@ -4034,7 +4091,6 @@ const AudioStreamerChatBot = ({
                           }
                         }
                       } else {
-                        // For other files (Excel, CSV), process normally
                         if (attendanceStep === "class_info") {
                           setChatHistory((prev) => [
                             ...prev,

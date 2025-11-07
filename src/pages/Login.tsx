@@ -48,6 +48,15 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f8f6f3] via-[#faf8f6] to-[#efeae4] px-4 py-6 md:py-10 relative overflow-hidden">
+      {/* Sofisto AI Header */}
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-[#C9A882] px-4 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
+        <span className="text-2xl">
+          🤖
+        </span>
+        <h2 className="m-0 text-[clamp(0.9rem,2vw,1.1rem)] text-white font-semibold tracking-[-0.3px]">
+          Sofisto AI
+        </h2>
+      </div>
       {/* Animated background elements - inspired by modern design */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {/* Floating gradient orbs */}
