@@ -5,11 +5,17 @@ import { userAPI } from "../services/api";
 
 interface Props {
   onUserFetched: (userId: string, roles: string, email: string) => void;
+  initialEmail?: string;
+  initialError?: string;
 }
 
-const UserInfoBox = ({ onUserFetched }: Props) => {
-  const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
+const UserInfoBox = ({
+  onUserFetched,
+  initialEmail,
+  initialError,
+}: Props) => {
+  const [email, setEmail] = useState(initialEmail ?? "");
+  const [error, setError] = useState<string | null>(initialError ?? null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isValid, setIsValid] = useState(false);
@@ -21,6 +27,16 @@ const UserInfoBox = ({ onUserFetched }: Props) => {
   useEffect(() => {
     setIsValid(email ? validateEmail(email) : false);
   }, [email]);
+
+  useEffect(() => {
+    if (initialEmail) {
+      setEmail(initialEmail);
+    }
+  }, [initialEmail]);
+
+  useEffect(() => {
+    setError(initialError ?? null);
+  }, [initialError]);
 
   const handleFetch = async () => {
     setError(null);
@@ -86,7 +102,12 @@ const UserInfoBox = ({ onUserFetched }: Props) => {
             type="email"
             placeholder="Enter your email address"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (error) {
+                setError(null);
+              }
+            }}
             onKeyDown={(e) =>
               e.key === "Enter" && !isLoading && isValid && handleFetch()
             }

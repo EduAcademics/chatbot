@@ -2898,7 +2898,7 @@ const AudioStreamerChatBot = ({
           {/* Header Section - Improved Design */}
           <div className="chatbot-header-section">
             <h1 className="chatbot-header-title">Chat with Sofisto</h1>
-            <div className="relative" ref={menuRef}>
+            <div className="relative right-12" ref={menuRef}>
               <motion.button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
                 className="three-dot-menu-btn"
