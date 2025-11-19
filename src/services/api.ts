@@ -3,7 +3,7 @@ import { API_BASE_URL } from '../config/api';
 // Types
 export interface LoginCredentials {
   email: string;
-  password: string;
+  // password: string;
 }
 
 export interface LoginResponse {
@@ -120,6 +120,93 @@ interface ProcessVoiceAttendanceResponse {
     voice_processed: boolean;
   };
   message?: string;
+}
+
+interface LeaveChatRequest {
+  session_id: string;
+  user_id?: string;  // Optional: user ID (will be mapped to employee UUID)
+  query: string;
+  bearer_token?: string;  // Optional: Bearer token for ERP API
+  academic_session?: string;  // Optional: Academic session
+  branch_token?: string;  // Optional: Branch token
+}
+
+interface LeaveChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    leave_data?: {
+      employee: string;
+      start_date: string;
+      end_date: string;
+      leave_for: string;
+      leave_type: string;
+      description: string;
+      reject_reason: string;
+      attachments: any[];
+      status: string;
+      alternative_transport_incharges: any[];
+    };
+  };
+  message?: string;
+}
+
+interface LeaveApprovalRequest {
+  user_id: string;
+  page?: number;
+  limit?: number;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface LeaveApprovalResponse {
+  message: string;
+  status: number;
+  data: {
+    leaveRequests: Array<{
+      uuid: string;
+      employee: {
+        personalInfo: {
+          employeeName: string;
+          employeeId: string;
+          photoDocument?: {
+            path: string;
+          };
+        };
+      };
+      start_date: string;
+      end_date: string;
+      leave_for: string;
+      leave_type: {
+        name: string;
+      };
+      description: string;
+      status: string;
+      created_at: string;
+    }>;
+    meta: {
+      currentPage: number;
+      limit: number;
+      totalPages: number;
+      totalRecords: number;
+    };
+  };
+}
+
+interface ApproveLeaveRequest {
+  leave_request_uuid: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface RejectLeaveRequest {
+  leave_request_uuid: string;
+  reject_reason: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
 }
 
 interface TextToSpeechRequest {
@@ -307,6 +394,126 @@ export const aiAPI = {
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
+
+    return await response.json();
+  },
+
+  // Leave chat
+  leaveChat: async (request: LeaveChatRequest): Promise<LeaveChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/leave-chat`, {
+      method: 'POST',
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+};
+
+// Leave Approval API
+export const leaveApprovalAPI = {
+  // Fetch pending leave requests for approval
+  fetchPendingRequests: async (request: LeaveApprovalRequest): Promise<LeaveApprovalResponse> => {
+    const params = new URLSearchParams({
+      user_id: request.user_id,
+      page: String(request.page || 1),
+      limit: String(request.limit || 10),
+    });
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (request.bearer_token) {
+      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers['x-academic-session'] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers['x-branch-token'] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/leave-approval-requests?${params.toString()}`,
+      {
+        method: 'GET',
+        headers,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch leave approval requests');
+    }
+
+    return await response.json();
+  },
+
+  // Approve a leave request
+  approve: async (request: ApproveLeaveRequest): Promise<any> => {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (request.bearer_token) {
+      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers['x-academic-session'] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers['x-branch-token'] = request.branch_token;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/v1/ai/leave-approval/approve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        leave_request_uuid: request.leave_request_uuid,
+        bearer_token: request.bearer_token,
+        academic_session: request.academic_session,
+        branch_token: request.branch_token,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to approve leave request');
+    }
+
+    return await response.json();
+  },
+
+  // Reject a leave request
+  reject: async (request: RejectLeaveRequest): Promise<any> => {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (request.bearer_token) {
+      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers['x-academic-session'] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers['x-branch-token'] = request.branch_token;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/v1/ai/leave-approval/reject`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        leave_request_uuid: request.leave_request_uuid,
+        reject_reason: request.reject_reason,
+        bearer_token: request.bearer_token,
+        academic_session: request.academic_session,
+        branch_token: request.branch_token,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to reject leave request');
+    }
 
     return await response.json();
   },

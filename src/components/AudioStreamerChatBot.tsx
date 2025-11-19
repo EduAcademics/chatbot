@@ -18,10 +18,10 @@ import { SlBubbles } from "react-icons/sl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ClassInfoModal from "./ClassInfoModal";
-import { aiAPI, userAPI } from "../services/api";
+import { aiAPI, userAPI, leaveApprovalAPI } from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType = "none" | "query" | "attendance" | "voice_attendance"; // <-- add voice attendance
+type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval"; // <-- add leave approval flow
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -94,6 +94,9 @@ const AudioStreamerChatBot = ({
   ); // Track which message is being edited
   const [showClassInfoModal, setShowClassInfoModal] = useState(false); // <-- add for class info modal
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null); // <-- add for pending image
+  const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
+  const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
+  const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>({}); // <-- add for reject reasons
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -865,6 +868,120 @@ const AudioStreamerChatBot = ({
         } finally {
           setIsProcessing(false);
         }
+      }
+    } else if (activeFlow === "leave") {
+      // Leave application flow
+      try {
+        // Get auth token from localStorage
+        const authToken = localStorage.getItem('token');
+        
+        const data = await aiAPI.leaveChat({
+          session_id: sessionId || userId,
+          user_id: userId,  // Pass user_id (will be mapped to employee UUID)
+          query: userMessage,
+          bearer_token: authToken || undefined,  // Pass bearer token if available
+          academic_session: "2025-26",  // Can be made configurable
+          branch_token: "demo",  // Can be made configurable
+        });
+
+        if (data.status === "success" && data.data) {
+          const answer = data.data.answer || "";
+          const leaveData = data.data.leave_data;
+
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              answer: answer,
+              activeTab: "answer" as const,
+            },
+          ]);
+
+          // If leave data is present, log it (you can add UI to display it)
+          if (leaveData) {
+            console.log("Leave application data:", leaveData);
+          }
+        } else {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: data.message || "Sorry, there was an error processing your leave request.",
+            },
+          ]);
+        }
+      } catch (err) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your leave request.",
+          },
+        ]);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "leave_approval") {
+      // Leave approval flow - only fetch if we don't have requests already
+      // The fetch should happen when flow is activated from dropdown, not on every message
+      if (leaveApprovalRequests.length === 0 && !loadingLeaveRequests) {
+        try {
+          setLoadingLeaveRequests(true);
+          const authToken = localStorage.getItem('token');
+          
+          const response = await leaveApprovalAPI.fetchPendingRequests({
+            user_id: userId,
+            page: 1,
+            limit: 50,
+            bearer_token: authToken || undefined,
+            academic_session: "2025-26",
+            branch_token: "demo",
+          });
+
+          if (response.status === 200 && response.data) {
+            setLeaveApprovalRequests(response.data.leaveRequests || []);
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: `📋 **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                activeTab: "answer" as const,
+              },
+            ]);
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                activeTab: "answer" as const,
+              },
+            ]);
+          }
+        } catch (err: any) {
+          console.error("Error fetching leave approval requests:", err);
+          const errorMessage = err.message || err.response?.data?.message || "Unknown error occurred";
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+            },
+          ]);
+        } finally {
+          setLoadingLeaveRequests(false);
+          setIsProcessing(false);
+        }
+      } else {
+        // If requests are already loaded, just acknowledge the message
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "You're in the Leave Approval flow. Please use the approve/reject buttons on the leave requests above to take action.",
+          },
+        ]);
+        setIsProcessing(false);
       }
     }
   };
@@ -3041,6 +3158,107 @@ const AudioStreamerChatBot = ({
                           </div>
                           <div
                             onClick={() => {
+                              setActiveFlow("leave");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              setChatHistory(prev => [
+                                ...prev,
+                                { type: "bot", text: "Leave application flow activated! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'." }
+                              ]);
+                            }}
+                            style={{
+                              opacity: activeFlow === "leave" ? 1 : 0.7,
+                              fontWeight: activeFlow === "leave" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "leave" ? "✓ " : ""}Apply for Leave
+                          </div>
+                          <div
+                            onClick={async () => {
+                              setActiveFlow("leave_approval");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              // Clear existing requests and fetch fresh ones
+                              setLeaveApprovalRequests([]);
+                              setRejectReason({});
+                              setLoadingLeaveRequests(true);
+                              try {
+                                const authToken = localStorage.getItem('token');
+                                const response = await leaveApprovalAPI.fetchPendingRequests({
+                                  user_id: userId,
+                                  page: 1,
+                                  limit: 50,
+                                  bearer_token: authToken || undefined,
+                                  academic_session: "2025-26",
+                                  branch_token: "demo",
+                                });
+                                if (response.status === 200 && response.data) {
+                                  const pendingRequests = response.data.leaveRequests || [];
+                                  setLeaveApprovalRequests(pendingRequests);
+                                  
+                                  if (pendingRequests.length > 0) {
+                                    setChatHistory((prev) => [
+                                      ...prev,
+                                      {
+                                        type: "bot",
+                                        answer: `📋 **Leave Approval Dashboard**\n\nFound **${pendingRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                                        activeTab: "answer" as const,
+                                      },
+                                    ]);
+                                  } else {
+                                    setChatHistory((prev) => [
+                                      ...prev,
+                                      {
+                                        type: "bot",
+                                        answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                                        activeTab: "answer" as const,
+                                      },
+                                    ]);
+                                  }
+                                } else {
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      text: `⚠️ ${response.message || "No pending leave requests found."}`,
+                                    },
+                                  ]);
+                                }
+                              } catch (err: any) {
+                                console.error("Error fetching leave approval requests:", err);
+                                const errorMessage = err.message || err.response?.data?.message || "Unknown error occurred";
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+                                  },
+                                ]);
+                              } finally {
+                                setLoadingLeaveRequests(false);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "leave_approval" ? 1 : 0.7,
+                              fontWeight: activeFlow === "leave_approval" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "leave_approval" ? "✓ " : ""}Leave Approval Flow
+                          </div>
+                          <div
+                            onClick={() => {
                               setActiveFlow("none");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
@@ -3316,6 +3534,176 @@ const AudioStreamerChatBot = ({
                               // Always show answer content
                               return (
                                 <>
+                                  {/* Show leave approval requests if in leave_approval flow */}
+                                  {activeFlow === "leave_approval" && idx === chatHistory.length - 1 && (
+                                    <>
+                                      {loadingLeaveRequests ? (
+                                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                          <div className="flex items-center gap-3">
+                                            <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                            <span className="text-blue-900 font-medium">Loading pending leave requests...</span>
+                                          </div>
+                                        </div>
+                                      ) : leaveApprovalRequests.length > 0 ? (
+                                        <div className="mt-4 space-y-4">
+                                          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <p className="text-sm text-blue-900 font-medium">
+                                              📋 Found <strong>{leaveApprovalRequests.length}</strong> pending leave request(s). Please review and take action.
+                                            </p>
+                                          </div>
+                                          {leaveApprovalRequests.map((request, reqIdx) => {
+                                        const startDate = new Date(request.start_date).toLocaleDateString();
+                                        const endDate = new Date(request.end_date).toLocaleDateString();
+                                        const employeeName = request.employee?.personalInfo?.employeeName || "Unknown";
+                                        const employeeId = request.employee?.personalInfo?.employeeId || "";
+                                        const leaveType = request.leave_type?.name || "Unknown";
+                                        const description = request.description || "No description";
+                                        const photoPath = request.employee?.personalInfo?.photoDocument?.path;
+                                        
+                                        return (
+                                          <div
+                                            key={request.uuid || reqIdx}
+                                            className="bg-white border border-gray-300 rounded-lg p-4 shadow-md"
+                                          >
+                                            <div className="flex items-start gap-4 mb-4">
+                                              {photoPath && (
+                                                <img
+                                                  src={photoPath}
+                                                  alt={employeeName}
+                                                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
+                                                />
+                                              )}
+                                              <div className="flex-1">
+                                                <h4 className="text-lg font-semibold text-gray-900 mb-1">
+                                                  {employeeName}
+                                                </h4>
+                                                <p className="text-sm text-gray-600 mb-2">ID: {employeeId}</p>
+                                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                                  <div>
+                                                    <span className="font-medium text-gray-700">Leave Type:</span>{" "}
+                                                    <span className="text-gray-900">{leaveType}</span>
+                                                  </div>
+                                                  <div>
+                                                    <span className="font-medium text-gray-700">Duration:</span>{" "}
+                                                    <span className="text-gray-900">
+                                                      {startDate === endDate ? startDate : `${startDate} - ${endDate}`}
+                                                    </span>
+                                                  </div>
+                                                  <div className="col-span-2">
+                                                    <span className="font-medium text-gray-700">Reason:</span>{" "}
+                                                    <span className="text-gray-900">{description}</span>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                            <div className="flex gap-3 pt-4 border-t border-gray-200">
+                                              <button
+                                                onClick={async () => {
+                                                  try {
+                                                    const authToken = localStorage.getItem('token');
+                                                    await leaveApprovalAPI.approve({
+                                                      leave_request_uuid: request.uuid,
+                                                      bearer_token: authToken || undefined,
+                                                      academic_session: "2025-26",
+                                                      branch_token: "demo",
+                                                    });
+                                                    setLeaveApprovalRequests((prev) =>
+                                                      prev.filter((r) => r.uuid !== request.uuid)
+                                                    );
+                                                    setChatHistory((prev) => [
+                                                      ...prev,
+                                                      {
+                                                        type: "bot",
+                                                        text: `✅ Leave request for ${employeeName} has been approved successfully!`,
+                                                      },
+                                                    ]);
+                                                  } catch (err: any) {
+                                                    setChatHistory((prev) => [
+                                                      ...prev,
+                                                      {
+                                                        type: "bot",
+                                                        text: `❌ Error approving leave request: ${err.message || "Unknown error"}`,
+                                                      },
+                                                    ]);
+                                                  }
+                                                }}
+                                                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md font-medium hover:bg-green-600 transition-colors cursor-pointer"
+                                              >
+                                                ✓ Approve
+                                              </button>
+                                              <div className="flex-1 flex gap-2">
+                                                <input
+                                                  type="text"
+                                                  placeholder="Rejection reason (optional)"
+                                                  value={rejectReason[request.uuid] || ""}
+                                                  onChange={(e) =>
+                                                    setRejectReason((prev) => ({
+                                                      ...prev,
+                                                      [request.uuid]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                                                />
+                                                <button
+                                                  onClick={async () => {
+                                                    try {
+                                                      const authToken = localStorage.getItem('token');
+                                                      const reason = rejectReason[request.uuid] || "No reason provided";
+                                                      await leaveApprovalAPI.reject({
+                                                        leave_request_uuid: request.uuid,
+                                                        reject_reason: reason,
+                                                        bearer_token: authToken || undefined,
+                                                        academic_session: "2025-26",
+                                                        branch_token: "demo",
+                                                      });
+                                                      setLeaveApprovalRequests((prev) =>
+                                                        prev.filter((r) => r.uuid !== request.uuid)
+                                                      );
+                                                      setRejectReason((prev) => {
+                                                        const newReasons = { ...prev };
+                                                        delete newReasons[request.uuid];
+                                                        return newReasons;
+                                                      });
+                                                      setChatHistory((prev) => [
+                                                        ...prev,
+                                                        {
+                                                          type: "bot",
+                                                          text: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                        },
+                                                      ]);
+                                                    } catch (err: any) {
+                                                      setChatHistory((prev) => [
+                                                        ...prev,
+                                                        {
+                                                          type: "bot",
+                                                          text: `❌ Error rejecting leave request: ${err.message || "Unknown error"}`,
+                                                        },
+                                                      ]);
+                                                    }
+                                                  }}
+                                                  className="px-4 py-2 bg-red-500 text-white rounded-md font-medium hover:bg-red-600 transition-colors cursor-pointer"
+                                                >
+                                                  ✗ Reject
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div className="mt-4 p-6 bg-green-50 border-2 border-green-200 rounded-lg text-center">
+                                          <div className="text-4xl mb-3">✅</div>
+                                          <p className="text-green-900 font-semibold text-lg">
+                                            No pending leave requests found!
+                                          </p>
+                                          <p className="text-green-700 text-sm mt-2">
+                                            All leave requests have been processed or there are no pending requests at this time.
+                                          </p>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
                                   {/* Show table if this message has attendance data */}
                                   {(() => {
                                     console.log(

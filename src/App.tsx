@@ -100,37 +100,19 @@ function App() {
           path="/"
           element={
             isAuthenticated ? (
-              <>
-                <div className="absolute top-4 right-4 z-10 flex gap-2.5">
-                  <motion.button
-                    onClick={handleLogout}
-                    className="w-11 h-11 bg-[#C9A882] text-white border-none rounded-full cursor-pointer flex items-center justify-center text-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all hover:scale-110 hover:bg-red-100 hover:text-red-600 hover:shadow-[0_4px_12px_rgba(220,38,38,0.2)]"
-                    title="Logout"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                  >
-                    <FiLogOut />
-                  </motion.button>
-                </div>
-                {!userId ? (
-                  <UserInfoBox
-                    initialEmail={userEmail}
-                    initialError={autoAuthError ?? undefined}
-                    onUserFetched={(id, r, email) => {
-                      setUserId(id);
-                      setRoles(r);
-                      setUserEmail(email);
-                      setAutoAuthError(null);
-                    }}
-                  />
-                ) : (
-                  <AudioStreamerChatBot
-                    userId={userId}
-                    roles={roles}
-                    email={userEmail}
-                  />
-                )}
-              </>
+              <MainLayout
+                userId={userId}
+                userEmail={userEmail}
+                roles={roles}
+                autoAuthError={autoAuthError}
+                onUserFetched={(id, r, email) => {
+                  setUserId(id);
+                  setRoles(r);
+                  setUserEmail(email);
+                  setAutoAuthError(null);
+                }}
+                onLogout={handleLogout}
+              />
             ) : (
               <Navigate to="/login" />
             )
@@ -142,5 +124,54 @@ function App() {
     </>
   );
 }
+
+// Main Layout component
+const MainLayout = ({
+  userId,
+  userEmail,
+  roles,
+  autoAuthError,
+  onUserFetched,
+  onLogout,
+}: {
+  userId: string | null;
+  userEmail: string;
+  roles: string;
+  autoAuthError: string | null;
+  onUserFetched: (id: string, r: string, email: string) => void;
+  onLogout: () => void;
+}) => {
+  return (
+    <>
+      <NavigationButtons onLogout={onLogout} />
+      {!userId ? (
+        <UserInfoBox
+          initialEmail={userEmail}
+          initialError={autoAuthError ?? undefined}
+          onUserFetched={onUserFetched}
+        />
+      ) : (
+        <AudioStreamerChatBot userId={userId} roles={roles} email={userEmail} />
+      )}
+    </>
+  );
+};
+
+// Navigation buttons component
+const NavigationButtons = ({ onLogout }: { onLogout: () => void }) => {
+  return (
+    <div className="absolute top-4 right-4 z-10 flex gap-2.5">
+      <motion.button
+        onClick={onLogout}
+        className="w-11 h-11 bg-[#C9A882] text-white border-none rounded-full cursor-pointer flex items-center justify-center text-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all hover:scale-110 hover:bg-red-100 hover:text-red-600 hover:shadow-[0_4px_12px_rgba(220,38,38,0.2)]"
+        title="Logout"
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.95 }}
+      >
+        <FiLogOut />
+      </motion.button>
+    </div>
+  );
+};
 
 export default App;
