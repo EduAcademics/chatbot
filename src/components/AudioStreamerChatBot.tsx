@@ -21,7 +21,7 @@ import ClassInfoModal from "./ClassInfoModal";
 import { aiAPI, userAPI, leaveApprovalAPI } from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval"; // <-- add leave approval flow
+type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval" | "assignment"; // <-- add assignment flow
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -254,6 +254,23 @@ const AudioStreamerChatBot = ({
       file,
       session_id: sessionId || userId,
     });
+  };
+
+  // Upload assignment file
+  const uploadAssignmentFile = async (file: File) => {
+    try {
+      const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
+      if (result.status === "success" && result.data?.file_uuid) {
+        // Send message to assignment chat with file UUID
+        const fileMessage = `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`;
+        // The backend will handle adding this to attachments
+        return result;
+      }
+      return result;
+    } catch (error) {
+      console.error("Assignment file upload error:", error);
+      throw error;
+    }
   };
 
   // Upload attendance image through OCR processing
@@ -916,6 +933,58 @@ const AudioStreamerChatBot = ({
           {
             type: "bot",
             text: "Sorry, there was an error processing your leave request.",
+          },
+        ]);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "assignment") {
+      // Assignment creation flow
+      try {
+        // Get auth token from localStorage
+        const authToken = localStorage.getItem('token');
+        
+        const data = await aiAPI.assignmentChat({
+          session_id: sessionId || userId,
+          user_id: userId,  // Pass user_id (will be mapped to employee UUID)
+          query: userMessage,
+          bearer_token: authToken || undefined,  // Pass bearer token if available
+          academic_session: "2025-26",  // Can be made configurable
+          branch_token: "demo",  // Can be made configurable
+        });
+
+        if (data.status === "success" && data.data) {
+          const answer = data.data.answer || "";
+          const assignmentData = data.data.assignment_data;
+
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              answer: answer,
+              activeTab: "answer" as const,
+            },
+          ]);
+
+          // If assignment data is present, log it (you can add UI to display it)
+          if (assignmentData) {
+            console.log("Assignment data:", assignmentData);
+          }
+        } else {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: data.message || "Sorry, there was an error processing your assignment request.",
+            },
+          ]);
+        }
+      } catch (err) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your assignment request.",
           },
         ]);
       } finally {
@@ -3259,6 +3328,29 @@ const AudioStreamerChatBot = ({
                           </div>
                           <div
                             onClick={() => {
+                              setActiveFlow("assignment");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              setChatHistory(prev => [
+                                ...prev,
+                                { type: "bot", text: "📚 **Assignment Creation Flow Activated!**\n\nI'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?" }
+                              ]);
+                            }}
+                            style={{
+                              opacity: activeFlow === "assignment" ? 1 : 0.7,
+                              fontWeight: activeFlow === "assignment" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "assignment" ? "✓ " : ""}Assignment Flow
+                          </div>
+                          <div
+                            onClick={() => {
                               setActiveFlow("none");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
@@ -4297,23 +4389,26 @@ const AudioStreamerChatBot = ({
             <div className="relative">
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv,image/*"
+                accept={activeFlow === "assignment" ? ".pdf,.doc,.docx,image/*" : ".xlsx,.xls,.csv,image/*"}
                 id="file-upload-input"
                 className="hidden"
-                disabled={activeFlow !== "attendance"}
+                disabled={activeFlow !== "attendance" && activeFlow !== "assignment"}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (file && activeFlow === "attendance") {
+                  if (!file) return;
+                  
+                  if (activeFlow === "attendance") {
+                    // Show upload message
+                    setChatHistory((prev) => [
+                      ...prev,
+                      {
+                        type: "user",
+                        text: `Uploaded ${file.type.startsWith("image/") ? "image" : "file"
+                          }: ${file.name}`,
+                      },
+                    ]);
+                    
                     try {
-                      // Show upload message
-                      setChatHistory((prev) => [
-                        ...prev,
-                        {
-                          type: "user",
-                          text: `Uploaded ${file.type.startsWith("image/") ? "image" : "file"
-                            }: ${file.name}`,
-                        },
-                      ]);
 
                       if (file.type.startsWith("image/")) {
                         // For images, follow the same step-by-step flow as text-based attendance
@@ -4478,23 +4573,94 @@ const AudioStreamerChatBot = ({
                             }
                           }
                         }
-                      } else {
-                        if (attendanceStep === "class_info") {
+                      } else if (attendanceStep === "student_details") {
+                        // Handle non-image files for attendance
+                        const result = await uploadFile(file);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text:
+                              result.message || "File processing completed.",
+                          },
+                        ]);
+                      } else if (attendanceStep === "class_info") {
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "Please provide class information first before uploading student data files.",
+                          },
+                        ]);
+                      }
+                    } catch (err) {
+                      setChatHistory((prev) => [
+                        ...prev,
+                        {
+                          type: "bot",
+                          text: `File upload failed: ${(err as Error).message}`,
+                        },
+                      ]);
+                    }
+                  } else if (activeFlow === "assignment") {
+                    // Handle assignment file upload
+                    try {
+                      const result = await uploadAssignmentFile(file);
+                      if (result.status === "success") {
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: `✅ File uploaded successfully: ${result.data?.filename || file.name}\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
+                          },
+                        ]);
+                        // Send the file UUID to the assignment chat to add it to attachments
+                        const fileUuid = result.data?.file_uuid;
+                        console.log("File upload result:", result);
+                        console.log("Extracted fileUuid:", fileUuid);
+                        
+                        if (fileUuid) {
+                          const fileMessage = `Add file ${fileUuid} to attachments`;
+                          console.log("Sending file message to assignment chat:", fileMessage);
+                          
+                          // Trigger assignment chat with file info
+                          setTimeout(async () => {
+                            try {
+                              const authToken = localStorage.getItem('token');
+                              console.log("Calling assignmentChat with message:", fileMessage, "session:", sessionId || userId);
+                              
+                              const data = await aiAPI.assignmentChat({
+                                session_id: sessionId || userId,
+                                user_id: userId,
+                                query: fileMessage,
+                                bearer_token: authToken || undefined,
+                                academic_session: "2025-26",
+                                branch_token: "demo",
+                              });
+                              
+                              console.log("Assignment chat response:", data);
+                              
+                              if (data.status === "success" && data.data) {
+                                const answer = data.data.answer || "File added to assignment.";
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    answer: answer,
+                                    activeTab: "answer" as const,
+                                  },
+                                ]);
+                              }
+                            } catch (err) {
+                              console.error("Error adding file to assignment:", err);
+                            }
+                          }, 500);
+                        } else {
                           setChatHistory((prev) => [
                             ...prev,
                             {
                               type: "bot",
-                              text: "Please provide class information first before uploading student data files.",
-                            },
-                          ]);
-                        } else if (attendanceStep === "student_details") {
-                          const result = await uploadFile(file);
-                          setChatHistory((prev) => [
-                            ...prev,
-                            {
-                              type: "bot",
-                              text:
-                                result.message || "File processing completed.",
+                              text: "⚠️ File uploaded but could not be attached. Please try uploading again.",
                             },
                           ]);
                         }
@@ -4513,16 +4679,16 @@ const AudioStreamerChatBot = ({
                 }}
               />
               <motion.label
-                htmlFor={activeFlow === "attendance" ? "file-upload-input" : undefined}
-                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${activeFlow === "attendance"
+                htmlFor={activeFlow === "attendance" || activeFlow === "assignment" ? "file-upload-input" : undefined}
+                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${activeFlow === "attendance" || activeFlow === "assignment"
                   ? "cursor-pointer"
                   : "cursor-not-allowed"
                   }`}
-                whileHover={activeFlow === "attendance" ? { scale: 1.08, y: -2 } : {}}
-                whileTap={activeFlow === "attendance" ? { scale: 0.95 } : {}}
-                title={activeFlow === "attendance" ? "Upload Excel or Image" : "Enable attendance flow to upload"}
+                whileHover={activeFlow === "attendance" || activeFlow === "assignment" ? { scale: 1.08, y: -2 } : {}}
+                whileTap={activeFlow === "attendance" || activeFlow === "assignment" ? { scale: 0.95 } : {}}
+                title={activeFlow === "attendance" ? "Upload Excel or Image" : activeFlow === "assignment" ? "Upload Assignment File (PDF, DOCX, Image)" : "Enable assignment or attendance flow to upload"}
                 onClick={(e) => {
-                  if (activeFlow !== "attendance") {
+                  if (activeFlow !== "attendance" && activeFlow !== "assignment") {
                     e.preventDefault();
                     e.stopPropagation();
                   }

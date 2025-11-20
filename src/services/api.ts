@@ -151,6 +151,32 @@ interface LeaveChatResponse {
   message?: string;
 }
 
+interface AssignmentChatRequest {
+  session_id: string;
+  user_id?: string;  // Optional: user ID (will be mapped to employee UUID)
+  query: string;
+  bearer_token?: string;  // Optional: Bearer token for ERP API
+  academic_session?: string;  // Optional: Academic session
+  branch_token?: string;  // Optional: Branch token
+}
+
+interface AssignmentChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    assignment_data?: {
+      title: string;
+      classSection: string;
+      subject: string;
+      assignmentType: string;
+      dueDate: string;
+      description: string;
+      attachments: any[];
+    };
+  };
+  message?: string;
+}
+
 interface LeaveApprovalRequest {
   user_id: string;
   page?: number;
@@ -405,6 +431,35 @@ export const aiAPI = {
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
+
+    return await response.json();
+  },
+
+  // Assignment chat
+  assignmentChat: async (request: AssignmentChatRequest): Promise<AssignmentChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/assignment-chat`, {
+      method: 'POST',
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
+  // Upload assignment file
+  uploadAssignmentFile: async (file: File, session_id: string): Promise<any> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('session_id', session_id);
+
+    const response = await fetch(`${API_BASE_URL}/v1/ai/upload-assignment-file`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Assignment file upload failed');
+    }
 
     return await response.json();
   },
