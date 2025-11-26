@@ -18,10 +18,10 @@ import { SlBubbles } from "react-icons/sl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ClassInfoModal from "./ClassInfoModal";
-import { aiAPI, userAPI, leaveApprovalAPI } from "../services/api";
+import { aiAPI, userAPI, leaveApprovalAPI, courseProgressAPI } from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval" | "assignment"; // <-- add assignment flow
+type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval" | "assignment" | "course_progress"; // <-- add course_progress flow
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -61,6 +61,9 @@ const AudioStreamerChatBot = ({
       buttons?: { label: string; action: () => void }[];
       bulkattandance?: boolean;
       finish_collecting?: boolean;
+      classSections?: any[]; // For course progress flow
+      courseProgress?: any; // For course progress data
+      classSection?: { classId: string; sectionId: string; className?: string; sectionName?: string }; // Selected class/section
     }[]
   >([]);
 
@@ -97,6 +100,10 @@ const AudioStreamerChatBot = ({
   const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
   const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
   const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>({}); // <-- add for reject reasons
+  const [classSections, setClassSections] = useState<any[]>([]); // <-- add for course progress class sections
+  const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
+  const [selectedClassSection, setSelectedClassSection] = useState<{ classId: string; sectionId: string; className?: string; sectionName?: string } | null>(null); // <-- add for selected class/section
+  const [courseProgressData, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -985,6 +992,111 @@ const AudioStreamerChatBot = ({
           {
             type: "bot",
             text: "Sorry, there was an error processing your assignment request.",
+          },
+        ]);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "course_progress") {
+      // Course progress flow - selection is handled via UI clicks
+      // This handles text-based queries or refreshes
+      try {
+        if (classSections.length === 0) {
+          // Fetch class sections if not already loaded
+          setLoadingClassSections(true);
+          const authToken = localStorage.getItem('token');
+          const response = await courseProgressAPI.fetchClassSections({
+            page: 1,
+            limit: 50,
+            bearer_token: authToken || undefined,
+            academic_session: "2025-26",
+            branch_token: "demo",
+          });
+          
+          if ((response.status === 200 || response.status === "success") && response.data?.options) {
+            const options = response.data.options || [];
+            setClassSections(options);
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: `📚 Found **${options.length}** class-section(s). Please select a class and section from the list above to view course progress.`,
+                classSections: options,
+              },
+            ]);
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: response.message || "No class sections found. Please try again.",
+              },
+            ]);
+          }
+          setLoadingClassSections(false);
+        } else if (selectedClassSection) {
+          // If a class section is already selected, refresh the progress
+          const authToken = localStorage.getItem('token');
+          const progressResponse = await courseProgressAPI.getProgress({
+            classId: selectedClassSection.classId,
+            sectionId: selectedClassSection.sectionId,
+            bearer_token: authToken || undefined,
+            academic_session: "2025-26",
+            branch_token: "demo",
+          });
+
+          if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+            // The API returns data.resp according to the controller
+            const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+            setCourseProgressData(progressData);
+            
+            // Format a nice summary message
+            const teacherDiarys = progressData.teacherDiarys || progressData || [];
+            const totalSubjects = Array.isArray(teacherDiarys) ? teacherDiarys.length : 0;
+            const summaryText = totalSubjects > 0 
+              ? `📊 **Course Progress for ${selectedClassSection.className || 'Class'} ${selectedClassSection.sectionName || 'Section'}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
+              : `📊 **Course Progress for ${selectedClassSection.className || 'Class'} ${selectedClassSection.sectionName || 'Section'}**\n\nNo progress data available yet.`;
+            
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: summaryText,
+                courseProgress: progressData,
+                classSection: {
+                  classId: selectedClassSection.classId,
+                  sectionId: selectedClassSection.sectionId,
+                  className: selectedClassSection.className,
+                  sectionName: selectedClassSection.sectionName,
+                },
+              },
+            ]);
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: progressResponse.message || "Failed to fetch course progress. Please try again.",
+              },
+            ]);
+          }
+        } else {
+          // Remind user to select from the list
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: "Please select a class and section from the list above to view course progress.",
+            },
+          ]);
+        }
+      } catch (err: any) {
+        console.error("Error in course progress flow:", err);
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: `❌ Error: ${err.message || "Unknown error occurred"}`,
           },
         ]);
       } finally {
@@ -3350,6 +3462,71 @@ const AudioStreamerChatBot = ({
                             {activeFlow === "assignment" ? "✓ " : ""}Assignment Flow
                           </div>
                           <div
+                            onClick={async () => {
+                              setActiveFlow("course_progress");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              setSelectedClassSection(null);
+                              setCourseProgressData(null);
+                              
+                              // Fetch class sections when flow is activated
+                              setLoadingClassSections(true);
+                              try {
+                                const authToken = localStorage.getItem('token');
+                                console.log("Fetching class sections with token:", authToken ? "present" : "missing");
+                                const response = await courseProgressAPI.fetchClassSections({
+                                  page: 1,
+                                  limit: 50,
+                                  bearer_token: authToken || undefined,
+                                  academic_session: "2025-26",
+                                  branch_token: "demo",
+                                });
+                                
+                                console.log("Class sections API response:", response);
+                                
+                                if ((response.status === 200 || response.status === "success") && response.data?.options) {
+                                  const options = response.data.options || [];
+                                  console.log("Parsed class sections:", options);
+                                  setClassSections(options);
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { 
+                                      type: "bot", 
+                                      text: `📊 **Course Progress Flow Activated!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
+                                      classSections: options,
+                                    }
+                                  ]);
+                                } else {
+                                  console.warn("Unexpected response structure:", response);
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { type: "bot", text: `⚠️ ${response.message || "No class sections found. Please try again."}` }
+                                  ]);
+                                }
+                              } catch (err: any) {
+                                console.error("Error fetching class sections:", err);
+                                setChatHistory(prev => [
+                                  ...prev,
+                                  { type: "bot", text: `❌ Error loading class sections: ${err.message || "Unknown error"}` }
+                                ]);
+                              } finally {
+                                setLoadingClassSections(false);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "course_progress" ? 1 : 0.7,
+                              fontWeight: activeFlow === "course_progress" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "course_progress" ? "✓ " : ""}Course Progress
+                          </div>
+                          <div
                             onClick={() => {
                               setActiveFlow("none");
                               setUserOptionSelected(true);
@@ -3617,6 +3794,274 @@ const AudioStreamerChatBot = ({
                             </span>
                           </div>
                         )}
+                        {/* Show class sections for course progress flow - render regardless of text/answer */}
+                        {(msg as any).classSections && Array.isArray((msg as any).classSections) && (msg as any).classSections.length > 0 && (
+                          <>
+                            {loadingClassSections ? (
+                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                  <span className="text-blue-900 font-medium">Loading class sections...</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-4 space-y-3">
+                                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <p className="text-sm text-blue-900 font-medium">
+                                    📚 Select a class and section to view course progress:
+                                  </p>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  {(msg as any).classSections.map((classSection: any, csIdx: number) => {
+                                    const className = classSection.class?.name || "Unknown Class";
+                                    const sectionName = classSection.section?.name || "Unknown Section";
+                                    // Use _id for get-progress API as it expects ObjectId
+                                    const classId = classSection.class?._id || classSection.class?.uuid;
+                                    const sectionId = classSection.section?._id || classSection.section?.uuid;
+                                    const isSelected = selectedClassSection?.classId === classId && selectedClassSection?.sectionId === sectionId;
+                                    
+                                    return (
+                                      <div
+                                        key={classSection.class?._id + classSection.section?._id || csIdx}
+                                        className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                                          isSelected 
+                                            ? "border-blue-500 bg-blue-50 shadow-md" 
+                                            : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
+                                        }`}
+                                        onClick={async () => {
+                                          if (!classId || !sectionId) {
+                                            setChatHistory((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "bot",
+                                                text: "❌ Error: Missing class or section ID. Please try again.",
+                                              },
+                                            ]);
+                                            return;
+                                          }
+                                          
+                                          const newSelection = {
+                                            classId: classId,
+                                            sectionId: sectionId,
+                                            className: className,
+                                            sectionName: sectionName,
+                                          };
+                                          setSelectedClassSection(newSelection);
+                                          
+                                          // Fetch course progress
+                                          setIsProcessing(true);
+                                          try {
+                                            const authToken = localStorage.getItem('token');
+                                            console.log("Fetching course progress for:", { classId, sectionId, className, sectionName });
+                                            const progressResponse = await courseProgressAPI.getProgress({
+                                              classId: classId,
+                                              sectionId: sectionId,
+                                              bearer_token: authToken || undefined,
+                                              academic_session: "2025-26",
+                                              branch_token: "demo",
+                                            });
+
+                                            console.log("Course progress API response:", progressResponse);
+
+                                            if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+                                              // The API returns data.resp according to the controller
+                                              const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+                                              setCourseProgressData(progressData);
+                                              
+                                              // Format a nice summary message
+                                              const teacherDiarys = progressData.teacherDiarys || progressData || [];
+                                              const totalSubjects = Array.isArray(teacherDiarys) ? teacherDiarys.length : 0;
+                                              const summaryText = totalSubjects > 0 
+                                                ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
+                                                : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
+                                              
+                                              setChatHistory((prev) => [
+                                                ...prev,
+                                                {
+                                                  type: "bot",
+                                                  text: summaryText,
+                                                  courseProgress: progressData,
+                                                  classSection: {
+                                                    classId: classId,
+                                                    sectionId: sectionId,
+                                                    className: className,
+                                                    sectionName: sectionName,
+                                                  },
+                                                },
+                                              ]);
+                                            } else {
+                                              console.warn("Unexpected progress response:", progressResponse);
+                                              setChatHistory((prev) => [
+                                                ...prev,
+                                                {
+                                                  type: "bot",
+                                                  text: progressResponse.message || "Failed to fetch course progress. Please try again.",
+                                                },
+                                              ]);
+                                            }
+                                          } catch (err: any) {
+                                            console.error("Error fetching course progress:", err);
+                                            setChatHistory((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "bot",
+                                                text: `❌ Error fetching course progress: ${err.message || "Unknown error"}`,
+                                              },
+                                            ]);
+                                          } finally {
+                                            setIsProcessing(false);
+                                          }
+                                        }}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <h4 className="text-base font-semibold text-gray-900">
+                                              {className}
+                                            </h4>
+                                            <p className="text-sm text-gray-600 mt-1">
+                                              Section: {sectionName}
+                                            </p>
+                                          </div>
+                                          {isSelected && (
+                                            <div className="text-blue-600 text-xl">✓</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        
+                        {/* Show course progress data - render regardless of text/answer */}
+                        {msg.courseProgress && (msg as any).classSection && (
+                          <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg shadow-md">
+                            <div className="mb-4 pb-3 border-b border-gray-200">
+                              <h4 className="text-lg font-semibold text-gray-900">
+                                📊 Course Progress: {(msg as any).classSection.className} {(msg as any).classSection.sectionName}
+                              </h4>
+                              {(msg.courseProgress as any).meta && (
+                                <p className="text-sm text-gray-600 mt-1">
+                                  Total Subjects: {(msg.courseProgress as any).meta.totalSubjects || 0}
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                              {(() => {
+                                const progressData = msg.courseProgress as any;
+                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
+                                
+                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) {
+                                  return (
+                                    <div className="text-center py-8 text-gray-500">
+                                      No course progress data available.
+                                    </div>
+                                  );
+                                }
+                                
+                                return teacherDiarys.map((subject: any, subjectIdx: number) => {
+                                  const subjectName = subject.name || "Unknown Subject";
+                                  const avgProgress = subject.avrage_progress || subject.average_progress || 0;
+                                  const chapters = subject.chapters || [];
+                                  
+                                  // Determine progress color
+                                  const getProgressColor = (progress: number) => {
+                                    if (progress >= 75) return "bg-green-500";
+                                    if (progress >= 50) return "bg-yellow-500";
+                                    if (progress >= 25) return "bg-orange-500";
+                                    return "bg-red-500";
+                                  };
+                                  
+                                  const getProgressBgColor = (progress: number) => {
+                                    if (progress >= 75) return "bg-green-100";
+                                    if (progress >= 50) return "bg-yellow-100";
+                                    if (progress >= 25) return "bg-orange-100";
+                                    return "bg-red-100";
+                                  };
+                                  
+                                  return (
+                                    <div
+                                      key={subject.id || subjectIdx}
+                                      className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm"
+                                    >
+                                      {/* Subject Header */}
+                                      <div className="mb-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <h5 className="text-base font-semibold text-gray-900">
+                                            📚 {subjectName}
+                                          </h5>
+                                          <span className={`text-sm font-bold px-2 py-1 rounded ${
+                                            avgProgress >= 75 ? "text-green-700 bg-green-100" :
+                                            avgProgress >= 50 ? "text-yellow-700 bg-yellow-100" :
+                                            avgProgress >= 25 ? "text-orange-700 bg-orange-100" :
+                                            "text-red-700 bg-red-100"
+                                          }`}>
+                                            {avgProgress}%
+                                          </span>
+                                        </div>
+                                        {/* Subject Progress Bar */}
+                                        <div className={`w-full h-3 rounded-full overflow-hidden ${getProgressBgColor(avgProgress)}`}>
+                                          <div
+                                            className={`h-full ${getProgressColor(avgProgress)} transition-all duration-500 ease-out`}
+                                            style={{ width: `${Math.min(avgProgress, 100)}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Chapters List */}
+                                      {chapters.length > 0 ? (
+                                        <div className="space-y-2">
+                                          <h6 className="text-sm font-medium text-gray-700 mb-2">
+                                            Chapters ({chapters.length}):
+                                          </h6>
+                                          {chapters.map((chapter: any, chapterIdx: number) => {
+                                            const chapterName = chapter.name || "Unknown Chapter";
+                                            const chapterProgress = chapter.coverage_status || 0;
+                                            
+                                            return (
+                                              <div
+                                                key={chapter.id || chapterIdx}
+                                                className="bg-white border border-gray-200 rounded-md p-3 hover:shadow-sm transition-shadow"
+                                              >
+                                                <div className="flex items-center justify-between mb-1">
+                                                  <span className="text-sm text-gray-800 font-medium">
+                                                    {chapterName}
+                                                  </span>
+                                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                                    chapterProgress >= 75 ? "text-green-700 bg-green-100" :
+                                                    chapterProgress >= 50 ? "text-yellow-700 bg-yellow-100" :
+                                                    chapterProgress >= 25 ? "text-orange-700 bg-orange-100" :
+                                                    "text-red-700 bg-red-100"
+                                                  }`}>
+                                                    {chapterProgress}%
+                                                  </span>
+                                                </div>
+                                                {/* Chapter Progress Bar */}
+                                                <div className={`w-full h-2 rounded-full overflow-hidden ${getProgressBgColor(chapterProgress)}`}>
+                                                  <div
+                                                    className={`h-full ${getProgressColor(chapterProgress)} transition-all duration-500 ease-out`}
+                                                    style={{ width: `${Math.min(chapterProgress, 100)}%` }}
+                                                  />
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-gray-500 italic">
+                                          No chapters available
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                        
                         {msg.text ? (
                           <div>{msg.text}</div>
                         ) : (

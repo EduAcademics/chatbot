@@ -574,3 +574,139 @@ export const leaveApprovalAPI = {
   },
 };
 
+// Course Progress API
+const ERP_API_BASE_URL = 'https://api.eduacademics.com';
+
+interface ClassSectionOption {
+  _id: string;
+  classId: string;
+  sectionId: string;
+  className?: string;
+  sectionName?: string;
+  class?: {
+    name: string;
+    _id: string;
+  };
+  section?: {
+    name: string;
+    _id: string;
+  };
+}
+
+interface FetchClassSectionsRequest {
+  page?: number;
+  limit?: number;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface FetchClassSectionsResponse {
+  message?: string;
+  status: number | string;
+  data?: {
+    options: Array<{
+      class: {
+        _id: string;
+        name: string;
+        uuid: string;
+      };
+      section: {
+        _id: string;
+        name: string;
+        uuid: string;
+      };
+      isClassTeacher?: boolean;
+    }>;
+  };
+}
+
+interface GetCourseProgressRequest {
+  classId: string;
+  sectionId: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface GetCourseProgressResponse {
+  status: string;
+  data?: {
+    progress: any;
+    classId: string;
+    sectionId: string;
+    className?: string;
+    sectionName?: string;
+  };
+  message?: string;
+}
+
+export const courseProgressAPI = {
+  // Fetch class and section options
+  fetchClassSections: async (request: FetchClassSectionsRequest): Promise<FetchClassSectionsResponse> => {
+    const params = new URLSearchParams({
+      page: String(request.page || 1),
+      limit: String(request.limit || 20),
+    });
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (request.bearer_token) {
+      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers['x-academic-session'] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers['x-branch-token'] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${ERP_API_BASE_URL}/v1/list-options/my-class-sections?${params.toString()}`,
+      {
+        method: 'GET',
+        headers,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch class sections');
+    }
+
+    return await response.json();
+  },
+
+  // Get course progress for a class and section
+  getProgress: async (request: GetCourseProgressRequest): Promise<GetCourseProgressResponse> => {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (request.bearer_token) {
+      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers['x-academic-session'] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers['x-branch-token'] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${ERP_API_BASE_URL}/v1/teacher-diary/get-progress/${request.classId}/${request.sectionId}`,
+      {
+        method: 'GET',
+        headers,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch course progress');
+    }
+
+    return await response.json();
+  },
+};
+
