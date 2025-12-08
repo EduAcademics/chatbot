@@ -21,7 +21,7 @@ import ClassInfoModal from "./ClassInfoModal";
 import { aiAPI, userAPI, leaveApprovalAPI, courseProgressAPI } from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval" | "assignment" | "course_progress"; // <-- add course_progress flow
+type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "full_voice_attendance" | "leave" | "leave_approval" | "assignment" | "course_progress"; // <-- add full_voice_attendance flow
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -104,6 +104,8 @@ const AudioStreamerChatBot = ({
   const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
   const [selectedClassSection, setSelectedClassSection] = useState<{ classId: string; sectionId: string; className?: string; sectionName?: string } | null>(null); // <-- add for selected class/section
   const [courseProgressData, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
+  const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
+  const [lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -206,7 +208,35 @@ const AudioStreamerChatBot = ({
     };
 
     socket.onmessage = (event: MessageEvent) => {
-      setInputText((prev) => prev + " " + event.data);
+      const newText = event.data;
+      setInputText((prev) => {
+        const updated = prev + " " + newText;
+        
+        // For full voice attendance flow, implement 3-second auto-submit
+        if (activeFlow === "full_voice_attendance") {
+          const currentTime = Date.now();
+          setLastVoiceInputTime(currentTime);
+          
+          // Clear existing timer
+          if (fullVoiceAutoSubmitTimer) {
+            clearTimeout(fullVoiceAutoSubmitTimer);
+          }
+          
+          // Set new 3-second timer for auto-submit
+          const timer = setTimeout(() => {
+            const finalInput = updated.trim();
+            if (finalInput && !isProcessing) {
+              // Auto submit the voice input
+              handleSubmit(finalInput);
+              setInputText(""); // Clear input after submit
+            }
+          }, 3000); // 3 seconds
+          
+          setFullVoiceAutoSubmitTimer(timer);
+        }
+        
+        return updated;
+      });
     };
 
     socket.onerror = (err) => console.error("WebSocket error:", err);
@@ -892,6 +922,138 @@ const AudioStreamerChatBot = ({
         } finally {
           setIsProcessing(false);
         }
+      }
+    } else if (activeFlow === "full_voice_attendance") {
+      // Full voice attendance flow with auto mic activation and auto-submit
+      setIsProcessing(true);
+      try {
+        const data = await aiAPI.processFullVoiceAttendance({
+          session_id: sessionId || userId,
+          voice_text: userMessage,
+        });
+
+        if (data.status === "success" && data.data) {
+          const answer = data.data.display_answer || data.data.answer || "";
+          const voiceAnswer = data.data.answer || "";
+          const attendanceSummary = data.data.attendance_summary;
+          const classInfo = data.data.class_info;
+          const voiceFlowActive = data.data.voice_flow_active;
+          const autoActivateMic = data.data.auto_activate_mic;
+          const currentStep = data.data.current_step;
+
+          // Add bot message
+          const botMessage: any = {
+            type: "bot" as const,
+            text: voiceAnswer,
+            answer: answer, // Full answer with table for display
+            activeTab: "answer" as const,
+          };
+
+          if (attendanceSummary) {
+            botMessage.attendance_summary = attendanceSummary;
+          }
+          if (classInfo) {
+            botMessage.class_info = classInfo;
+          }
+
+          // If in final approval step, add approve/reject buttons
+          if (currentStep === "final_approval" && attendanceSummary) {
+            botMessage.buttons = [
+              {
+                label: "Approve",
+                action: async () => {
+                  // Process approval
+                  const approveData = await aiAPI.processFullVoiceAttendance({
+                    session_id: sessionId || userId,
+                    voice_text: "approve",
+                  });
+                  if (approveData.status === "success") {
+                    setChatHistory((prev) => [
+                      ...prev,
+                      {
+                        type: "bot",
+                        text: approveData.data?.answer || "Attendance saved successfully!",
+                      },
+                    ]);
+                    // Flow complete - switch to query flow
+                    setActiveFlow("query");
+                    // Play TTS for completion message
+                    if (approveData.data?.answer) {
+                      handlePlayTTS(chatHistory.length, approveData.data.answer);
+                    }
+                  }
+                },
+              },
+              {
+                label: "Reject",
+                action: () => {
+                  setChatHistory((prev) => [
+                    ...prev,
+                    {
+                      type: "bot",
+                      text: "Attendance rejected. Please provide corrections via voice.",
+                    },
+                  ]);
+                  // Auto activate mic for corrections
+                  setTimeout(() => {
+                    if (!isRecording) {
+                      startRecording();
+                    }
+                  }, 500);
+                },
+              },
+            ];
+          }
+
+          setChatHistory((prev) => [...prev, botMessage]);
+
+          // Check if flow is complete
+          if (currentStep === "completed" || !voiceFlowActive) {
+            // Flow complete - switch to query flow
+            setActiveFlow("query");
+            // Play TTS for completion message
+            if (voiceAnswer) {
+              handlePlayTTS(chatHistory.length, voiceAnswer);
+            }
+          } else if (autoActivateMic) {
+            // Auto activate mic after bot message
+            setTimeout(() => {
+              if (!isRecording) {
+                startRecording();
+              }
+            }, 500);
+          }
+        } else {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: data.message || "Sorry, there was an error processing your voice input. Please try again.",
+            },
+          ]);
+          // Auto activate mic for retry
+          setTimeout(() => {
+            if (!isRecording) {
+              startRecording();
+            }
+          }, 500);
+        }
+      } catch (err) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your voice input. Please try again.",
+          },
+        ]);
+        // Auto activate mic for retry
+        setTimeout(() => {
+          if (!isRecording) {
+            startRecording();
+          }
+        }, 500);
+      } finally {
+        setIsProcessing(false);
       }
     } else if (activeFlow === "leave") {
       // Leave application flow
@@ -3338,14 +3500,101 @@ const AudioStreamerChatBot = ({
                             {activeFlow === "voice_attendance" ? "✓ " : ""}Mark Attendance (Voice)
                           </div>
                           <div
-                            onClick={() => {
+                            onClick={async () => {
+                              setActiveFlow("full_voice_attendance");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              try {
+                                const data = await aiAPI.startFullVoiceAttendance({
+                                  session_id: sessionId || userId,
+                                });
+                                if (data.status === "success" && data.data) {
+                                  const botMessage = data.data.answer || "Full voice attendance flow activated. Please provide class information...";
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { type: "bot", text: botMessage }
+                                  ]);
+                                  // Auto activate mic after bot message
+                                  setTimeout(() => {
+                                    if (!isRecording) {
+                                      startRecording();
+                                    }
+                                  }, 500);
+                                } else {
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { type: "bot", text: data.message || "Failed to start full voice attendance flow." }
+                                  ]);
+                                }
+                              } catch (err) {
+                                setChatHistory(prev => [
+                                  ...prev,
+                                  { type: "bot", text: "Sorry, there was an error starting the full voice attendance flow. Please try again." }
+                                ]);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "full_voice_attendance" ? 1 : 0.7,
+                              fontWeight: activeFlow === "full_voice_attendance" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "full_voice_attendance" ? "✓ " : ""}Full Voice Attendance (Auto)
+                          </div>
+                          <div
+                            onClick={async () => {
                               setActiveFlow("leave");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              setChatHistory(prev => [
-                                ...prev,
-                                { type: "bot", text: "Leave application flow activated! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'." }
-                              ]);
+                              
+                              // Call the API to get leave quotas
+                              try {
+                                setIsProcessing(true);
+                                const authToken = localStorage.getItem('token');
+                                const data = await aiAPI.leaveChat({
+                                  session_id: sessionId || userId,
+                                  user_id: userId,
+                                  query: "apply leave", // Flow activation message
+                                  bearer_token: authToken || undefined,
+                                  academic_session: "2025-26",
+                                  branch_token: "demo",
+                                });
+
+                                if (data.status === "success" && data.data) {
+                                  const answer = data.data.answer || "";
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      answer: answer,
+                                      activeTab: "answer" as const,
+                                    },
+                                  ]);
+                                } else {
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      text: data.message || "Leave application flow activated. Please provide your leave details.",
+                                    },
+                                  ]);
+                                }
+                              } catch (err) {
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    text: "Leave application flow activated. Please provide your leave details.",
+                                  },
+                                ]);
+                              } finally {
+                                setIsProcessing(false);
+                              }
                             }}
                             style={{
                               opacity: activeFlow === "leave" ? 1 : 0.7,

@@ -398,6 +398,32 @@ export const aiAPI = {
     return await response.json();
   },
 
+  // Start full voice attendance flow
+  startFullVoiceAttendance: async (
+    request: { session_id: string }
+  ): Promise<any> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/start-full-voice-attendance`, {
+      method: 'POST',
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
+  // Process full voice attendance input
+  processFullVoiceAttendance: async (
+    request: { session_id: string; voice_text: string }
+  ): Promise<any> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/process-full-voice-attendance`, {
+      method: 'POST',
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
   // Text to speech
   textToSpeech: async (request: TextToSpeechRequest): Promise<ReadableStreamDefaultReader<Uint8Array> | null> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/text-to-speech`, {
