@@ -1,5 +1,4 @@
-﻿
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
 import {
@@ -18,10 +17,23 @@ import { SlBubbles } from "react-icons/sl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ClassInfoModal from "./ClassInfoModal";
-import { aiAPI, userAPI, leaveApprovalAPI, courseProgressAPI } from "../services/api";
+import {
+  aiAPI,
+  userAPI,
+  leaveApprovalAPI,
+  courseProgressAPI,
+} from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "leave" | "leave_approval" | "assignment" | "course_progress"; // <-- add course_progress flow
+type FlowType =
+  | "none"
+  | "query"
+  | "attendance"
+  | "voice_attendance"
+  | "leave"
+  | "leave_approval"
+  | "assignment"
+  | "course_progress"; // <-- add course_progress flow
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -63,7 +75,12 @@ const AudioStreamerChatBot = ({
       finish_collecting?: boolean;
       classSections?: any[]; // For course progress flow
       courseProgress?: any; // For course progress data
-      classSection?: { classId: string; sectionId: string; className?: string; sectionName?: string }; // Selected class/section
+      classSection?: {
+        classId: string;
+        sectionId: string;
+        className?: string;
+        sectionName?: string;
+      }; // Selected class/section
     }[]
   >([]);
 
@@ -99,11 +116,24 @@ const AudioStreamerChatBot = ({
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null); // <-- add for pending image
   const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
   const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
-  const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>({}); // <-- add for reject reasons
+  const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>(
+    {}
+  ); // <-- add for reject reasons
   const [classSections, setClassSections] = useState<any[]>([]); // <-- add for course progress class sections
   const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
-  const [selectedClassSection, setSelectedClassSection] = useState<{ classId: string; sectionId: string; className?: string; sectionName?: string } | null>(null); // <-- add for selected class/section
-  const [courseProgressData, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
+  const [selectedClassSection, setSelectedClassSection] = useState<{
+    classId: string;
+    sectionId: string;
+    className?: string;
+    sectionName?: string;
+  } | null>(null); // <-- add for selected class/section
+  const [, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
+
+  // Auto-routing states
+  const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
+  const [detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
+  const [classificationConfidence, setClassificationConfidence] =
+    useState<number>(0);
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -125,9 +155,9 @@ const AudioStreamerChatBot = ({
       };
 
       setChatHistory([welcomeMessage]); // replace instead of append
-      // Set default flow to query
-      setActiveFlow("query");
-      setUserOptionSelected(true);
+      // Don't set default flow or userOptionSelected - let auto-routing handle it
+      // setActiveFlow("query");
+      // setUserOptionSelected(true);
     }
   }, []); // run only once
 
@@ -266,11 +296,16 @@ const AudioStreamerChatBot = ({
   // Upload assignment file
   const uploadAssignmentFile = async (file: File) => {
     try {
-      const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
+      const result = await aiAPI.uploadAssignmentFile(
+        file,
+        sessionId || userId
+      );
       if (result.status === "success" && result.data?.file_uuid) {
         // Send message to assignment chat with file UUID
-        const fileMessage = `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`;
         // The backend will handle adding this to attachments
+        console.log(
+          `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`
+        );
         return result;
       }
       return result;
@@ -343,25 +378,342 @@ const AudioStreamerChatBot = ({
     }
   };
 
+  /**
+   * Classify user query to determine appropriate flow
+   */
+  const classifyQuery = async (
+    message: string
+  ): Promise<{
+    flow: string;
+    confidence: number;
+    entities: any;
+  }> => {
+    try {
+      const response = await fetch(
+        `${
+          import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
+        }/v1/ai/classify-query`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: message,
+            user_id: userId,
+            user_roles: roles ? roles.split(",") : [],
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.status === "success") {
+        const { flow, confidence, entities } = data.data;
+
+        console.log("🔍 Query Classification:", {
+          query: message,
+          detectedFlow: flow,
+          confidence: `${(confidence * 100).toFixed(0)}%`,
+          entities,
+        });
+
+        return { flow, confidence, entities };
+      }
+
+      // Fallback
+      return { flow: "query", confidence: 0.8, entities: {} };
+    } catch (error) {
+      console.error("❌ Classification error:", error);
+      return { flow: "query", confidence: 0.8, entities: {} };
+    }
+  };
+
   const handleSubmit = async () => {
     if (!inputText.trim()) return;
     const userMessage = inputText.trim();
+
+    console.log("🚀 handleSubmit START:", {
+      userMessage,
+      activeFlow,
+      userOptionSelected,
+      autoRouting,
+    });
+
     setChatHistory((prev) => [...prev, { type: "user", text: userMessage }]);
     setInputText("");
     setIsProcessing(true);
-    if (!userOptionSelected || activeFlow === "none") {
+
+    // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
+    let targetFlow = activeFlow;
+    let classificationResult = null;
+
+    // Don't re-classify if we're in the middle of a multi-step flow
+    const inAttendanceFlow =
+      activeFlow === "attendance" &&
+      attendanceStep === "student_details" &&
+      pendingClassInfo;
+    const inVoiceAttendanceFlow =
+      activeFlow === "voice_attendance" &&
+      attendanceStep === "student_details" &&
+      pendingClassInfo;
+
+    // For leave/assignment, check if message looks like a NEW request (indicates flow switch)
+    // Keywords that DEFINITELY indicate starting a NEW flow
+    const newFlowKeywords = [
+      "mark attendance",
+      "take attendance",
+      "attendance for",
+      "apply leave",
+      "apply for leave",
+      "need leave",
+      "want leave",
+      "create assignment",
+      "give assignment",
+      "new assignment",
+      "show me",
+      "list all",
+      "show",
+      "list",
+      "course progress",
+      "syllabus",
+      "view",
+      "display",
+    ];
+    const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
+      userMessage.toLowerCase().includes(keyword)
+    );
+
+    // Stay in active flow if user is responding (not starting new request)
+    // If already in leave/assignment and message doesn't look like a new request, stay in flow
+    // Don't check userOptionSelected - if activeFlow is set, we're in that flow
+    const inLeaveFlow = activeFlow === "leave" && !looksLikeNewRequest;
+    const inAssignmentFlow =
+      activeFlow === "assignment" && !looksLikeNewRequest;
+
+    console.log("🔧 Auto-routing check:", {
+      autoRouting,
+      activeFlow,
+      userOptionSelected,
+      attendanceStep,
+      pendingClassInfo,
+      inAttendanceFlow,
+      inVoiceAttendanceFlow,
+      inLeaveFlow,
+      inAssignmentFlow,
+      looksLikeNewRequest,
+      message: userMessage,
+    });
+
+    if (
+      inAttendanceFlow ||
+      inVoiceAttendanceFlow ||
+      inLeaveFlow ||
+      inAssignmentFlow
+    ) {
+      // Stay in current flow if we're in the middle of a multi-step process
+      console.log("📍 Staying in current flow (multi-step process active)");
+      targetFlow = activeFlow;
+      // Don't show old detection when in multi-step flow
+      setDetectedFlow(null);
+    } else if (autoRouting) {
+      // Skip classification for short confirmation words and common flow responses (save API call)
+      const simpleResponses = [
+        "yes",
+        "no",
+        "ok",
+        "okay",
+        "skip",
+        "approve",
+        "reject",
+        "cancel",
+        "continue",
+        "sick",
+        "casual",
+        "earned",
+        "medical",
+        "urgent",
+        "personal",
+        "maternity",
+        "paternity",
+        "today",
+        "tomorrow",
+        "yesterday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+      ];
+      const isSimpleResponse = simpleResponses.includes(
+        userMessage.toLowerCase().trim()
+      );
+
+      if (isSimpleResponse && activeFlow !== "none" && activeFlow !== "query") {
+        // Keep current flow for simple confirmation words
+        console.log(
+          "📍 Simple response detected, keeping current flow:",
+          activeFlow
+        );
+        targetFlow = activeFlow;
+      } else if (
+        activeFlow !== "none" &&
+        activeFlow !== "query" &&
+        userMessage.length < 50 &&
+        !looksLikeNewRequest
+      ) {
+        // Short message in an active flow (likely a response to a question) - stay in current flow
+        console.log(
+          "📍 Short response in active flow, staying in:",
+          activeFlow
+        );
+        targetFlow = activeFlow;
+      } else {
+        // Run classification for every new query when auto-routing is enabled
+        console.log("📍 Running classification...");
+        try {
+          classificationResult = await classifyQuery(userMessage);
+          console.log("✅ Classification complete:", classificationResult);
+          targetFlow = classificationResult.flow as FlowType;
+
+          // Map backend flow names to frontend flow types
+          if (targetFlow === ("assignment_create" as any)) {
+            targetFlow = "assignment";
+          } else if (targetFlow === ("assignment_submit" as any)) {
+            targetFlow = "assignment"; // For now, both map to same flow
+          }
+        } catch (error) {
+          console.error("❌ Classification error:", error);
+          targetFlow = "query"; // Fallback to query on error
+        }
+      }
+
+      console.log("📍 Target flow determined:", targetFlow);
+
+      // Update UI to show detected flow
+      setDetectedFlow(targetFlow);
+
+      // Only update confidence if we actually ran classification
+      if (classificationResult) {
+        setClassificationConfidence(classificationResult.confidence);
+
+        // Low confidence warning (but still proceed)
+        if (classificationResult.confidence < 0.25) {
+          console.warn("⚠️ Low classification confidence, defaulting to query");
+          targetFlow = "query";
+        }
+      }
+
+      // Set userOptionSelected to true when auto-routing detects a flow
+      setUserOptionSelected(true);
+
+      // IMPORTANT: Initialize flow state when detected (same as manual mode)
+      if (targetFlow === "attendance" || targetFlow === "voice_attendance") {
+        console.log("📍 Initializing attendance flow state");
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+
+        // Add welcome message for auto-detected attendance flow
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "✅ Attendance flow detected! I'll help you mark attendance. Please provide class information (class name, section, and date). For example: 'Class 3 A on 2025-12-06' or 'Class 6 section B today'.",
+          },
+        ]);
+      }
+
+      // Check if this is a new flow initialization (user just switched flows)
+      const isNewFlowInitialization =
+        classificationResult &&
+        (activeFlow === "none" ||
+          activeFlow === "query" ||
+          activeFlow !== targetFlow);
+
+      // Initialize assignment flow
+      if (targetFlow === "assignment" && isNewFlowInitialization) {
+        console.log("📍 Initializing assignment flow state");
+        console.log("📍 Setting activeFlow to 'assignment'");
+
+        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in assignment flow
+        setActiveFlow("assignment");
+
+        console.log("📍 Adding welcome message");
+        // Add welcome message matching manual mode
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "📚 **Assignment Creation Flow Activated!** I'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?",
+          },
+        ]);
+
+        console.log("📍 Setting isProcessing to false and returning");
+        // Stop here - don't process the initialization message, wait for user's next input
+        setIsProcessing(false);
+        return;
+      }
+
+      // Initialize leave flow
+      if (targetFlow === "leave" && isNewFlowInitialization) {
+        console.log("📍 Initializing leave flow state");
+
+        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in leave flow
+        setActiveFlow("leave");
+
+        // Add welcome message matching manual mode
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "📝 **Leave Application Flow Activated!** I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
+          },
+        ]);
+
+        // Stop here - don't process the initialization message, wait for user's next input
+        setIsProcessing(false);
+        return;
+      }
+    } else {
+      console.log("📍 Using current activeFlow:", activeFlow);
+    }
+
+    // If still no flow selected after classification, prompt user
+    if (!userOptionSelected && targetFlow === "none") {
       setChatHistory((prev) => [
         ...prev,
         {
           type: "bot",
-          text: "Please select an option first.",
+          text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.",
         },
       ]);
       setIsProcessing(false);
       return;
     }
 
-    if (activeFlow === "query") {
+    console.log("📍 Routing to flow:", targetFlow);
+    console.log("📍 Current attendance step:", attendanceStep);
+    console.log("📍 Pending class info:", pendingClassInfo);
+
+    // Update active flow for next message (unless manually overridden)
+    if (autoRouting) {
+      setActiveFlow(targetFlow);
+    }
+
+    // If we're already in attendance flow at student_details step, stay there
+    // Don't reset to class_info when user is providing student attendance data
+    if (
+      targetFlow === "attendance" &&
+      attendanceStep === "student_details" &&
+      pendingClassInfo
+    ) {
+      console.log("📍 Continuing attendance at student_details step");
+      // Keep the current step - don't reset
+    }
+
+    if (targetFlow === "query") {
       // Query handler API
       try {
         const data = await aiAPI.queryHandler({
@@ -402,7 +754,7 @@ const AudioStreamerChatBot = ({
       } finally {
         setIsProcessing(false);
       }
-    } else if (activeFlow === "attendance") {
+    } else if (targetFlow === "attendance") {
       // Step-by-step attendance flow
       if (attendanceStep === "class_info") {
         // First step: Collect class information
@@ -565,10 +917,11 @@ const AudioStreamerChatBot = ({
         try {
           const data = await aiAPI.chat({
             session_id: sessionId || userId,
-            query: `Process and verify attendance for ${pendingClassInfo
-              ? `Class ${pendingClassInfo.class_} ${pendingClassInfo.section} on ${pendingClassInfo.date}`
-              : "the class"
-              }: ${userMessage}. Please extract student names and attendance status, and verify the information for accuracy.`,
+            query: `Process and verify attendance for ${
+              pendingClassInfo
+                ? `Class ${pendingClassInfo.class_} ${pendingClassInfo.section} on ${pendingClassInfo.date}`
+                : "the class"
+            }: ${userMessage}. Please extract student names and attendance status, and verify the information for accuracy.`,
           });
 
           if (data.status === "success" && data.data) {
@@ -755,7 +1108,7 @@ const AudioStreamerChatBot = ({
           setIsProcessing(false);
         }
       }
-    } else if (activeFlow === "voice_attendance") {
+    } else if (targetFlow === "voice_attendance") {
       // Voice-based attendance flow
       if (attendanceStep === "class_info") {
         // First step: Process voice input for class information
@@ -773,8 +1126,9 @@ const AudioStreamerChatBot = ({
               ...prev,
               {
                 type: "bot",
-                text: `✅ ${data.data?.message || "Class information confirmed"
-                  } Now you can speak the student names and their attendance status. For example: "Aarav present, Diya absent" or "Mark all present except John".`,
+                text: `✅ ${
+                  data.data?.message || "Class information confirmed"
+                } Now you can speak the student names and their attendance status. For example: "Aarav present, Diya absent" or "Mark all present except John".`,
               },
             ]);
           } else {
@@ -893,19 +1247,19 @@ const AudioStreamerChatBot = ({
           setIsProcessing(false);
         }
       }
-    } else if (activeFlow === "leave") {
+    } else if (targetFlow === "leave") {
       // Leave application flow
       try {
         // Get auth token from localStorage
-        const authToken = localStorage.getItem('token');
-        
+        const authToken = localStorage.getItem("token");
+
         const data = await aiAPI.leaveChat({
           session_id: sessionId || userId,
-          user_id: userId,  // Pass user_id (will be mapped to employee UUID)
+          user_id: userId, // Pass user_id (will be mapped to employee UUID)
           query: userMessage,
-          bearer_token: authToken || undefined,  // Pass bearer token if available
-          academic_session: "2025-26",  // Can be made configurable
-          branch_token: "demo",  // Can be made configurable
+          bearer_token: authToken || undefined, // Pass bearer token if available
+          academic_session: "2025-26", // Can be made configurable
+          branch_token: "demo", // Can be made configurable
         });
 
         if (data.status === "success" && data.data) {
@@ -925,12 +1279,32 @@ const AudioStreamerChatBot = ({
           if (leaveData) {
             console.log("Leave application data:", leaveData);
           }
+
+          // If submission failed (error message), exit the flow
+          if (
+            answer.includes("❌") ||
+            answer.includes("error") ||
+            answer.includes("failed")
+          ) {
+            console.log("⚠️ Leave submission error detected, exiting flow");
+            setActiveFlow("none");
+          }
+
+          // If submission succeeded (success message), exit the flow
+          if (answer.includes("✅") && answer.includes("successfully")) {
+            console.log("✅ Leave submitted successfully, exiting flow");
+            setTimeout(() => {
+              setActiveFlow("none");
+            }, 1000);
+          }
         } else {
           setChatHistory((prev) => [
             ...prev,
             {
               type: "bot",
-              text: data.message || "Sorry, there was an error processing your leave request.",
+              text:
+                data.message ||
+                "Sorry, there was an error processing your leave request.",
             },
           ]);
         }
@@ -945,19 +1319,19 @@ const AudioStreamerChatBot = ({
       } finally {
         setIsProcessing(false);
       }
-    } else if (activeFlow === "assignment") {
+    } else if (targetFlow === "assignment") {
       // Assignment creation flow
       try {
         // Get auth token from localStorage
-        const authToken = localStorage.getItem('token');
-        
+        const authToken = localStorage.getItem("token");
+
         const data = await aiAPI.assignmentChat({
           session_id: sessionId || userId,
-          user_id: userId,  // Pass user_id (will be mapped to employee UUID)
+          user_id: userId, // Pass user_id (will be mapped to employee UUID)
           query: userMessage,
-          bearer_token: authToken || undefined,  // Pass bearer token if available
-          academic_session: "2025-26",  // Can be made configurable
-          branch_token: "demo",  // Can be made configurable
+          bearer_token: authToken || undefined, // Pass bearer token if available
+          academic_session: "2025-26", // Can be made configurable
+          branch_token: "demo", // Can be made configurable
         });
 
         if (data.status === "success" && data.data) {
@@ -977,12 +1351,38 @@ const AudioStreamerChatBot = ({
           if (assignmentData) {
             console.log("Assignment data:", assignmentData);
           }
+
+          // If submission failed (error message), exit the flow
+          if (
+            answer.includes("❌") ||
+            answer.includes("error") ||
+            answer.includes("failed")
+          ) {
+            console.log(
+              "⚠️ Assignment submission error detected, exiting flow"
+            );
+            setActiveFlow("none");
+          }
+
+          // If submission succeeded (success message), exit the flow
+          if (
+            answer.includes("✅") &&
+            answer.includes("successfully") &&
+            answer.includes("created")
+          ) {
+            console.log("✅ Assignment created successfully, exiting flow");
+            setTimeout(() => {
+              setActiveFlow("none");
+            }, 1000);
+          }
         } else {
           setChatHistory((prev) => [
             ...prev,
             {
               type: "bot",
-              text: data.message || "Sorry, there was an error processing your assignment request.",
+              text:
+                data.message ||
+                "Sorry, there was an error processing your assignment request.",
             },
           ]);
         }
@@ -997,14 +1397,14 @@ const AudioStreamerChatBot = ({
       } finally {
         setIsProcessing(false);
       }
-    } else if (activeFlow === "course_progress") {
+    } else if (targetFlow === "course_progress") {
       // Course progress flow - selection is handled via UI clicks
       // This handles text-based queries or refreshes
       try {
         if (classSections.length === 0) {
           // Fetch class sections if not already loaded
           setLoadingClassSections(true);
-          const authToken = localStorage.getItem('token');
+          const authToken = localStorage.getItem("token");
           const response = await courseProgressAPI.fetchClassSections({
             page: 1,
             limit: 50,
@@ -1012,8 +1412,11 @@ const AudioStreamerChatBot = ({
             academic_session: "2025-26",
             branch_token: "demo",
           });
-          
-          if ((response.status === 200 || response.status === "success") && response.data?.options) {
+
+          if (
+            (response.status === 200 || response.status === "success") &&
+            response.data?.options
+          ) {
             const options = response.data.options || [];
             setClassSections(options);
             setChatHistory((prev) => [
@@ -1029,14 +1432,16 @@ const AudioStreamerChatBot = ({
               ...prev,
               {
                 type: "bot",
-                text: response.message || "No class sections found. Please try again.",
+                text:
+                  response.message ||
+                  "No class sections found. Please try again.",
               },
             ]);
           }
           setLoadingClassSections(false);
         } else if (selectedClassSection) {
           // If a class section is already selected, refresh the progress
-          const authToken = localStorage.getItem('token');
+          const authToken = localStorage.getItem("token");
           const progressResponse = await courseProgressAPI.getProgress({
             classId: selectedClassSection.classId,
             sectionId: selectedClassSection.sectionId,
@@ -1045,18 +1450,37 @@ const AudioStreamerChatBot = ({
             branch_token: "demo",
           });
 
-          if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+          if (
+            ((progressResponse.status as any) === 200 ||
+              progressResponse.status === "success") &&
+            progressResponse.data
+          ) {
             // The API returns data.resp according to the controller
-            const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+            const progressData =
+              (progressResponse.data as any).resp ||
+              progressResponse.data.progress ||
+              progressResponse.data;
             setCourseProgressData(progressData);
-            
+
             // Format a nice summary message
-            const teacherDiarys = progressData.teacherDiarys || progressData || [];
-            const totalSubjects = Array.isArray(teacherDiarys) ? teacherDiarys.length : 0;
-            const summaryText = totalSubjects > 0 
-              ? `📊 **Course Progress for ${selectedClassSection.className || 'Class'} ${selectedClassSection.sectionName || 'Section'}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-              : `📊 **Course Progress for ${selectedClassSection.className || 'Class'} ${selectedClassSection.sectionName || 'Section'}**\n\nNo progress data available yet.`;
-            
+            const teacherDiarys =
+              progressData.teacherDiarys || progressData || [];
+            const totalSubjects = Array.isArray(teacherDiarys)
+              ? teacherDiarys.length
+              : 0;
+            const summaryText =
+              totalSubjects > 0
+                ? `📊 **Course Progress for ${
+                    selectedClassSection.className || "Class"
+                  } ${
+                    selectedClassSection.sectionName || "Section"
+                  }**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
+                : `📊 **Course Progress for ${
+                    selectedClassSection.className || "Class"
+                  } ${
+                    selectedClassSection.sectionName || "Section"
+                  }**\n\nNo progress data available yet.`;
+
             setChatHistory((prev) => [
               ...prev,
               {
@@ -1076,7 +1500,9 @@ const AudioStreamerChatBot = ({
               ...prev,
               {
                 type: "bot",
-                text: progressResponse.message || "Failed to fetch course progress. Please try again.",
+                text:
+                  progressResponse.message ||
+                  "Failed to fetch course progress. Please try again.",
               },
             ]);
           }
@@ -1102,14 +1528,14 @@ const AudioStreamerChatBot = ({
       } finally {
         setIsProcessing(false);
       }
-    } else if (activeFlow === "leave_approval") {
+    } else if (targetFlow === "leave_approval") {
       // Leave approval flow - only fetch if we don't have requests already
       // The fetch should happen when flow is activated from dropdown, not on every message
       if (leaveApprovalRequests.length === 0 && !loadingLeaveRequests) {
         try {
           setLoadingLeaveRequests(true);
-          const authToken = localStorage.getItem('token');
-          
+          const authToken = localStorage.getItem("token");
+
           const response = await leaveApprovalAPI.fetchPendingRequests({
             user_id: userId,
             page: 1,
@@ -1141,7 +1567,10 @@ const AudioStreamerChatBot = ({
           }
         } catch (err: any) {
           console.error("Error fetching leave approval requests:", err);
-          const errorMessage = err.message || err.response?.data?.message || "Unknown error occurred";
+          const errorMessage =
+            err.message ||
+            err.response?.data?.message ||
+            "Unknown error occurred";
           setChatHistory((prev) => [
             ...prev,
             {
@@ -1414,8 +1843,9 @@ const AudioStreamerChatBot = ({
             ...filteredHistory,
             {
               type: "bot",
-              text: `❌ Image processing failed: ${(err as Error).message
-                }. Please try uploading a different image or provide attendance data as text.`,
+              text: `❌ Image processing failed: ${
+                (err as Error).message
+              }. Please try uploading a different image or provide attendance data as text.`,
             },
           ];
         });
@@ -1696,8 +2126,9 @@ const AudioStreamerChatBot = ({
           ...prev,
           {
             type: "bot",
-            text: `❌ No attendance data found. Please try ${attendanceType === "text" ? "entering" : "uploading"
-              } the attendance information again.`,
+            text: `❌ No attendance data found. Please try ${
+              attendanceType === "text" ? "entering" : "uploading"
+            } the attendance information again.`,
           },
         ]);
         return;
@@ -1732,9 +2163,11 @@ const AudioStreamerChatBot = ({
             ...filtered,
             {
               type: "bot",
-              text: `✅ ${attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
-                } attendance saved successfully! ${data.data?.message || "Data has been saved to MongoDB."
-                }`,
+              text: `✅ ${
+                attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
+              } attendance saved successfully! ${
+                data.data?.message || "Data has been saved to MongoDB."
+              }`,
               answer: data.data?.answer || data.data?.message,
             },
           ];
@@ -1769,8 +2202,9 @@ const AudioStreamerChatBot = ({
           ...filtered,
           {
             type: "bot",
-            text: `❌ Failed to save ${attendanceType} attendance: ${(err as Error).message
-              }`,
+            text: `❌ Failed to save ${attendanceType} attendance: ${
+              (err as Error).message
+            }`,
           },
         ];
       });
@@ -1936,8 +2370,9 @@ const AudioStreamerChatBot = ({
                     (item) =>
                       `| ${item.student_name} | ${item.attendance_status} |`
                   )
-                  .join("\n")}\n\nClass: ${currentClassInfo?.class_} ${currentClassInfo?.section
-                  } on ${currentClassInfo?.date}`,
+                  .join("\n")}\n\nClass: ${currentClassInfo?.class_} ${
+                  currentClassInfo?.section
+                } on ${currentClassInfo?.date}`,
               };
             }
             return msg;
@@ -2121,15 +2556,19 @@ const AudioStreamerChatBot = ({
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      
+
       // Check if click is inside a correction box
-      const isInsideCorrectionBox = target.closest('.correction-box');
-      
+      const isInsideCorrectionBox = target.closest(".correction-box");
+
       // Check if click is on any action button (to allow toggling)
-      const isActionButton = target.closest('.bot-action-btn');
-      
+      const isActionButton = target.closest(".bot-action-btn");
+
       // If click is outside correction box and not on an action button, close it
-      if (showCorrectionBox !== null && !isInsideCorrectionBox && !isActionButton) {
+      if (
+        showCorrectionBox !== null &&
+        !isInsideCorrectionBox &&
+        !isActionButton
+      ) {
         setShowCorrectionBox(null);
       }
     };
@@ -3215,6 +3654,61 @@ const AudioStreamerChatBot = ({
                   transition={{ duration: 0.2 }}
                   className="three-dot-menu"
                 >
+                  {/* Auto-routing status header */}
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      backgroundColor: autoRouting ? "#e8f5e9" : "#fff3e0",
+                      borderBottom: "1px solid #ddd",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      color: autoRouting ? "#2e7d32" : "#ef6c00",
+                    }}
+                  >
+                    {autoRouting ? "✓ Auto-routing ON" : "⚠️ Manual mode"}
+                  </div>
+
+                  {/* Toggle auto-routing */}
+                  <div
+                    className="menu-item-option"
+                    onClick={() => {
+                      setAutoRouting(!autoRouting);
+                      if (!autoRouting) {
+                        // Switching to auto mode
+                        setActiveFlow("none");
+                        setUserOptionSelected(false);
+                      }
+                      setIsMenuOpen(false);
+                      setChatHistory((prev) => [
+                        ...prev,
+                        {
+                          type: "bot",
+                          text: !autoRouting
+                            ? "🤖 Auto-routing enabled! I'll automatically detect which flow to use based on your message."
+                            : "🔧 Manual mode activated. Please select a specific flow from the menu.",
+                        },
+                      ]);
+                    }}
+                    style={{
+                      backgroundColor: "#f5f5f5",
+                      fontWeight: "600",
+                    }}
+                  >
+                    <span className="menu-option-label">
+                      {autoRouting
+                        ? "🔧 Switch to Manual"
+                        : "🤖 Enable Auto-routing"}
+                    </span>
+                  </div>
+
+                  {/* Divider */}
+                  <div
+                    style={{
+                      borderTop: "1px solid #ddd",
+                      margin: "5px 0",
+                    }}
+                  />
+
                   <div
                     className="menu-item-option"
                     onMouseEnter={() => {
@@ -3230,6 +3724,7 @@ const AudioStreamerChatBot = ({
                       }, 100);
                     }}
                     onClick={() => {
+                      setAutoRouting(false); // Disable auto-routing
                       setActiveFlow("query");
                       setUserOptionSelected(true);
                       setIsMenuOpen(false);
@@ -3237,12 +3732,12 @@ const AudioStreamerChatBot = ({
                         ...prev,
                         {
                           type: "bot",
-                          text: "Query flow activated. You can now ask me anything!",
+                          text: "Query flow activated (Manual override). You can now ask me anything!",
                         },
                       ]);
                     }}
                   >
-                    <span className="menu-option-label">Query</span>
+                    <span className="menu-option-label">📊 Query</span>
                     {hoveredMenuItem === "query" && (
                       <motion.div
                         initial={{ opacity: 0, x: 10 }}
@@ -3262,101 +3757,160 @@ const AudioStreamerChatBot = ({
                           }, 100);
                         }}
                       >
-                        <div style={{ marginBottom: "0.5rem", fontWeight: "600", fontSize: "0.85rem" }}>Flow Options:</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <div
+                          style={{
+                            marginBottom: "0.5rem",
+                            fontWeight: "600",
+                            fontSize: "0.85rem",
+                          }}
+                        >
+                          Flow Options:
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.25rem",
+                          }}
+                        >
                           <div
                             onClick={() => {
+                              setAutoRouting(false); // Disable auto-routing
                               setActiveFlow("query");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              setChatHistory(prev => [
+                              setChatHistory((prev) => [
                                 ...prev,
-                                { type: "bot", text: "Query flow activated. You can now ask me anything!" }
+                                {
+                                  type: "bot",
+                                  text: "Query flow activated (Manual override). You can now ask me anything!",
+                                },
                               ]);
                             }}
                             style={{
                               opacity: activeFlow === "query" ? 1 : 0.7,
-                              fontWeight: activeFlow === "query" ? "600" : "400",
+                              fontWeight:
+                                activeFlow === "query" ? "600" : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
                             {activeFlow === "query" ? "✓ " : ""}Query
                           </div>
                           <div
                             onClick={() => {
+                              setAutoRouting(false); // Disable auto-routing
                               setActiveFlow("attendance");
                               setUserOptionSelected(true);
-                              setAttendanceStep('class_info');
+                              setAttendanceStep("class_info");
                               setPendingClassInfo(null);
                               setIsMenuOpen(false);
-                              setChatHistory(prev => [
+                              setChatHistory((prev) => [
                                 ...prev,
-                                { type: "bot", text: "Attendance flow activated. First, please provide class information (class name, section, and date). For example: 'Class 6 A on 2025-01-15' or upload an image with class details." }
+                                {
+                                  type: "bot",
+                                  text: "Attendance flow activated (Manual override). First, please provide class information (class name, section, and date). For example: 'Class 6 A on 2025-01-15' or upload an image with class details.",
+                                },
                               ]);
                             }}
                             style={{
                               opacity: activeFlow === "attendance" ? 1 : 0.7,
-                              fontWeight: activeFlow === "attendance" ? "600" : "400",
+                              fontWeight:
+                                activeFlow === "attendance" ? "600" : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
-                            {activeFlow === "attendance" ? "✓ " : ""}Mark Attendance (Text/Image)
+                            {activeFlow === "attendance" ? "✓ " : ""}Mark
+                            Attendance (Text/Image)
                           </div>
                           <div
                             onClick={() => {
+                              setAutoRouting(false); // Disable auto-routing
                               setActiveFlow("voice_attendance");
                               setUserOptionSelected(true);
-                              setAttendanceStep('class_info');
+                              setAttendanceStep("class_info");
                               setPendingClassInfo(null);
                               setIsMenuOpen(false);
-                              setChatHistory(prev => [
+                              setChatHistory((prev) => [
                                 ...prev,
-                                { type: "bot", text: "Voice attendance flow activated! 🎤 You can now use voice commands to mark attendance. First, speak the class information (class name, section, and date), then speak the student names and their attendance status. For example: 'Class 6 A on 2025-01-15' then 'Aarav present, Diya absent'." }
+                                {
+                                  type: "bot",
+                                  text: "Voice attendance flow activated (Manual override)! 🎤 You can now use voice commands to mark attendance. First, speak the class information (class name, section, and date), then speak the student names and their attendance status. For example: 'Class 6 A on 2025-01-15' then 'Aarav present, Diya absent'.",
+                                },
                               ]);
                             }}
                             style={{
-                              opacity: activeFlow === "voice_attendance" ? 1 : 0.7,
-                              fontWeight: activeFlow === "voice_attendance" ? "600" : "400",
+                              opacity:
+                                activeFlow === "voice_attendance" ? 1 : 0.7,
+                              fontWeight:
+                                activeFlow === "voice_attendance"
+                                  ? "600"
+                                  : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
-                            {activeFlow === "voice_attendance" ? "✓ " : ""}Mark Attendance (Voice)
+                            {activeFlow === "voice_attendance" ? "✓ " : ""}Mark
+                            Attendance (Voice)
                           </div>
                           <div
                             onClick={() => {
+                              setAutoRouting(false); // Disable auto-routing
                               setActiveFlow("leave");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              setChatHistory(prev => [
+                              setChatHistory((prev) => [
                                 ...prev,
-                                { type: "bot", text: "Leave application flow activated! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'." }
+                                {
+                                  type: "bot",
+                                  text: "Leave application flow activated (Manual override)! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'.",
+                                },
                               ]);
                             }}
                             style={{
                               opacity: activeFlow === "leave" ? 1 : 0.7,
-                              fontWeight: activeFlow === "leave" ? "600" : "400",
+                              fontWeight:
+                                activeFlow === "leave" ? "600" : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
                             {activeFlow === "leave" ? "✓ " : ""}Apply for Leave
                           </div>
@@ -3370,19 +3924,21 @@ const AudioStreamerChatBot = ({
                               setRejectReason({});
                               setLoadingLeaveRequests(true);
                               try {
-                                const authToken = localStorage.getItem('token');
-                                const response = await leaveApprovalAPI.fetchPendingRequests({
-                                  user_id: userId,
-                                  page: 1,
-                                  limit: 50,
-                                  bearer_token: authToken || undefined,
-                                  academic_session: "2025-26",
-                                  branch_token: "demo",
-                                });
+                                const authToken = localStorage.getItem("token");
+                                const response =
+                                  await leaveApprovalAPI.fetchPendingRequests({
+                                    user_id: userId,
+                                    page: 1,
+                                    limit: 50,
+                                    bearer_token: authToken || undefined,
+                                    academic_session: "2025-26",
+                                    branch_token: "demo",
+                                  });
                                 if (response.status === 200 && response.data) {
-                                  const pendingRequests = response.data.leaveRequests || [];
+                                  const pendingRequests =
+                                    response.data.leaveRequests || [];
                                   setLeaveApprovalRequests(pendingRequests);
-                                  
+
                                   if (pendingRequests.length > 0) {
                                     setChatHistory((prev) => [
                                       ...prev,
@@ -3407,13 +3963,22 @@ const AudioStreamerChatBot = ({
                                     ...prev,
                                     {
                                       type: "bot",
-                                      text: `⚠️ ${response.message || "No pending leave requests found."}`,
+                                      text: `⚠️ ${
+                                        response.message ||
+                                        "No pending leave requests found."
+                                      }`,
                                     },
                                   ]);
                                 }
                               } catch (err: any) {
-                                console.error("Error fetching leave approval requests:", err);
-                                const errorMessage = err.message || err.response?.data?.message || "Unknown error occurred";
+                                console.error(
+                                  "Error fetching leave approval requests:",
+                                  err
+                                );
+                                const errorMessage =
+                                  err.message ||
+                                  err.response?.data?.message ||
+                                  "Unknown error occurred";
                                 setChatHistory((prev) => [
                                   ...prev,
                                   {
@@ -3426,105 +3991,166 @@ const AudioStreamerChatBot = ({
                               }
                             }}
                             style={{
-                              opacity: activeFlow === "leave_approval" ? 1 : 0.7,
-                              fontWeight: activeFlow === "leave_approval" ? "600" : "400",
+                              opacity:
+                                activeFlow === "leave_approval" ? 1 : 0.7,
+                              fontWeight:
+                                activeFlow === "leave_approval" ? "600" : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
-                            {activeFlow === "leave_approval" ? "✓ " : ""}Leave Approval Flow
+                            {activeFlow === "leave_approval" ? "✓ " : ""}Leave
+                            Approval Flow
                           </div>
                           <div
                             onClick={() => {
+                              setAutoRouting(false); // Disable auto-routing
                               setActiveFlow("assignment");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              setChatHistory(prev => [
+                              setChatHistory((prev) => [
                                 ...prev,
-                                { type: "bot", text: "📚 **Assignment Creation Flow Activated!**\n\nI'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?" }
+                                {
+                                  type: "bot",
+                                  text: "📚 **Assignment Creation Flow Activated (Manual override)!**\n\nI'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?",
+                                },
                               ]);
                             }}
                             style={{
                               opacity: activeFlow === "assignment" ? 1 : 0.7,
-                              fontWeight: activeFlow === "assignment" ? "600" : "400",
+                              fontWeight:
+                                activeFlow === "assignment" ? "600" : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
-                            {activeFlow === "assignment" ? "✓ " : ""}Assignment Flow
+                            {activeFlow === "assignment" ? "✓ " : ""}Assignment
+                            Flow
                           </div>
                           <div
                             onClick={async () => {
+                              setAutoRouting(false); // Disable auto-routing
                               setActiveFlow("course_progress");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
                               setSelectedClassSection(null);
                               setCourseProgressData(null);
-                              
+
                               // Fetch class sections when flow is activated
                               setLoadingClassSections(true);
                               try {
-                                const authToken = localStorage.getItem('token');
-                                console.log("Fetching class sections with token:", authToken ? "present" : "missing");
-                                const response = await courseProgressAPI.fetchClassSections({
-                                  page: 1,
-                                  limit: 50,
-                                  bearer_token: authToken || undefined,
-                                  academic_session: "2025-26",
-                                  branch_token: "demo",
-                                });
-                                
-                                console.log("Class sections API response:", response);
-                                
-                                if ((response.status === 200 || response.status === "success") && response.data?.options) {
+                                const authToken = localStorage.getItem("token");
+                                console.log(
+                                  "Fetching class sections with token:",
+                                  authToken ? "present" : "missing"
+                                );
+                                const response =
+                                  await courseProgressAPI.fetchClassSections({
+                                    page: 1,
+                                    limit: 50,
+                                    bearer_token: authToken || undefined,
+                                    academic_session: "2025-26",
+                                    branch_token: "demo",
+                                  });
+
+                                console.log(
+                                  "Class sections API response:",
+                                  response
+                                );
+
+                                if (
+                                  (response.status === 200 ||
+                                    response.status === "success") &&
+                                  response.data?.options
+                                ) {
                                   const options = response.data.options || [];
-                                  console.log("Parsed class sections:", options);
+                                  console.log(
+                                    "Parsed class sections:",
+                                    options
+                                  );
                                   setClassSections(options);
-                                  setChatHistory(prev => [
+                                  setChatHistory((prev) => [
                                     ...prev,
-                                    { 
-                                      type: "bot", 
-                                      text: `📊 **Course Progress Flow Activated!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
+                                    {
+                                      type: "bot",
+                                      text: `📊 **Course Progress Flow Activated (Manual override)!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
                                       classSections: options,
-                                    }
+                                    },
                                   ]);
                                 } else {
-                                  console.warn("Unexpected response structure:", response);
-                                  setChatHistory(prev => [
+                                  console.warn(
+                                    "Unexpected response structure:",
+                                    response
+                                  );
+                                  setChatHistory((prev) => [
                                     ...prev,
-                                    { type: "bot", text: `⚠️ ${response.message || "No class sections found. Please try again."}` }
+                                    {
+                                      type: "bot",
+                                      text: `⚠️ ${
+                                        response.message ||
+                                        "No class sections found. Please try again."
+                                      }`,
+                                    },
                                   ]);
                                 }
                               } catch (err: any) {
-                                console.error("Error fetching class sections:", err);
-                                setChatHistory(prev => [
+                                console.error(
+                                  "Error fetching class sections:",
+                                  err
+                                );
+                                setChatHistory((prev) => [
                                   ...prev,
-                                  { type: "bot", text: `❌ Error loading class sections: ${err.message || "Unknown error"}` }
+                                  {
+                                    type: "bot",
+                                    text: `❌ Error loading class sections: ${
+                                      err.message || "Unknown error"
+                                    }`,
+                                  },
                                 ]);
                               } finally {
                                 setLoadingClassSections(false);
                               }
                             }}
                             style={{
-                              opacity: activeFlow === "course_progress" ? 1 : 0.7,
-                              fontWeight: activeFlow === "course_progress" ? "600" : "400",
+                              opacity:
+                                activeFlow === "course_progress" ? 1 : 0.7,
+                              fontWeight:
+                                activeFlow === "course_progress"
+                                  ? "600"
+                                  : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
-                            {activeFlow === "course_progress" ? "✓ " : ""}Course Progress
+                            {activeFlow === "course_progress" ? "✓ " : ""}Course
+                            Progress
                           </div>
                           <div
                             onClick={() => {
@@ -3538,10 +4164,15 @@ const AudioStreamerChatBot = ({
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
                             {activeFlow === "none" ? "✓ " : ""}Select Flow
                           </div>
@@ -3589,8 +4220,22 @@ const AudioStreamerChatBot = ({
                           }, 100);
                         }}
                       >
-                        <div style={{ marginBottom: "0.5rem", fontWeight: "600", fontSize: "0.85rem" }}>Device Options:</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <div
+                          style={{
+                            marginBottom: "0.5rem",
+                            fontWeight: "600",
+                            fontSize: "0.85rem",
+                          }}
+                        >
+                          Device Options:
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.25rem",
+                          }}
+                        >
                           <div
                             onClick={() => {
                               setSelectedDeviceId("default");
@@ -3598,14 +4243,20 @@ const AudioStreamerChatBot = ({
                             }}
                             style={{
                               opacity: selectedDeviceId === "default" ? 1 : 0.7,
-                              fontWeight: selectedDeviceId === "default" ? "600" : "400",
+                              fontWeight:
+                                selectedDeviceId === "default" ? "600" : "400",
                               cursor: "pointer",
                               padding: "0.25rem 0.5rem",
                               borderRadius: "4px",
-                              transition: "background 0.2s"
+                              transition: "background 0.2s",
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.background =
+                                "rgba(255, 255, 255, 0.2)")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.background = "transparent")
+                            }
                           >
                             {selectedDeviceId === "default" ? "✓ " : ""}Default
                           </div>
@@ -3617,17 +4268,31 @@ const AudioStreamerChatBot = ({
                                 setIsMenuOpen(false);
                               }}
                               style={{
-                                opacity: selectedDeviceId === device.deviceId ? 1 : 0.7,
-                                fontWeight: selectedDeviceId === device.deviceId ? "600" : "400",
+                                opacity:
+                                  selectedDeviceId === device.deviceId
+                                    ? 1
+                                    : 0.7,
+                                fontWeight:
+                                  selectedDeviceId === device.deviceId
+                                    ? "600"
+                                    : "400",
                                 cursor: "pointer",
                                 padding: "0.25rem 0.5rem",
                                 borderRadius: "4px",
-                                transition: "background 0.2s"
+                                transition: "background 0.2s",
                               }}
-                              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                              onMouseEnter={(e) =>
+                                (e.currentTarget.style.background =
+                                  "rgba(255, 255, 255, 0.2)")
+                              }
+                              onMouseLeave={(e) =>
+                                (e.currentTarget.style.background =
+                                  "transparent")
+                              }
                             >
-                              {selectedDeviceId === device.deviceId ? "✓ " : ""}{device.label || `Mic (${device.deviceId.slice(-4)})`}
+                              {selectedDeviceId === device.deviceId ? "✓ " : ""}
+                              {device.label ||
+                                `Mic (${device.deviceId.slice(-4)})`}
                             </div>
                           ))}
                         </div>
@@ -3674,8 +4339,22 @@ const AudioStreamerChatBot = ({
                           }, 100);
                         }}
                       >
-                        <div style={{ marginBottom: "0.5rem", fontWeight: "600", fontSize: "0.85rem" }}>Language Options:</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <div
+                          style={{
+                            marginBottom: "0.5rem",
+                            fontWeight: "600",
+                            fontSize: "0.85rem",
+                          }}
+                        >
+                          Language Options:
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.25rem",
+                          }}
+                        >
                           {languages.map((lang) => (
                             <div
                               key={lang.value}
@@ -3684,17 +4363,28 @@ const AudioStreamerChatBot = ({
                                 setIsMenuOpen(false);
                               }}
                               style={{
-                                opacity: selectedLanguage === lang.value ? 1 : 0.7,
-                                fontWeight: selectedLanguage === lang.value ? "600" : "400",
+                                opacity:
+                                  selectedLanguage === lang.value ? 1 : 0.7,
+                                fontWeight:
+                                  selectedLanguage === lang.value
+                                    ? "600"
+                                    : "400",
                                 cursor: "pointer",
                                 padding: "0.25rem 0.5rem",
                                 borderRadius: "4px",
-                                transition: "background 0.2s"
+                                transition: "background 0.2s",
                               }}
-                              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
-                              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                              onMouseEnter={(e) =>
+                                (e.currentTarget.style.background =
+                                  "rgba(255, 255, 255, 0.2)")
+                              }
+                              onMouseLeave={(e) =>
+                                (e.currentTarget.style.background =
+                                  "transparent")
+                              }
                             >
-                              {selectedLanguage === lang.value ? "✓ " : ""}{lang.label}
+                              {selectedLanguage === lang.value ? "✓ " : ""}
+                              {lang.label}
                             </div>
                           ))}
                         </div>
@@ -3709,63 +4399,69 @@ const AudioStreamerChatBot = ({
             {/* Attendance Flow Step Indicator */}
             {(activeFlow === "attendance" ||
               activeFlow === "voice_attendance") && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-4">
-                  <div
-                    className={`flex items-center gap-2 ${attendanceStep === "class_info"
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-4">
+                <div
+                  className={`flex items-center gap-2 ${
+                    attendanceStep === "class_info"
                       ? "text-blue-600 font-semibold"
                       : "text-gray-600 font-normal"
-                      }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${attendanceStep === "class_info"
+                  }`}
+                >
+                  <span
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
+                      attendanceStep === "class_info"
                         ? "bg-blue-600 text-white"
                         : "bg-blue-100 text-gray-600"
-                        }`}
-                    >
-                      {attendanceStep === "class_info" ? "1" : "✓"}
-                    </span>
-                    {activeFlow === "voice_attendance"
-                      ? "Class Info (Voice)"
-                      : "Class Information"}
-                  </div>
-                  <div className="w-0.5 h-5 bg-blue-200"></div>
-                  <div
-                    className={`flex items-center gap-2 ${attendanceStep === "student_details"
+                    }`}
+                  >
+                    {attendanceStep === "class_info" ? "1" : "✓"}
+                  </span>
+                  {activeFlow === "voice_attendance"
+                    ? "Class Info (Voice)"
+                    : "Class Information"}
+                </div>
+                <div className="w-0.5 h-5 bg-blue-200"></div>
+                <div
+                  className={`flex items-center gap-2 ${
+                    attendanceStep === "student_details"
                       ? "text-blue-600 font-semibold"
                       : "text-gray-600 font-normal"
-                      }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${attendanceStep === "student_details"
+                  }`}
+                >
+                  <span
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
+                      attendanceStep === "student_details"
                         ? "bg-blue-600 text-white"
                         : "bg-blue-100 text-gray-600"
-                        }`}
-                    >
-                      {attendanceStep === "completed" ? "✓" : "2"}
-                    </span>
-                    {activeFlow === "voice_attendance"
-                      ? "Student Details (Voice)"
-                      : "Student Details"}
-                  </div>
-                  <div className="w-0.5 h-5 bg-blue-200"></div>
-                  <div
-                    className={`flex items-center gap-2 ${attendanceStep === "completed"
+                    }`}
+                  >
+                    {attendanceStep === "completed" ? "✓" : "2"}
+                  </span>
+                  {activeFlow === "voice_attendance"
+                    ? "Student Details (Voice)"
+                    : "Student Details"}
+                </div>
+                <div className="w-0.5 h-5 bg-blue-200"></div>
+                <div
+                  className={`flex items-center gap-2 ${
+                    attendanceStep === "completed"
                       ? "text-green-600 font-semibold"
                       : "text-gray-600 font-normal"
-                      }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${attendanceStep === "completed"
+                  }`}
+                >
+                  <span
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
+                      attendanceStep === "completed"
                         ? "bg-green-600 text-white"
                         : "bg-blue-100 text-gray-600"
-                        }`}
-                    >
-                      {attendanceStep === "completed" ? "✓" : "3"}
-                    </span>
-                    Complete
-                  </div>
+                    }`}
+                  >
+                    {attendanceStep === "completed" ? "✓" : "3"}
+                  </span>
+                  Complete
                 </div>
-              )}
+              </div>
+            )}
             {/* Removed separate editable component - editing is now inline in the table */}
             <div className="chatbot-messages">
               {chatHistory.map((msg, idx) => (
@@ -3795,273 +4491,419 @@ const AudioStreamerChatBot = ({
                           </div>
                         )}
                         {/* Show class sections for course progress flow - render regardless of text/answer */}
-                        {(msg as any).classSections && Array.isArray((msg as any).classSections) && (msg as any).classSections.length > 0 && (
-                          <>
-                            {loadingClassSections ? (
-                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                                  <span className="text-blue-900 font-medium">Loading class sections...</span>
+                        {(msg as any).classSections &&
+                          Array.isArray((msg as any).classSections) &&
+                          (msg as any).classSections.length > 0 && (
+                            <>
+                              {loadingClassSections ? (
+                                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                    <span className="text-blue-900 font-medium">
+                                      Loading class sections...
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
-                            ) : (
-                              <div className="mt-4 space-y-3">
-                                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                  <p className="text-sm text-blue-900 font-medium">
-                                    📚 Select a class and section to view course progress:
-                                  </p>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  {(msg as any).classSections.map((classSection: any, csIdx: number) => {
-                                    const className = classSection.class?.name || "Unknown Class";
-                                    const sectionName = classSection.section?.name || "Unknown Section";
-                                    // Use _id for get-progress API as it expects ObjectId
-                                    const classId = classSection.class?._id || classSection.class?.uuid;
-                                    const sectionId = classSection.section?._id || classSection.section?.uuid;
-                                    const isSelected = selectedClassSection?.classId === classId && selectedClassSection?.sectionId === sectionId;
-                                    
-                                    return (
-                                      <div
-                                        key={classSection.class?._id + classSection.section?._id || csIdx}
-                                        className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                                          isSelected 
-                                            ? "border-blue-500 bg-blue-50 shadow-md" 
-                                            : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
-                                        }`}
-                                        onClick={async () => {
-                                          if (!classId || !sectionId) {
-                                            setChatHistory((prev) => [
-                                              ...prev,
-                                              {
-                                                type: "bot",
-                                                text: "❌ Error: Missing class or section ID. Please try again.",
-                                              },
-                                            ]);
-                                            return;
-                                          }
-                                          
-                                          const newSelection = {
-                                            classId: classId,
-                                            sectionId: sectionId,
-                                            className: className,
-                                            sectionName: sectionName,
-                                          };
-                                          setSelectedClassSection(newSelection);
-                                          
-                                          // Fetch course progress
-                                          setIsProcessing(true);
-                                          try {
-                                            const authToken = localStorage.getItem('token');
-                                            console.log("Fetching course progress for:", { classId, sectionId, className, sectionName });
-                                            const progressResponse = await courseProgressAPI.getProgress({
-                                              classId: classId,
-                                              sectionId: sectionId,
-                                              bearer_token: authToken || undefined,
-                                              academic_session: "2025-26",
-                                              branch_token: "demo",
-                                            });
+                              ) : (
+                                <div className="mt-4 space-y-3">
+                                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <p className="text-sm text-blue-900 font-medium">
+                                      📚 Select a class and section to view
+                                      course progress:
+                                    </p>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {(msg as any).classSections.map(
+                                      (classSection: any, csIdx: number) => {
+                                        const className =
+                                          classSection.class?.name ||
+                                          "Unknown Class";
+                                        const sectionName =
+                                          classSection.section?.name ||
+                                          "Unknown Section";
+                                        // Use _id for get-progress API as it expects ObjectId
+                                        const classId =
+                                          classSection.class?._id ||
+                                          classSection.class?.uuid;
+                                        const sectionId =
+                                          classSection.section?._id ||
+                                          classSection.section?.uuid;
+                                        const isSelected =
+                                          selectedClassSection?.classId ===
+                                            classId &&
+                                          selectedClassSection?.sectionId ===
+                                            sectionId;
 
-                                            console.log("Course progress API response:", progressResponse);
-
-                                            if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
-                                              // The API returns data.resp according to the controller
-                                              const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
-                                              setCourseProgressData(progressData);
-                                              
-                                              // Format a nice summary message
-                                              const teacherDiarys = progressData.teacherDiarys || progressData || [];
-                                              const totalSubjects = Array.isArray(teacherDiarys) ? teacherDiarys.length : 0;
-                                              const summaryText = totalSubjects > 0 
-                                                ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                                                : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
-                                              
-                                              setChatHistory((prev) => [
-                                                ...prev,
-                                                {
-                                                  type: "bot",
-                                                  text: summaryText,
-                                                  courseProgress: progressData,
-                                                  classSection: {
-                                                    classId: classId,
-                                                    sectionId: sectionId,
-                                                    className: className,
-                                                    sectionName: sectionName,
-                                                  },
-                                                },
-                                              ]);
-                                            } else {
-                                              console.warn("Unexpected progress response:", progressResponse);
-                                              setChatHistory((prev) => [
-                                                ...prev,
-                                                {
-                                                  type: "bot",
-                                                  text: progressResponse.message || "Failed to fetch course progress. Please try again.",
-                                                },
-                                              ]);
+                                        return (
+                                          <div
+                                            key={
+                                              classSection.class?._id +
+                                                classSection.section?._id ||
+                                              csIdx
                                             }
-                                          } catch (err: any) {
-                                            console.error("Error fetching course progress:", err);
-                                            setChatHistory((prev) => [
-                                              ...prev,
-                                              {
-                                                type: "bot",
-                                                text: `❌ Error fetching course progress: ${err.message || "Unknown error"}`,
-                                              },
-                                            ]);
-                                          } finally {
-                                            setIsProcessing(false);
-                                          }
-                                        }}
-                                      >
-                                        <div className="flex items-center justify-between">
-                                          <div>
-                                            <h4 className="text-base font-semibold text-gray-900">
-                                              {className}
-                                            </h4>
-                                            <p className="text-sm text-gray-600 mt-1">
-                                              Section: {sectionName}
-                                            </p>
+                                            className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                                              isSelected
+                                                ? "border-blue-500 bg-blue-50 shadow-md"
+                                                : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
+                                            }`}
+                                            onClick={async () => {
+                                              if (!classId || !sectionId) {
+                                                setChatHistory((prev) => [
+                                                  ...prev,
+                                                  {
+                                                    type: "bot",
+                                                    text: "❌ Error: Missing class or section ID. Please try again.",
+                                                  },
+                                                ]);
+                                                return;
+                                              }
+
+                                              const newSelection = {
+                                                classId: classId,
+                                                sectionId: sectionId,
+                                                className: className,
+                                                sectionName: sectionName,
+                                              };
+                                              setSelectedClassSection(
+                                                newSelection
+                                              );
+
+                                              // Fetch course progress
+                                              setIsProcessing(true);
+                                              try {
+                                                const authToken =
+                                                  localStorage.getItem("token");
+                                                console.log(
+                                                  "Fetching course progress for:",
+                                                  {
+                                                    classId,
+                                                    sectionId,
+                                                    className,
+                                                    sectionName,
+                                                  }
+                                                );
+                                                const progressResponse =
+                                                  await courseProgressAPI.getProgress(
+                                                    {
+                                                      classId: classId,
+                                                      sectionId: sectionId,
+                                                      bearer_token:
+                                                        authToken || undefined,
+                                                      academic_session:
+                                                        "2025-26",
+                                                      branch_token: "demo",
+                                                    }
+                                                  );
+
+                                                console.log(
+                                                  "Course progress API response:",
+                                                  progressResponse
+                                                );
+
+                                                if (
+                                                  ((progressResponse.status as any) ===
+                                                    200 ||
+                                                    progressResponse.status ===
+                                                      "success") &&
+                                                  progressResponse.data
+                                                ) {
+                                                  // The API returns data.resp according to the controller
+                                                  const progressData =
+                                                    (
+                                                      progressResponse.data as any
+                                                    ).resp ||
+                                                    progressResponse.data
+                                                      .progress ||
+                                                    progressResponse.data;
+                                                  setCourseProgressData(
+                                                    progressData
+                                                  );
+
+                                                  // Format a nice summary message
+                                                  const teacherDiarys =
+                                                    progressData.teacherDiarys ||
+                                                    progressData ||
+                                                    [];
+                                                  const totalSubjects =
+                                                    Array.isArray(teacherDiarys)
+                                                      ? teacherDiarys.length
+                                                      : 0;
+                                                  const summaryText =
+                                                    totalSubjects > 0
+                                                      ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
+                                                      : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
+
+                                                  setChatHistory((prev) => [
+                                                    ...prev,
+                                                    {
+                                                      type: "bot",
+                                                      text: summaryText,
+                                                      courseProgress:
+                                                        progressData,
+                                                      classSection: {
+                                                        classId: classId,
+                                                        sectionId: sectionId,
+                                                        className: className,
+                                                        sectionName:
+                                                          sectionName,
+                                                      },
+                                                    },
+                                                  ]);
+                                                } else {
+                                                  console.warn(
+                                                    "Unexpected progress response:",
+                                                    progressResponse
+                                                  );
+                                                  setChatHistory((prev) => [
+                                                    ...prev,
+                                                    {
+                                                      type: "bot",
+                                                      text:
+                                                        progressResponse.message ||
+                                                        "Failed to fetch course progress. Please try again.",
+                                                    },
+                                                  ]);
+                                                }
+                                              } catch (err: any) {
+                                                console.error(
+                                                  "Error fetching course progress:",
+                                                  err
+                                                );
+                                                setChatHistory((prev) => [
+                                                  ...prev,
+                                                  {
+                                                    type: "bot",
+                                                    text: `❌ Error fetching course progress: ${
+                                                      err.message ||
+                                                      "Unknown error"
+                                                    }`,
+                                                  },
+                                                ]);
+                                              } finally {
+                                                setIsProcessing(false);
+                                              }
+                                            }}
+                                          >
+                                            <div className="flex items-center justify-between">
+                                              <div>
+                                                <h4 className="text-base font-semibold text-gray-900">
+                                                  {className}
+                                                </h4>
+                                                <p className="text-sm text-gray-600 mt-1">
+                                                  Section: {sectionName}
+                                                </p>
+                                              </div>
+                                              {isSelected && (
+                                                <div className="text-blue-600 text-xl">
+                                                  ✓
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
-                                          {isSelected && (
-                                            <div className="text-blue-600 text-xl">✓</div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                        );
+                                      }
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-                        
+                              )}
+                            </>
+                          )}
+
                         {/* Show course progress data - render regardless of text/answer */}
                         {msg.courseProgress && (msg as any).classSection && (
                           <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg shadow-md">
                             <div className="mb-4 pb-3 border-b border-gray-200">
                               <h4 className="text-lg font-semibold text-gray-900">
-                                📊 Course Progress: {(msg as any).classSection.className} {(msg as any).classSection.sectionName}
+                                📊 Course Progress:{" "}
+                                {(msg as any).classSection.className}{" "}
+                                {(msg as any).classSection.sectionName}
                               </h4>
                               {(msg.courseProgress as any).meta && (
                                 <p className="text-sm text-gray-600 mt-1">
-                                  Total Subjects: {(msg.courseProgress as any).meta.totalSubjects || 0}
+                                  Total Subjects:{" "}
+                                  {(msg.courseProgress as any).meta
+                                    .totalSubjects || 0}
                                 </p>
                               )}
                             </div>
                             <div className="space-y-4 max-h-[600px] overflow-y-auto">
                               {(() => {
                                 const progressData = msg.courseProgress as any;
-                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
-                                
-                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) {
+                                const teacherDiarys =
+                                  progressData.teacherDiarys ||
+                                  progressData ||
+                                  [];
+
+                                if (
+                                  !Array.isArray(teacherDiarys) ||
+                                  teacherDiarys.length === 0
+                                ) {
                                   return (
                                     <div className="text-center py-8 text-gray-500">
                                       No course progress data available.
                                     </div>
                                   );
                                 }
-                                
-                                return teacherDiarys.map((subject: any, subjectIdx: number) => {
-                                  const subjectName = subject.name || "Unknown Subject";
-                                  const avgProgress = subject.avrage_progress || subject.average_progress || 0;
-                                  const chapters = subject.chapters || [];
-                                  
-                                  // Determine progress color
-                                  const getProgressColor = (progress: number) => {
-                                    if (progress >= 75) return "bg-green-500";
-                                    if (progress >= 50) return "bg-yellow-500";
-                                    if (progress >= 25) return "bg-orange-500";
-                                    return "bg-red-500";
-                                  };
-                                  
-                                  const getProgressBgColor = (progress: number) => {
-                                    if (progress >= 75) return "bg-green-100";
-                                    if (progress >= 50) return "bg-yellow-100";
-                                    if (progress >= 25) return "bg-orange-100";
-                                    return "bg-red-100";
-                                  };
-                                  
-                                  return (
-                                    <div
-                                      key={subject.id || subjectIdx}
-                                      className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm"
-                                    >
-                                      {/* Subject Header */}
-                                      <div className="mb-4">
-                                        <div className="flex items-center justify-between mb-2">
-                                          <h5 className="text-base font-semibold text-gray-900">
-                                            📚 {subjectName}
-                                          </h5>
-                                          <span className={`text-sm font-bold px-2 py-1 rounded ${
-                                            avgProgress >= 75 ? "text-green-700 bg-green-100" :
-                                            avgProgress >= 50 ? "text-yellow-700 bg-yellow-100" :
-                                            avgProgress >= 25 ? "text-orange-700 bg-orange-100" :
-                                            "text-red-700 bg-red-100"
-                                          }`}>
-                                            {avgProgress}%
-                                          </span>
-                                        </div>
-                                        {/* Subject Progress Bar */}
-                                        <div className={`w-full h-3 rounded-full overflow-hidden ${getProgressBgColor(avgProgress)}`}>
+
+                                return teacherDiarys.map(
+                                  (subject: any, subjectIdx: number) => {
+                                    const subjectName =
+                                      subject.name || "Unknown Subject";
+                                    const avgProgress =
+                                      subject.avrage_progress ||
+                                      subject.average_progress ||
+                                      0;
+                                    const chapters = subject.chapters || [];
+
+                                    // Determine progress color
+                                    const getProgressColor = (
+                                      progress: number
+                                    ) => {
+                                      if (progress >= 75) return "bg-green-500";
+                                      if (progress >= 50)
+                                        return "bg-yellow-500";
+                                      if (progress >= 25)
+                                        return "bg-orange-500";
+                                      return "bg-red-500";
+                                    };
+
+                                    const getProgressBgColor = (
+                                      progress: number
+                                    ) => {
+                                      if (progress >= 75) return "bg-green-100";
+                                      if (progress >= 50)
+                                        return "bg-yellow-100";
+                                      if (progress >= 25)
+                                        return "bg-orange-100";
+                                      return "bg-red-100";
+                                    };
+
+                                    return (
+                                      <div
+                                        key={subject.id || subjectIdx}
+                                        className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm"
+                                      >
+                                        {/* Subject Header */}
+                                        <div className="mb-4">
+                                          <div className="flex items-center justify-between mb-2">
+                                            <h5 className="text-base font-semibold text-gray-900">
+                                              📚 {subjectName}
+                                            </h5>
+                                            <span
+                                              className={`text-sm font-bold px-2 py-1 rounded ${
+                                                avgProgress >= 75
+                                                  ? "text-green-700 bg-green-100"
+                                                  : avgProgress >= 50
+                                                  ? "text-yellow-700 bg-yellow-100"
+                                                  : avgProgress >= 25
+                                                  ? "text-orange-700 bg-orange-100"
+                                                  : "text-red-700 bg-red-100"
+                                              }`}
+                                            >
+                                              {avgProgress}%
+                                            </span>
+                                          </div>
+                                          {/* Subject Progress Bar */}
                                           <div
-                                            className={`h-full ${getProgressColor(avgProgress)} transition-all duration-500 ease-out`}
-                                            style={{ width: `${Math.min(avgProgress, 100)}%` }}
-                                          />
+                                            className={`w-full h-3 rounded-full overflow-hidden ${getProgressBgColor(
+                                              avgProgress
+                                            )}`}
+                                          >
+                                            <div
+                                              className={`h-full ${getProgressColor(
+                                                avgProgress
+                                              )} transition-all duration-500 ease-out`}
+                                              style={{
+                                                width: `${Math.min(
+                                                  avgProgress,
+                                                  100
+                                                )}%`,
+                                              }}
+                                            />
+                                          </div>
                                         </div>
-                                      </div>
-                                      
-                                      {/* Chapters List */}
-                                      {chapters.length > 0 ? (
-                                        <div className="space-y-2">
-                                          <h6 className="text-sm font-medium text-gray-700 mb-2">
-                                            Chapters ({chapters.length}):
-                                          </h6>
-                                          {chapters.map((chapter: any, chapterIdx: number) => {
-                                            const chapterName = chapter.name || "Unknown Chapter";
-                                            const chapterProgress = chapter.coverage_status || 0;
-                                            
-                                            return (
-                                              <div
-                                                key={chapter.id || chapterIdx}
-                                                className="bg-white border border-gray-200 rounded-md p-3 hover:shadow-sm transition-shadow"
-                                              >
-                                                <div className="flex items-center justify-between mb-1">
-                                                  <span className="text-sm text-gray-800 font-medium">
-                                                    {chapterName}
-                                                  </span>
-                                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                                                    chapterProgress >= 75 ? "text-green-700 bg-green-100" :
-                                                    chapterProgress >= 50 ? "text-yellow-700 bg-yellow-100" :
-                                                    chapterProgress >= 25 ? "text-orange-700 bg-orange-100" :
-                                                    "text-red-700 bg-red-100"
-                                                  }`}>
-                                                    {chapterProgress}%
-                                                  </span>
-                                                </div>
-                                                {/* Chapter Progress Bar */}
-                                                <div className={`w-full h-2 rounded-full overflow-hidden ${getProgressBgColor(chapterProgress)}`}>
+
+                                        {/* Chapters List */}
+                                        {chapters.length > 0 ? (
+                                          <div className="space-y-2">
+                                            <h6 className="text-sm font-medium text-gray-700 mb-2">
+                                              Chapters ({chapters.length}):
+                                            </h6>
+                                            {chapters.map(
+                                              (
+                                                chapter: any,
+                                                chapterIdx: number
+                                              ) => {
+                                                const chapterName =
+                                                  chapter.name ||
+                                                  "Unknown Chapter";
+                                                const chapterProgress =
+                                                  chapter.coverage_status || 0;
+
+                                                return (
                                                   <div
-                                                    className={`h-full ${getProgressColor(chapterProgress)} transition-all duration-500 ease-out`}
-                                                    style={{ width: `${Math.min(chapterProgress, 100)}%` }}
-                                                  />
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      ) : (
-                                        <div className="text-sm text-gray-500 italic">
-                                          No chapters available
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                });
+                                                    key={
+                                                      chapter.id || chapterIdx
+                                                    }
+                                                    className="bg-white border border-gray-200 rounded-md p-3 hover:shadow-sm transition-shadow"
+                                                  >
+                                                    <div className="flex items-center justify-between mb-1">
+                                                      <span className="text-sm text-gray-800 font-medium">
+                                                        {chapterName}
+                                                      </span>
+                                                      <span
+                                                        className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                                          chapterProgress >= 75
+                                                            ? "text-green-700 bg-green-100"
+                                                            : chapterProgress >=
+                                                              50
+                                                            ? "text-yellow-700 bg-yellow-100"
+                                                            : chapterProgress >=
+                                                              25
+                                                            ? "text-orange-700 bg-orange-100"
+                                                            : "text-red-700 bg-red-100"
+                                                        }`}
+                                                      >
+                                                        {chapterProgress}%
+                                                      </span>
+                                                    </div>
+                                                    {/* Chapter Progress Bar */}
+                                                    <div
+                                                      className={`w-full h-2 rounded-full overflow-hidden ${getProgressBgColor(
+                                                        chapterProgress
+                                                      )}`}
+                                                    >
+                                                      <div
+                                                        className={`h-full ${getProgressColor(
+                                                          chapterProgress
+                                                        )} transition-all duration-500 ease-out`}
+                                                        style={{
+                                                          width: `${Math.min(
+                                                            chapterProgress,
+                                                            100
+                                                          )}%`,
+                                                        }}
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                );
+                                              }
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="text-sm text-gray-500 italic">
+                                            No chapters available
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  }
+                                );
                               })()}
                             </div>
                           </div>
                         )}
-                        
+
                         {msg.text ? (
                           <div>{msg.text}</div>
                         ) : (
@@ -4072,175 +4914,281 @@ const AudioStreamerChatBot = ({
                               return (
                                 <>
                                   {/* Show leave approval requests if in leave_approval flow */}
-                                  {activeFlow === "leave_approval" && idx === chatHistory.length - 1 && (
-                                    <>
-                                      {loadingLeaveRequests ? (
-                                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                          <div className="flex items-center gap-3">
-                                            <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                                            <span className="text-blue-900 font-medium">Loading pending leave requests...</span>
+                                  {activeFlow === "leave_approval" &&
+                                    idx === chatHistory.length - 1 && (
+                                      <>
+                                        {loadingLeaveRequests ? (
+                                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <div className="flex items-center gap-3">
+                                              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                              <span className="text-blue-900 font-medium">
+                                                Loading pending leave
+                                                requests...
+                                              </span>
+                                            </div>
                                           </div>
-                                        </div>
-                                      ) : leaveApprovalRequests.length > 0 ? (
-                                        <div className="mt-4 space-y-4">
-                                          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                            <p className="text-sm text-blue-900 font-medium">
-                                              📋 Found <strong>{leaveApprovalRequests.length}</strong> pending leave request(s). Please review and take action.
+                                        ) : leaveApprovalRequests.length > 0 ? (
+                                          <div className="mt-4 space-y-4">
+                                            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                              <p className="text-sm text-blue-900 font-medium">
+                                                📋 Found{" "}
+                                                <strong>
+                                                  {leaveApprovalRequests.length}
+                                                </strong>{" "}
+                                                pending leave request(s). Please
+                                                review and take action.
+                                              </p>
+                                            </div>
+                                            {leaveApprovalRequests.map(
+                                              (request, reqIdx) => {
+                                                const startDate = new Date(
+                                                  request.start_date
+                                                ).toLocaleDateString();
+                                                const endDate = new Date(
+                                                  request.end_date
+                                                ).toLocaleDateString();
+                                                const employeeName =
+                                                  request.employee?.personalInfo
+                                                    ?.employeeName || "Unknown";
+                                                const employeeId =
+                                                  request.employee?.personalInfo
+                                                    ?.employeeId || "";
+                                                const leaveType =
+                                                  request.leave_type?.name ||
+                                                  "Unknown";
+                                                const description =
+                                                  request.description ||
+                                                  "No description";
+                                                const photoPath =
+                                                  request.employee?.personalInfo
+                                                    ?.photoDocument?.path;
+
+                                                return (
+                                                  <div
+                                                    key={request.uuid || reqIdx}
+                                                    className="bg-white border border-gray-300 rounded-lg p-4 shadow-md"
+                                                  >
+                                                    <div className="flex items-start gap-4 mb-4">
+                                                      {photoPath && (
+                                                        <img
+                                                          src={photoPath}
+                                                          alt={employeeName}
+                                                          className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
+                                                        />
+                                                      )}
+                                                      <div className="flex-1">
+                                                        <h4 className="text-lg font-semibold text-gray-900 mb-1">
+                                                          {employeeName}
+                                                        </h4>
+                                                        <p className="text-sm text-gray-600 mb-2">
+                                                          ID: {employeeId}
+                                                        </p>
+                                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                                          <div>
+                                                            <span className="font-medium text-gray-700">
+                                                              Leave Type:
+                                                            </span>{" "}
+                                                            <span className="text-gray-900">
+                                                              {leaveType}
+                                                            </span>
+                                                          </div>
+                                                          <div>
+                                                            <span className="font-medium text-gray-700">
+                                                              Duration:
+                                                            </span>{" "}
+                                                            <span className="text-gray-900">
+                                                              {startDate ===
+                                                              endDate
+                                                                ? startDate
+                                                                : `${startDate} - ${endDate}`}
+                                                            </span>
+                                                          </div>
+                                                          <div className="col-span-2">
+                                                            <span className="font-medium text-gray-700">
+                                                              Reason:
+                                                            </span>{" "}
+                                                            <span className="text-gray-900">
+                                                              {description}
+                                                            </span>
+                                                          </div>
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex gap-3 pt-4 border-t border-gray-200">
+                                                      <button
+                                                        onClick={async () => {
+                                                          try {
+                                                            const authToken =
+                                                              localStorage.getItem(
+                                                                "token"
+                                                              );
+                                                            await leaveApprovalAPI.approve(
+                                                              {
+                                                                leave_request_uuid:
+                                                                  request.uuid,
+                                                                bearer_token:
+                                                                  authToken ||
+                                                                  undefined,
+                                                                academic_session:
+                                                                  "2025-26",
+                                                                branch_token:
+                                                                  "demo",
+                                                              }
+                                                            );
+                                                            setLeaveApprovalRequests(
+                                                              (prev) =>
+                                                                prev.filter(
+                                                                  (r) =>
+                                                                    r.uuid !==
+                                                                    request.uuid
+                                                                )
+                                                            );
+                                                            setChatHistory(
+                                                              (prev) => [
+                                                                ...prev,
+                                                                {
+                                                                  type: "bot",
+                                                                  text: `✅ Leave request for ${employeeName} has been approved successfully!`,
+                                                                },
+                                                              ]
+                                                            );
+                                                          } catch (err: any) {
+                                                            setChatHistory(
+                                                              (prev) => [
+                                                                ...prev,
+                                                                {
+                                                                  type: "bot",
+                                                                  text: `❌ Error approving leave request: ${
+                                                                    err.message ||
+                                                                    "Unknown error"
+                                                                  }`,
+                                                                },
+                                                              ]
+                                                            );
+                                                          }
+                                                        }}
+                                                        className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md font-medium hover:bg-green-600 transition-colors cursor-pointer"
+                                                      >
+                                                        ✓ Approve
+                                                      </button>
+                                                      <div className="flex-1 flex gap-2">
+                                                        <input
+                                                          type="text"
+                                                          placeholder="Rejection reason (optional)"
+                                                          value={
+                                                            rejectReason[
+                                                              request.uuid
+                                                            ] || ""
+                                                          }
+                                                          onChange={(e) =>
+                                                            setRejectReason(
+                                                              (prev) => ({
+                                                                ...prev,
+                                                                [request.uuid]:
+                                                                  e.target
+                                                                    .value,
+                                                              })
+                                                            )
+                                                          }
+                                                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                                                        />
+                                                        <button
+                                                          onClick={async () => {
+                                                            try {
+                                                              const authToken =
+                                                                localStorage.getItem(
+                                                                  "token"
+                                                                );
+                                                              const reason =
+                                                                rejectReason[
+                                                                  request.uuid
+                                                                ] ||
+                                                                "No reason provided";
+                                                              await leaveApprovalAPI.reject(
+                                                                {
+                                                                  leave_request_uuid:
+                                                                    request.uuid,
+                                                                  reject_reason:
+                                                                    reason,
+                                                                  bearer_token:
+                                                                    authToken ||
+                                                                    undefined,
+                                                                  academic_session:
+                                                                    "2025-26",
+                                                                  branch_token:
+                                                                    "demo",
+                                                                }
+                                                              );
+                                                              setLeaveApprovalRequests(
+                                                                (prev) =>
+                                                                  prev.filter(
+                                                                    (r) =>
+                                                                      r.uuid !==
+                                                                      request.uuid
+                                                                  )
+                                                              );
+                                                              setRejectReason(
+                                                                (prev) => {
+                                                                  const newReasons =
+                                                                    { ...prev };
+                                                                  delete newReasons[
+                                                                    request.uuid
+                                                                  ];
+                                                                  return newReasons;
+                                                                }
+                                                              );
+                                                              setChatHistory(
+                                                                (prev) => [
+                                                                  ...prev,
+                                                                  {
+                                                                    type: "bot",
+                                                                    text: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                                  },
+                                                                ]
+                                                              );
+                                                            } catch (err: any) {
+                                                              setChatHistory(
+                                                                (prev) => [
+                                                                  ...prev,
+                                                                  {
+                                                                    type: "bot",
+                                                                    text: `❌ Error rejecting leave request: ${
+                                                                      err.message ||
+                                                                      "Unknown error"
+                                                                    }`,
+                                                                  },
+                                                                ]
+                                                              );
+                                                            }
+                                                          }}
+                                                          className="px-4 py-2 bg-red-500 text-white rounded-md font-medium hover:bg-red-600 transition-colors cursor-pointer"
+                                                        >
+                                                          ✗ Reject
+                                                        </button>
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                );
+                                              }
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="mt-4 p-6 bg-green-50 border-2 border-green-200 rounded-lg text-center">
+                                            <div className="text-4xl mb-3">
+                                              ✅
+                                            </div>
+                                            <p className="text-green-900 font-semibold text-lg">
+                                              No pending leave requests found!
+                                            </p>
+                                            <p className="text-green-700 text-sm mt-2">
+                                              All leave requests have been
+                                              processed or there are no pending
+                                              requests at this time.
                                             </p>
                                           </div>
-                                          {leaveApprovalRequests.map((request, reqIdx) => {
-                                        const startDate = new Date(request.start_date).toLocaleDateString();
-                                        const endDate = new Date(request.end_date).toLocaleDateString();
-                                        const employeeName = request.employee?.personalInfo?.employeeName || "Unknown";
-                                        const employeeId = request.employee?.personalInfo?.employeeId || "";
-                                        const leaveType = request.leave_type?.name || "Unknown";
-                                        const description = request.description || "No description";
-                                        const photoPath = request.employee?.personalInfo?.photoDocument?.path;
-                                        
-                                        return (
-                                          <div
-                                            key={request.uuid || reqIdx}
-                                            className="bg-white border border-gray-300 rounded-lg p-4 shadow-md"
-                                          >
-                                            <div className="flex items-start gap-4 mb-4">
-                                              {photoPath && (
-                                                <img
-                                                  src={photoPath}
-                                                  alt={employeeName}
-                                                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
-                                                />
-                                              )}
-                                              <div className="flex-1">
-                                                <h4 className="text-lg font-semibold text-gray-900 mb-1">
-                                                  {employeeName}
-                                                </h4>
-                                                <p className="text-sm text-gray-600 mb-2">ID: {employeeId}</p>
-                                                <div className="grid grid-cols-2 gap-2 text-sm">
-                                                  <div>
-                                                    <span className="font-medium text-gray-700">Leave Type:</span>{" "}
-                                                    <span className="text-gray-900">{leaveType}</span>
-                                                  </div>
-                                                  <div>
-                                                    <span className="font-medium text-gray-700">Duration:</span>{" "}
-                                                    <span className="text-gray-900">
-                                                      {startDate === endDate ? startDate : `${startDate} - ${endDate}`}
-                                                    </span>
-                                                  </div>
-                                                  <div className="col-span-2">
-                                                    <span className="font-medium text-gray-700">Reason:</span>{" "}
-                                                    <span className="text-gray-900">{description}</span>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            </div>
-                                            <div className="flex gap-3 pt-4 border-t border-gray-200">
-                                              <button
-                                                onClick={async () => {
-                                                  try {
-                                                    const authToken = localStorage.getItem('token');
-                                                    await leaveApprovalAPI.approve({
-                                                      leave_request_uuid: request.uuid,
-                                                      bearer_token: authToken || undefined,
-                                                      academic_session: "2025-26",
-                                                      branch_token: "demo",
-                                                    });
-                                                    setLeaveApprovalRequests((prev) =>
-                                                      prev.filter((r) => r.uuid !== request.uuid)
-                                                    );
-                                                    setChatHistory((prev) => [
-                                                      ...prev,
-                                                      {
-                                                        type: "bot",
-                                                        text: `✅ Leave request for ${employeeName} has been approved successfully!`,
-                                                      },
-                                                    ]);
-                                                  } catch (err: any) {
-                                                    setChatHistory((prev) => [
-                                                      ...prev,
-                                                      {
-                                                        type: "bot",
-                                                        text: `❌ Error approving leave request: ${err.message || "Unknown error"}`,
-                                                      },
-                                                    ]);
-                                                  }
-                                                }}
-                                                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md font-medium hover:bg-green-600 transition-colors cursor-pointer"
-                                              >
-                                                ✓ Approve
-                                              </button>
-                                              <div className="flex-1 flex gap-2">
-                                                <input
-                                                  type="text"
-                                                  placeholder="Rejection reason (optional)"
-                                                  value={rejectReason[request.uuid] || ""}
-                                                  onChange={(e) =>
-                                                    setRejectReason((prev) => ({
-                                                      ...prev,
-                                                      [request.uuid]: e.target.value,
-                                                    }))
-                                                  }
-                                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                                                />
-                                                <button
-                                                  onClick={async () => {
-                                                    try {
-                                                      const authToken = localStorage.getItem('token');
-                                                      const reason = rejectReason[request.uuid] || "No reason provided";
-                                                      await leaveApprovalAPI.reject({
-                                                        leave_request_uuid: request.uuid,
-                                                        reject_reason: reason,
-                                                        bearer_token: authToken || undefined,
-                                                        academic_session: "2025-26",
-                                                        branch_token: "demo",
-                                                      });
-                                                      setLeaveApprovalRequests((prev) =>
-                                                        prev.filter((r) => r.uuid !== request.uuid)
-                                                      );
-                                                      setRejectReason((prev) => {
-                                                        const newReasons = { ...prev };
-                                                        delete newReasons[request.uuid];
-                                                        return newReasons;
-                                                      });
-                                                      setChatHistory((prev) => [
-                                                        ...prev,
-                                                        {
-                                                          type: "bot",
-                                                          text: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
-                                                        },
-                                                      ]);
-                                                    } catch (err: any) {
-                                                      setChatHistory((prev) => [
-                                                        ...prev,
-                                                        {
-                                                          type: "bot",
-                                                          text: `❌ Error rejecting leave request: ${err.message || "Unknown error"}`,
-                                                        },
-                                                      ]);
-                                                    }
-                                                  }}
-                                                  className="px-4 py-2 bg-red-500 text-white rounded-md font-medium hover:bg-red-600 transition-colors cursor-pointer"
-                                                >
-                                                  ✗ Reject
-                                                </button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        );
-                                          })}
-                                        </div>
-                                      ) : (
-                                        <div className="mt-4 p-6 bg-green-50 border-2 border-green-200 rounded-lg text-center">
-                                          <div className="text-4xl mb-3">✅</div>
-                                          <p className="text-green-900 font-semibold text-lg">
-                                            No pending leave requests found!
-                                          </p>
-                                          <p className="text-green-700 text-sm mt-2">
-                                            All leave requests have been processed or there are no pending requests at this time.
-                                          </p>
-                                        </div>
-                                      )}
-                                    </>
-                                  )}
+                                        )}
+                                      </>
+                                    )}
                                   {/* Show table if this message has attendance data */}
                                   {(() => {
                                     console.log(
@@ -4263,7 +5211,8 @@ const AudioStreamerChatBot = ({
                                   })() ? (
                                     (() => {
                                       console.log(
-                                        `Rendering table for message ${idx}, editingMessageIndex: ${editingMessageIndex}, isEditing: ${editingMessageIndex === idx
+                                        `Rendering table for message ${idx}, editingMessageIndex: ${editingMessageIndex}, isEditing: ${
+                                          editingMessageIndex === idx
                                         }`
                                       );
                                       console.log(
@@ -4315,67 +5264,67 @@ const AudioStreamerChatBot = ({
                                           <div>
                                             <h3 className="text-gray-900 m-0 mb-1 text-lg font-semibold">
                                               {editingMessageIndex === idx ||
-                                                (msg as any).isBeingEdited
+                                              (msg as any).isBeingEdited
                                                 ? "✏️ Edit Attendance Summary"
                                                 : "📋 Attendance Summary"}
                                             </h3>
                                             {(editingMessageIndex === idx ||
                                               (msg as any).isBeingEdited) && (
-                                                <div className="bg-blue-100 text-blue-900 p-2 rounded-md text-sm mb-4 font-medium">
-                                                  ✏️ Edit mode active - You can
-                                                  modify student names and
-                                                  attendance status below
-                                                </div>
-                                              )}
+                                              <div className="bg-blue-100 text-blue-900 p-2 rounded-md text-sm mb-4 font-medium">
+                                                ✏️ Edit mode active - You can
+                                                modify student names and
+                                                attendance status below
+                                              </div>
+                                            )}
                                             {/* Edit Mode Buttons - Show Save/Cancel when in edit mode */}
                                             {(editingMessageIndex === idx ||
                                               (msg as any).isBeingEdited) && (
-                                                <div className="flex gap-2 mb-4 p-2 rounded-md bg-gray-50 border border-gray-200">
-                                                  <button
-                                                    onClick={() =>
-                                                      handleSaveAttendance(idx)
-                                                    }
-                                                    className="px-4 py-2 rounded-md border-none bg-green-500 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-green-600"
-                                                  >
-                                                    💾 Save
-                                                  </button>
-                                                  <button
-                                                    onClick={() => {
-                                                      // Cancel editing - exit edit mode without saving
-                                                      setEditingMessageIndex(
-                                                        null
-                                                      );
-                                                      setChatHistory((prev) => {
-                                                        const updatedHistory = [
-                                                          ...prev,
-                                                        ];
-                                                        if (
-                                                          updatedHistory[idx] &&
-                                                          updatedHistory[idx]
-                                                            .type === "bot"
-                                                        ) {
-                                                          (
-                                                            updatedHistory[
-                                                            idx
-                                                            ] as any
-                                                          ).isBeingEdited = false;
-                                                        }
-                                                        return updatedHistory;
-                                                      });
-                                                      setChatHistory((prev) => [
+                                              <div className="flex gap-2 mb-4 p-2 rounded-md bg-gray-50 border border-gray-200">
+                                                <button
+                                                  onClick={() =>
+                                                    handleSaveAttendance(idx)
+                                                  }
+                                                  className="px-4 py-2 rounded-md border-none bg-green-500 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-green-600"
+                                                >
+                                                  💾 Save
+                                                </button>
+                                                <button
+                                                  onClick={() => {
+                                                    // Cancel editing - exit edit mode without saving
+                                                    setEditingMessageIndex(
+                                                      null
+                                                    );
+                                                    setChatHistory((prev) => {
+                                                      const updatedHistory = [
                                                         ...prev,
-                                                        {
-                                                          type: "bot",
-                                                          text: "❌ Edit cancelled. No changes were saved.",
-                                                        },
-                                                      ]);
-                                                    }}
-                                                    className="px-4 py-2 rounded-md border-none bg-red-500 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-red-600"
-                                                  >
-                                                    ❌ Cancel
-                                                  </button>
-                                                </div>
-                                              )}
+                                                      ];
+                                                      if (
+                                                        updatedHistory[idx] &&
+                                                        updatedHistory[idx]
+                                                          .type === "bot"
+                                                      ) {
+                                                        (
+                                                          updatedHistory[
+                                                            idx
+                                                          ] as any
+                                                        ).isBeingEdited = false;
+                                                      }
+                                                      return updatedHistory;
+                                                    });
+                                                    setChatHistory((prev) => [
+                                                      ...prev,
+                                                      {
+                                                        type: "bot",
+                                                        text: "❌ Edit cancelled. No changes were saved.",
+                                                      },
+                                                    ]);
+                                                  }}
+                                                  className="px-4 py-2 rounded-md border-none bg-red-500 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-red-600"
+                                                >
+                                                  ❌ Cancel
+                                                </button>
+                                              </div>
+                                            )}
                                             {classInfo && (
                                               <p className="text-gray-500 m-0 text-sm">
                                                 Class {classInfo.class_}{" "}
@@ -4452,7 +5401,7 @@ const AudioStreamerChatBot = ({
                                                 const dataToUse = isEditing
                                                   ? attendanceData
                                                   : msg.attendance_summary ||
-                                                  [];
+                                                    [];
                                                 console.log(
                                                   `Table data for message ${idx}:`,
                                                   {
@@ -4490,28 +5439,32 @@ const AudioStreamerChatBot = ({
                                                   (item, index) => (
                                                     <tr
                                                       key={index}
-                                                      className={`border-b border-gray-200 ${index % 2 === 0
-                                                        ? "bg-white"
-                                                        : "bg-gray-50"
-                                                        }`}
+                                                      className={`border-b border-gray-200 ${
+                                                        index % 2 === 0
+                                                          ? "bg-white"
+                                                          : "bg-gray-50"
+                                                      }`}
                                                     >
                                                       <td className="px-3 py-3 border-r border-gray-200 text-gray-900">
                                                         {(() => {
                                                           const isEditing =
                                                             editingMessageIndex ===
-                                                            idx ||
+                                                              idx ||
                                                             (msg as any)
                                                               .isBeingEdited;
                                                           console.log(
-                                                            `Student name field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, idx=${idx}, isBeingEdited=${(msg as any)
-                                                              .isBeingEdited
+                                                            `Student name field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, idx=${idx}, isBeingEdited=${
+                                                              (msg as any)
+                                                                .isBeingEdited
                                                             }`
                                                           );
                                                           console.log(
-                                                            `Student name field - isEditing check: ${editingMessageIndex} === ${idx} = ${editingMessageIndex ===
-                                                            idx
-                                                            } OR isBeingEdited=${(msg as any)
-                                                              .isBeingEdited
+                                                            `Student name field - isEditing check: ${editingMessageIndex} === ${idx} = ${
+                                                              editingMessageIndex ===
+                                                              idx
+                                                            } OR isBeingEdited=${
+                                                              (msg as any)
+                                                                .isBeingEdited
                                                             }`
                                                           );
                                                           return isEditing ? (
@@ -4542,12 +5495,13 @@ const AudioStreamerChatBot = ({
                                                         {(() => {
                                                           const isEditing =
                                                             editingMessageIndex ===
-                                                            idx ||
+                                                              idx ||
                                                             (msg as any)
                                                               .isBeingEdited;
                                                           console.log(
-                                                            `Attendance status field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, isBeingEdited=${(msg as any)
-                                                              .isBeingEdited
+                                                            `Attendance status field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, isBeingEdited=${
+                                                              (msg as any)
+                                                                .isBeingEdited
                                                             }`
                                                           );
                                                           return isEditing ? (
@@ -4573,14 +5527,15 @@ const AudioStreamerChatBot = ({
                                                             </select>
                                                           ) : (
                                                             <span
-                                                              className={`text-sm ${item.attendance_status ===
+                                                              className={`text-sm ${
+                                                                item.attendance_status ===
                                                                 "Present"
-                                                                ? "text-green-500"
-                                                                : item.attendance_status ===
-                                                                  "Absent"
+                                                                  ? "text-green-500"
+                                                                  : item.attendance_status ===
+                                                                    "Absent"
                                                                   ? "text-red-500"
                                                                   : "text-gray-500"
-                                                                }`}
+                                                              }`}
                                                             >
                                                               {
                                                                 item.attendance_status
@@ -4594,18 +5549,18 @@ const AudioStreamerChatBot = ({
                                                           idx ||
                                                           (msg as any)
                                                             .isBeingEdited) && (
-                                                            <button
-                                                              onClick={() =>
-                                                                handleRemoveStudent(
-                                                                  index
-                                                                )
-                                                              }
-                                                              className="px-1 py-1 border-none bg-red-500 text-white rounded cursor-pointer flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
-                                                              title="Remove Student"
-                                                            >
-                                                              🗑️
-                                                            </button>
-                                                          )}
+                                                          <button
+                                                            onClick={() =>
+                                                              handleRemoveStudent(
+                                                                index
+                                                              )
+                                                            }
+                                                            className="px-1 py-1 border-none bg-red-500 text-white rounded cursor-pointer flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                                            title="Remove Student"
+                                                          >
+                                                            🗑️
+                                                          </button>
+                                                        )}
                                                       </td>
                                                     </tr>
                                                   )
@@ -4618,36 +5573,36 @@ const AudioStreamerChatBot = ({
                                         {/* Add New Student - only show in edit mode */}
                                         {(editingMessageIndex === idx ||
                                           (msg as any).isBeingEdited) && (
-                                            <div
+                                          <div
+                                            style={{
+                                              marginTop: "1rem",
+                                              padding: "1rem",
+                                              background: "#f8fafc",
+                                              borderRadius: "6px",
+                                              border: "1px solid #e5e7eb",
+                                            }}
+                                          >
+                                            <button
+                                              onClick={handleAddStudent}
                                               style={{
-                                                marginTop: "1rem",
-                                                padding: "1rem",
-                                                background: "#f8fafc",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "0.5rem",
+                                                padding: "0.5rem 1rem",
                                                 borderRadius: "6px",
-                                                border: "1px solid #e5e7eb",
+                                                border: "none",
+                                                background: "#2563eb",
+                                                color: "white",
+                                                cursor: "pointer",
+                                                fontSize: "0.875rem",
+                                                fontWeight: "500",
+                                                transition: "background 0.2s",
                                               }}
                                             >
-                                              <button
-                                                onClick={handleAddStudent}
-                                                style={{
-                                                  display: "flex",
-                                                  alignItems: "center",
-                                                  gap: "0.5rem",
-                                                  padding: "0.5rem 1rem",
-                                                  borderRadius: "6px",
-                                                  border: "none",
-                                                  background: "#2563eb",
-                                                  color: "white",
-                                                  cursor: "pointer",
-                                                  fontSize: "0.875rem",
-                                                  fontWeight: "500",
-                                                  transition: "background 0.2s",
-                                                }}
-                                              >
-                                                ➕ Add New Student
-                                              </button>
-                                            </div>
-                                          )}
+                                              ➕ Add New Student
+                                            </button>
+                                          </div>
+                                        )}
                                       </div>
                                     )
                                   ) : (
@@ -4690,14 +5645,18 @@ const AudioStreamerChatBot = ({
                                         </span>
                                       )}
                                     </button>
-                                    <div style={{ position: 'relative' }}>
+                                    <div style={{ position: "relative" }}>
                                       <button
                                         className={getThumbsDownClass(msg)}
                                         title="Rejected"
                                         disabled={msg.feedback === "Approved"}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          setShowCorrectionBox(showCorrectionBox === idx ? null : idx);
+                                          setShowCorrectionBox(
+                                            showCorrectionBox === idx
+                                              ? null
+                                              : idx
+                                          );
                                         }}
                                       >
                                         <FiThumbsDown />
@@ -4709,7 +5668,10 @@ const AudioStreamerChatBot = ({
                                       </button>
                                       {showCorrectionBox === idx &&
                                         msg.feedback !== "Approved" && (
-                                          <div className="correction-box" ref={correctionBoxRef}>
+                                          <div
+                                            className="correction-box"
+                                            ref={correctionBoxRef}
+                                          >
                                             <div className="correction-title">
                                               Rejection Reason:
                                             </div>
@@ -4763,20 +5725,20 @@ const AudioStreamerChatBot = ({
                                       (msg as any).buttons.length > 0
                                     );
                                   })() && (
-                                      <div className="bot-buttons">
-                                        {(msg as any).buttons.map(
-                                          (btn: any, i: number) => (
-                                            <button
-                                              key={i}
-                                              className="bot-text-btn"
-                                              onClick={btn.action}
-                                            >
-                                              {btn.label}
-                                            </button>
-                                          )
-                                        )}
-                                      </div>
-                                    )}
+                                    <div className="bot-buttons">
+                                      {(msg as any).buttons.map(
+                                        (btn: any, i: number) => (
+                                          <button
+                                            key={i}
+                                            className="bot-text-btn"
+                                            onClick={btn.action}
+                                          >
+                                            {btn.label}
+                                          </button>
+                                        )
+                                      )}
+                                    </div>
+                                  )}
                                 </>
                               );
                             })()}
@@ -4799,15 +5761,15 @@ const AudioStreamerChatBot = ({
                         animate={{
                           scale: [1, 1.2, 1],
                           opacity: [0.7, 1, 0.7],
-                          y: [0, -5, 0]
+                          y: [0, -5, 0],
                         }}
                         transition={{
                           duration: 1.5,
                           repeat: Infinity,
-                          ease: "easeInOut"
+                          ease: "easeInOut",
                         }}
                       >
-                        <SlBubbles  />
+                        <SlBubbles />
                       </motion.div>
                       {/* <div className="animate-bounce">
                         <SlBubbles  />
@@ -4834,27 +5796,33 @@ const AudioStreamerChatBot = ({
             <div className="relative">
               <input
                 type="file"
-                accept={activeFlow === "assignment" ? ".pdf,.doc,.docx,image/*" : ".xlsx,.xls,.csv,image/*"}
+                accept={
+                  activeFlow === "assignment"
+                    ? ".pdf,.doc,.docx,image/*"
+                    : ".xlsx,.xls,.csv,image/*"
+                }
                 id="file-upload-input"
                 className="hidden"
-                disabled={activeFlow !== "attendance" && activeFlow !== "assignment"}
+                disabled={
+                  activeFlow !== "attendance" && activeFlow !== "assignment"
+                }
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  
+
                   if (activeFlow === "attendance") {
                     // Show upload message
                     setChatHistory((prev) => [
                       ...prev,
                       {
                         type: "user",
-                        text: `Uploaded ${file.type.startsWith("image/") ? "image" : "file"
-                          }: ${file.name}`,
+                        text: `Uploaded ${
+                          file.type.startsWith("image/") ? "image" : "file"
+                        }: ${file.name}`,
                       },
                     ]);
-                    
-                    try {
 
+                    try {
                       if (file.type.startsWith("image/")) {
                         // For images, follow the same step-by-step flow as text-based attendance
                         if (attendanceStep === "class_info") {
@@ -4950,7 +5918,7 @@ const AudioStreamerChatBot = ({
                                         const updatedHistory = [...prev];
                                         const lastMessage =
                                           updatedHistory[
-                                          updatedHistory.length - 1
+                                            updatedHistory.length - 1
                                           ];
                                         if (
                                           lastMessage &&
@@ -5010,8 +5978,9 @@ const AudioStreamerChatBot = ({
                                   ...filteredHistory,
                                   {
                                     type: "bot",
-                                    text: `❌ Image processing failed: ${(error as Error).message
-                                      }. Please try uploading a different image or provide attendance data as text.`,
+                                    text: `❌ Image processing failed: ${
+                                      (error as Error).message
+                                    }. Please try uploading a different image or provide attendance data as text.`,
                                   },
                                 ];
                               });
@@ -5056,24 +6025,34 @@ const AudioStreamerChatBot = ({
                           ...prev,
                           {
                             type: "bot",
-                            text: `✅ File uploaded successfully: ${result.data?.filename || file.name}\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
+                            text: `✅ File uploaded successfully: ${
+                              result.data?.filename || file.name
+                            }\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
                           },
                         ]);
                         // Send the file UUID to the assignment chat to add it to attachments
                         const fileUuid = result.data?.file_uuid;
                         console.log("File upload result:", result);
                         console.log("Extracted fileUuid:", fileUuid);
-                        
+
                         if (fileUuid) {
                           const fileMessage = `Add file ${fileUuid} to attachments`;
-                          console.log("Sending file message to assignment chat:", fileMessage);
-                          
+                          console.log(
+                            "Sending file message to assignment chat:",
+                            fileMessage
+                          );
+
                           // Trigger assignment chat with file info
                           setTimeout(async () => {
                             try {
-                              const authToken = localStorage.getItem('token');
-                              console.log("Calling assignmentChat with message:", fileMessage, "session:", sessionId || userId);
-                              
+                              const authToken = localStorage.getItem("token");
+                              console.log(
+                                "Calling assignmentChat with message:",
+                                fileMessage,
+                                "session:",
+                                sessionId || userId
+                              );
+
                               const data = await aiAPI.assignmentChat({
                                 session_id: sessionId || userId,
                                 user_id: userId,
@@ -5082,11 +6061,13 @@ const AudioStreamerChatBot = ({
                                 academic_session: "2025-26",
                                 branch_token: "demo",
                               });
-                              
+
                               console.log("Assignment chat response:", data);
-                              
+
                               if (data.status === "success" && data.data) {
-                                const answer = data.data.answer || "File added to assignment.";
+                                const answer =
+                                  data.data.answer ||
+                                  "File added to assignment.";
                                 setChatHistory((prev) => [
                                   ...prev,
                                   {
@@ -5097,7 +6078,10 @@ const AudioStreamerChatBot = ({
                                 ]);
                               }
                             } catch (err) {
-                              console.error("Error adding file to assignment:", err);
+                              console.error(
+                                "Error adding file to assignment:",
+                                err
+                              );
                             }
                           }, 500);
                         } else {
@@ -5124,16 +6108,38 @@ const AudioStreamerChatBot = ({
                 }}
               />
               <motion.label
-                htmlFor={activeFlow === "attendance" || activeFlow === "assignment" ? "file-upload-input" : undefined}
-                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${activeFlow === "attendance" || activeFlow === "assignment"
-                  ? "cursor-pointer"
-                  : "cursor-not-allowed"
-                  }`}
-                whileHover={activeFlow === "attendance" || activeFlow === "assignment" ? { scale: 1.08, y: -2 } : {}}
-                whileTap={activeFlow === "attendance" || activeFlow === "assignment" ? { scale: 0.95 } : {}}
-                title={activeFlow === "attendance" ? "Upload Excel or Image" : activeFlow === "assignment" ? "Upload Assignment File (PDF, DOCX, Image)" : "Enable assignment or attendance flow to upload"}
+                htmlFor={
+                  activeFlow === "attendance" || activeFlow === "assignment"
+                    ? "file-upload-input"
+                    : undefined
+                }
+                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${
+                  activeFlow === "attendance" || activeFlow === "assignment"
+                    ? "cursor-pointer"
+                    : "cursor-not-allowed"
+                }`}
+                whileHover={
+                  activeFlow === "attendance" || activeFlow === "assignment"
+                    ? { scale: 1.08, y: -2 }
+                    : {}
+                }
+                whileTap={
+                  activeFlow === "attendance" || activeFlow === "assignment"
+                    ? { scale: 0.95 }
+                    : {}
+                }
+                title={
+                  activeFlow === "attendance"
+                    ? "Upload Excel or Image"
+                    : activeFlow === "assignment"
+                    ? "Upload Assignment File (PDF, DOCX, Image)"
+                    : "Enable assignment or attendance flow to upload"
+                }
                 onClick={(e) => {
-                  if (activeFlow !== "attendance" && activeFlow !== "assignment") {
+                  if (
+                    activeFlow !== "attendance" &&
+                    activeFlow !== "assignment"
+                  ) {
                     e.preventDefault();
                     e.stopPropagation();
                   }
@@ -5142,6 +6148,39 @@ const AudioStreamerChatBot = ({
                 <FiUpload className="w-5 h-5 sm:w-6 sm:h-6" />
               </motion.label>
             </div>
+
+            {/* Auto-routing display - HIDDEN as per user request */}
+            {/* {autoRouting && detectedFlow && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "6px 12px",
+                  backgroundColor: "#e3f2fd",
+                  borderRadius: "8px",
+                  marginBottom: "6px",
+                  fontSize: "13px",
+                  color: "#1565c0",
+                }}
+              >
+                <span style={{ fontWeight: "600" }}>
+                  🤖 Auto-detected:
+                </span>
+                <span style={{
+                  padding: "2px 8px",
+                  backgroundColor: "#bbdefb",
+                  borderRadius: "12px",
+                  fontWeight: "500",
+                }}>
+                  {detectedFlow}
+                </span>
+                <span style={{ opacity: 0.8 }}>
+                  ({(classificationConfidence * 100).toFixed(0)}% confidence)
+                </span>
+              </div>
+            )} */}
+
             <input
               type="text"
               placeholder="Ask me anything!"
@@ -5155,7 +6194,9 @@ const AudioStreamerChatBot = ({
             />
             <button
               onClick={isRecording ? stopStreaming : startStreaming}
-              className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${isRecording ? " recording" : ""}`}
+              className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
+                isRecording ? " recording" : ""
+              }`}
               title={isRecording ? "Stop Recording" : "Start Recording"}
             >
               {isRecording ? <FiMicOff /> : <FiMic />}
@@ -5170,7 +6211,7 @@ const AudioStreamerChatBot = ({
             </button>
           </div>
         </div>
-      </div >
+      </div>
     </>
   );
 };
