@@ -18,10 +18,10 @@ import { SlBubbles } from "react-icons/sl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ClassInfoModal from "./ClassInfoModal";
-import { aiAPI, userAPI } from "../services/api";
+import { aiAPI, userAPI, leaveApprovalAPI, courseProgressAPI } from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType = "none" | "query" | "attendance" | "voice_attendance"; // <-- add voice attendance
+type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "full_voice_attendance" | "leave" | "leave_approval" | "assignment" | "course_progress"; // <-- add full_voice_attendance flow
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -61,6 +61,9 @@ const AudioStreamerChatBot = ({
       buttons?: { label: string; action: () => void }[];
       bulkattandance?: boolean;
       finish_collecting?: boolean;
+      classSections?: any[]; // For course progress flow
+      courseProgress?: any; // For course progress data
+      classSection?: { classId: string; sectionId: string; className?: string; sectionName?: string }; // Selected class/section
     }[]
   >([]);
 
@@ -94,6 +97,15 @@ const AudioStreamerChatBot = ({
   ); // Track which message is being edited
   const [showClassInfoModal, setShowClassInfoModal] = useState(false); // <-- add for class info modal
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null); // <-- add for pending image
+  const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
+  const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
+  const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>({}); // <-- add for reject reasons
+  const [classSections, setClassSections] = useState<any[]>([]); // <-- add for course progress class sections
+  const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
+  const [selectedClassSection, setSelectedClassSection] = useState<{ classId: string; sectionId: string; className?: string; sectionName?: string } | null>(null); // <-- add for selected class/section
+  const [courseProgressData, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
+  const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
+  const [lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -196,7 +208,35 @@ const AudioStreamerChatBot = ({
     };
 
     socket.onmessage = (event: MessageEvent) => {
-      setInputText((prev) => prev + " " + event.data);
+      const newText = event.data;
+      setInputText((prev) => {
+        const updated = prev + " " + newText;
+        
+        // For full voice attendance flow, implement 3-second auto-submit
+        if (activeFlow === "full_voice_attendance") {
+          const currentTime = Date.now();
+          setLastVoiceInputTime(currentTime);
+          
+          // Clear existing timer
+          if (fullVoiceAutoSubmitTimer) {
+            clearTimeout(fullVoiceAutoSubmitTimer);
+          }
+          
+          // Set new 3-second timer for auto-submit
+          const timer = setTimeout(() => {
+            const finalInput = updated.trim();
+            if (finalInput && !isProcessing) {
+              // Auto submit the voice input
+              handleSubmit(finalInput);
+              setInputText(""); // Clear input after submit
+            }
+          }, 3000); // 3 seconds
+          
+          setFullVoiceAutoSubmitTimer(timer);
+        }
+        
+        return updated;
+      });
     };
 
     socket.onerror = (err) => console.error("WebSocket error:", err);
@@ -251,6 +291,23 @@ const AudioStreamerChatBot = ({
       file,
       session_id: sessionId || userId,
     });
+  };
+
+  // Upload assignment file
+  const uploadAssignmentFile = async (file: File) => {
+    try {
+      const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
+      if (result.status === "success" && result.data?.file_uuid) {
+        // Send message to assignment chat with file UUID
+        const fileMessage = `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`;
+        // The backend will handle adding this to attachments
+        return result;
+      }
+      return result;
+    } catch (error) {
+      console.error("Assignment file upload error:", error);
+      throw error;
+    }
   };
 
   // Upload attendance image through OCR processing
@@ -865,6 +922,409 @@ const AudioStreamerChatBot = ({
         } finally {
           setIsProcessing(false);
         }
+      }
+    } else if (activeFlow === "full_voice_attendance") {
+      // Full voice attendance flow with auto mic activation and auto-submit
+      setIsProcessing(true);
+      try {
+        const data = await aiAPI.processFullVoiceAttendance({
+          session_id: sessionId || userId,
+          voice_text: userMessage,
+        });
+
+        if (data.status === "success" && data.data) {
+          const answer = data.data.display_answer || data.data.answer || "";
+          const voiceAnswer = data.data.answer || "";
+          const attendanceSummary = data.data.attendance_summary;
+          const classInfo = data.data.class_info;
+          const voiceFlowActive = data.data.voice_flow_active;
+          const autoActivateMic = data.data.auto_activate_mic;
+          const currentStep = data.data.current_step;
+
+          // Add bot message
+          const botMessage: any = {
+            type: "bot" as const,
+            text: voiceAnswer,
+            answer: answer, // Full answer with table for display
+            activeTab: "answer" as const,
+          };
+
+          if (attendanceSummary) {
+            botMessage.attendance_summary = attendanceSummary;
+          }
+          if (classInfo) {
+            botMessage.class_info = classInfo;
+          }
+
+          // If in final approval step, add approve/reject buttons
+          if (currentStep === "final_approval" && attendanceSummary) {
+            botMessage.buttons = [
+              {
+                label: "Approve",
+                action: async () => {
+                  // Process approval
+                  const approveData = await aiAPI.processFullVoiceAttendance({
+                    session_id: sessionId || userId,
+                    voice_text: "approve",
+                  });
+                  if (approveData.status === "success") {
+                    setChatHistory((prev) => [
+                      ...prev,
+                      {
+                        type: "bot",
+                        text: approveData.data?.answer || "Attendance saved successfully!",
+                      },
+                    ]);
+                    // Flow complete - switch to query flow
+                    setActiveFlow("query");
+                    // Play TTS for completion message
+                    if (approveData.data?.answer) {
+                      handlePlayTTS(chatHistory.length, approveData.data.answer);
+                    }
+                  }
+                },
+              },
+              {
+                label: "Reject",
+                action: () => {
+                  setChatHistory((prev) => [
+                    ...prev,
+                    {
+                      type: "bot",
+                      text: "Attendance rejected. Please provide corrections via voice.",
+                    },
+                  ]);
+                  // Auto activate mic for corrections
+                  setTimeout(() => {
+                    if (!isRecording) {
+                      startRecording();
+                    }
+                  }, 500);
+                },
+              },
+            ];
+          }
+
+          setChatHistory((prev) => [...prev, botMessage]);
+
+          // Check if flow is complete
+          if (currentStep === "completed" || !voiceFlowActive) {
+            // Flow complete - switch to query flow
+            setActiveFlow("query");
+            // Play TTS for completion message
+            if (voiceAnswer) {
+              handlePlayTTS(chatHistory.length, voiceAnswer);
+            }
+          } else if (autoActivateMic) {
+            // Auto activate mic after bot message
+            setTimeout(() => {
+              if (!isRecording) {
+                startRecording();
+              }
+            }, 500);
+          }
+        } else {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: data.message || "Sorry, there was an error processing your voice input. Please try again.",
+            },
+          ]);
+          // Auto activate mic for retry
+          setTimeout(() => {
+            if (!isRecording) {
+              startRecording();
+            }
+          }, 500);
+        }
+      } catch (err) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your voice input. Please try again.",
+          },
+        ]);
+        // Auto activate mic for retry
+        setTimeout(() => {
+          if (!isRecording) {
+            startRecording();
+          }
+        }, 500);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "leave") {
+      // Leave application flow
+      try {
+        // Get auth token from localStorage
+        const authToken = localStorage.getItem('token');
+        
+        const data = await aiAPI.leaveChat({
+          session_id: sessionId || userId,
+          user_id: userId,  // Pass user_id (will be mapped to employee UUID)
+          query: userMessage,
+          bearer_token: authToken || undefined,  // Pass bearer token if available
+          academic_session: "2025-26",  // Can be made configurable
+          branch_token: "demo",  // Can be made configurable
+        });
+
+        if (data.status === "success" && data.data) {
+          const answer = data.data.answer || "";
+          const leaveData = data.data.leave_data;
+
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              answer: answer,
+              activeTab: "answer" as const,
+            },
+          ]);
+
+          // If leave data is present, log it (you can add UI to display it)
+          if (leaveData) {
+            console.log("Leave application data:", leaveData);
+          }
+        } else {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: data.message || "Sorry, there was an error processing your leave request.",
+            },
+          ]);
+        }
+      } catch (err) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your leave request.",
+          },
+        ]);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "assignment") {
+      // Assignment creation flow
+      try {
+        // Get auth token from localStorage
+        const authToken = localStorage.getItem('token');
+        
+        const data = await aiAPI.assignmentChat({
+          session_id: sessionId || userId,
+          user_id: userId,  // Pass user_id (will be mapped to employee UUID)
+          query: userMessage,
+          bearer_token: authToken || undefined,  // Pass bearer token if available
+          academic_session: "2025-26",  // Can be made configurable
+          branch_token: "demo",  // Can be made configurable
+        });
+
+        if (data.status === "success" && data.data) {
+          const answer = data.data.answer || "";
+          const assignmentData = data.data.assignment_data;
+
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              answer: answer,
+              activeTab: "answer" as const,
+            },
+          ]);
+
+          // If assignment data is present, log it (you can add UI to display it)
+          if (assignmentData) {
+            console.log("Assignment data:", assignmentData);
+          }
+        } else {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: data.message || "Sorry, there was an error processing your assignment request.",
+            },
+          ]);
+        }
+      } catch (err) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your assignment request.",
+          },
+        ]);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "course_progress") {
+      // Course progress flow - selection is handled via UI clicks
+      // This handles text-based queries or refreshes
+      try {
+        if (classSections.length === 0) {
+          // Fetch class sections if not already loaded
+          setLoadingClassSections(true);
+          const authToken = localStorage.getItem('token');
+          const response = await courseProgressAPI.fetchClassSections({
+            page: 1,
+            limit: 50,
+            bearer_token: authToken || undefined,
+            academic_session: "2025-26",
+            branch_token: "demo",
+          });
+          
+          if ((response.status === 200 || response.status === "success") && response.data?.options) {
+            const options = response.data.options || [];
+            setClassSections(options);
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: `📚 Found **${options.length}** class-section(s). Please select a class and section from the list above to view course progress.`,
+                classSections: options,
+              },
+            ]);
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: response.message || "No class sections found. Please try again.",
+              },
+            ]);
+          }
+          setLoadingClassSections(false);
+        } else if (selectedClassSection) {
+          // If a class section is already selected, refresh the progress
+          const authToken = localStorage.getItem('token');
+          const progressResponse = await courseProgressAPI.getProgress({
+            classId: selectedClassSection.classId,
+            sectionId: selectedClassSection.sectionId,
+            bearer_token: authToken || undefined,
+            academic_session: "2025-26",
+            branch_token: "demo",
+          });
+
+          if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+            // The API returns data.resp according to the controller
+            const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+            setCourseProgressData(progressData);
+            
+            // Format a nice summary message
+            const teacherDiarys = progressData.teacherDiarys || progressData || [];
+            const totalSubjects = Array.isArray(teacherDiarys) ? teacherDiarys.length : 0;
+            const summaryText = totalSubjects > 0 
+              ? `📊 **Course Progress for ${selectedClassSection.className || 'Class'} ${selectedClassSection.sectionName || 'Section'}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
+              : `📊 **Course Progress for ${selectedClassSection.className || 'Class'} ${selectedClassSection.sectionName || 'Section'}**\n\nNo progress data available yet.`;
+            
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: summaryText,
+                courseProgress: progressData,
+                classSection: {
+                  classId: selectedClassSection.classId,
+                  sectionId: selectedClassSection.sectionId,
+                  className: selectedClassSection.className,
+                  sectionName: selectedClassSection.sectionName,
+                },
+              },
+            ]);
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: progressResponse.message || "Failed to fetch course progress. Please try again.",
+              },
+            ]);
+          }
+        } else {
+          // Remind user to select from the list
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: "Please select a class and section from the list above to view course progress.",
+            },
+          ]);
+        }
+      } catch (err: any) {
+        console.error("Error in course progress flow:", err);
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: `❌ Error: ${err.message || "Unknown error occurred"}`,
+          },
+        ]);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (activeFlow === "leave_approval") {
+      // Leave approval flow - only fetch if we don't have requests already
+      // The fetch should happen when flow is activated from dropdown, not on every message
+      if (leaveApprovalRequests.length === 0 && !loadingLeaveRequests) {
+        try {
+          setLoadingLeaveRequests(true);
+          const authToken = localStorage.getItem('token');
+          
+          const response = await leaveApprovalAPI.fetchPendingRequests({
+            user_id: userId,
+            page: 1,
+            limit: 50,
+            bearer_token: authToken || undefined,
+            academic_session: "2025-26",
+            branch_token: "demo",
+          });
+
+          if (response.status === 200 && response.data) {
+            setLeaveApprovalRequests(response.data.leaveRequests || []);
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: `📋 **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                activeTab: "answer" as const,
+              },
+            ]);
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                activeTab: "answer" as const,
+              },
+            ]);
+          }
+        } catch (err: any) {
+          console.error("Error fetching leave approval requests:", err);
+          const errorMessage = err.message || err.response?.data?.message || "Unknown error occurred";
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+            },
+          ]);
+        } finally {
+          setLoadingLeaveRequests(false);
+          setIsProcessing(false);
+        }
+      } else {
+        // If requests are already loaded, just acknowledge the message
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "You're in the Leave Approval flow. Please use the approve/reject buttons on the leave requests above to take action.",
+          },
+        ]);
+        setIsProcessing(false);
       }
     }
   };
@@ -3040,6 +3500,282 @@ const AudioStreamerChatBot = ({
                             {activeFlow === "voice_attendance" ? "✓ " : ""}Mark Attendance (Voice)
                           </div>
                           <div
+                            onClick={async () => {
+                              setActiveFlow("full_voice_attendance");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              try {
+                                const data = await aiAPI.startFullVoiceAttendance({
+                                  session_id: sessionId || userId,
+                                });
+                                if (data.status === "success" && data.data) {
+                                  const botMessage = data.data.answer || "Full voice attendance flow activated. Please provide class information...";
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { type: "bot", text: botMessage }
+                                  ]);
+                                  // Auto activate mic after bot message
+                                  setTimeout(() => {
+                                    if (!isRecording) {
+                                      startRecording();
+                                    }
+                                  }, 500);
+                                } else {
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { type: "bot", text: data.message || "Failed to start full voice attendance flow." }
+                                  ]);
+                                }
+                              } catch (err) {
+                                setChatHistory(prev => [
+                                  ...prev,
+                                  { type: "bot", text: "Sorry, there was an error starting the full voice attendance flow. Please try again." }
+                                ]);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "full_voice_attendance" ? 1 : 0.7,
+                              fontWeight: activeFlow === "full_voice_attendance" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "full_voice_attendance" ? "✓ " : ""}Full Voice Attendance (Auto)
+                          </div>
+                          <div
+                            onClick={async () => {
+                              setActiveFlow("leave");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              
+                              // Call the API to get leave quotas
+                              try {
+                                setIsProcessing(true);
+                                const authToken = localStorage.getItem('token');
+                                const data = await aiAPI.leaveChat({
+                                  session_id: sessionId || userId,
+                                  user_id: userId,
+                                  query: "apply leave", // Flow activation message
+                                  bearer_token: authToken || undefined,
+                                  academic_session: "2025-26",
+                                  branch_token: "demo",
+                                });
+
+                                if (data.status === "success" && data.data) {
+                                  const answer = data.data.answer || "";
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      answer: answer,
+                                      activeTab: "answer" as const,
+                                    },
+                                  ]);
+                                } else {
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      text: data.message || "Leave application flow activated. Please provide your leave details.",
+                                    },
+                                  ]);
+                                }
+                              } catch (err) {
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    text: "Leave application flow activated. Please provide your leave details.",
+                                  },
+                                ]);
+                              } finally {
+                                setIsProcessing(false);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "leave" ? 1 : 0.7,
+                              fontWeight: activeFlow === "leave" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "leave" ? "✓ " : ""}Apply for Leave
+                          </div>
+                          <div
+                            onClick={async () => {
+                              setActiveFlow("leave_approval");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              // Clear existing requests and fetch fresh ones
+                              setLeaveApprovalRequests([]);
+                              setRejectReason({});
+                              setLoadingLeaveRequests(true);
+                              try {
+                                const authToken = localStorage.getItem('token');
+                                const response = await leaveApprovalAPI.fetchPendingRequests({
+                                  user_id: userId,
+                                  page: 1,
+                                  limit: 50,
+                                  bearer_token: authToken || undefined,
+                                  academic_session: "2025-26",
+                                  branch_token: "demo",
+                                });
+                                if (response.status === 200 && response.data) {
+                                  const pendingRequests = response.data.leaveRequests || [];
+                                  setLeaveApprovalRequests(pendingRequests);
+                                  
+                                  if (pendingRequests.length > 0) {
+                                    setChatHistory((prev) => [
+                                      ...prev,
+                                      {
+                                        type: "bot",
+                                        answer: `📋 **Leave Approval Dashboard**\n\nFound **${pendingRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                                        activeTab: "answer" as const,
+                                      },
+                                    ]);
+                                  } else {
+                                    setChatHistory((prev) => [
+                                      ...prev,
+                                      {
+                                        type: "bot",
+                                        answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                                        activeTab: "answer" as const,
+                                      },
+                                    ]);
+                                  }
+                                } else {
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      text: `⚠️ ${response.message || "No pending leave requests found."}`,
+                                    },
+                                  ]);
+                                }
+                              } catch (err: any) {
+                                console.error("Error fetching leave approval requests:", err);
+                                const errorMessage = err.message || err.response?.data?.message || "Unknown error occurred";
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+                                  },
+                                ]);
+                              } finally {
+                                setLoadingLeaveRequests(false);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "leave_approval" ? 1 : 0.7,
+                              fontWeight: activeFlow === "leave_approval" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "leave_approval" ? "✓ " : ""}Leave Approval Flow
+                          </div>
+                          <div
+                            onClick={() => {
+                              setActiveFlow("assignment");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              setChatHistory(prev => [
+                                ...prev,
+                                { type: "bot", text: "📚 **Assignment Creation Flow Activated!**\n\nI'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?" }
+                              ]);
+                            }}
+                            style={{
+                              opacity: activeFlow === "assignment" ? 1 : 0.7,
+                              fontWeight: activeFlow === "assignment" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "assignment" ? "✓ " : ""}Assignment Flow
+                          </div>
+                          <div
+                            onClick={async () => {
+                              setActiveFlow("course_progress");
+                              setUserOptionSelected(true);
+                              setIsMenuOpen(false);
+                              setSelectedClassSection(null);
+                              setCourseProgressData(null);
+                              
+                              // Fetch class sections when flow is activated
+                              setLoadingClassSections(true);
+                              try {
+                                const authToken = localStorage.getItem('token');
+                                console.log("Fetching class sections with token:", authToken ? "present" : "missing");
+                                const response = await courseProgressAPI.fetchClassSections({
+                                  page: 1,
+                                  limit: 50,
+                                  bearer_token: authToken || undefined,
+                                  academic_session: "2025-26",
+                                  branch_token: "demo",
+                                });
+                                
+                                console.log("Class sections API response:", response);
+                                
+                                if ((response.status === 200 || response.status === "success") && response.data?.options) {
+                                  const options = response.data.options || [];
+                                  console.log("Parsed class sections:", options);
+                                  setClassSections(options);
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { 
+                                      type: "bot", 
+                                      text: `📊 **Course Progress Flow Activated!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
+                                      classSections: options,
+                                    }
+                                  ]);
+                                } else {
+                                  console.warn("Unexpected response structure:", response);
+                                  setChatHistory(prev => [
+                                    ...prev,
+                                    { type: "bot", text: `⚠️ ${response.message || "No class sections found. Please try again."}` }
+                                  ]);
+                                }
+                              } catch (err: any) {
+                                console.error("Error fetching class sections:", err);
+                                setChatHistory(prev => [
+                                  ...prev,
+                                  { type: "bot", text: `❌ Error loading class sections: ${err.message || "Unknown error"}` }
+                                ]);
+                              } finally {
+                                setLoadingClassSections(false);
+                              }
+                            }}
+                            style={{
+                              opacity: activeFlow === "course_progress" ? 1 : 0.7,
+                              fontWeight: activeFlow === "course_progress" ? "600" : "400",
+                              cursor: "pointer",
+                              padding: "0.25rem 0.5rem",
+                              borderRadius: "4px",
+                              transition: "background 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                          >
+                            {activeFlow === "course_progress" ? "✓ " : ""}Course Progress
+                          </div>
+                          <div
                             onClick={() => {
                               setActiveFlow("none");
                               setUserOptionSelected(true);
@@ -3307,6 +4043,274 @@ const AudioStreamerChatBot = ({
                             </span>
                           </div>
                         )}
+                        {/* Show class sections for course progress flow - render regardless of text/answer */}
+                        {(msg as any).classSections && Array.isArray((msg as any).classSections) && (msg as any).classSections.length > 0 && (
+                          <>
+                            {loadingClassSections ? (
+                              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                  <span className="text-blue-900 font-medium">Loading class sections...</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="mt-4 space-y-3">
+                                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                  <p className="text-sm text-blue-900 font-medium">
+                                    📚 Select a class and section to view course progress:
+                                  </p>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  {(msg as any).classSections.map((classSection: any, csIdx: number) => {
+                                    const className = classSection.class?.name || "Unknown Class";
+                                    const sectionName = classSection.section?.name || "Unknown Section";
+                                    // Use _id for get-progress API as it expects ObjectId
+                                    const classId = classSection.class?._id || classSection.class?.uuid;
+                                    const sectionId = classSection.section?._id || classSection.section?.uuid;
+                                    const isSelected = selectedClassSection?.classId === classId && selectedClassSection?.sectionId === sectionId;
+                                    
+                                    return (
+                                      <div
+                                        key={classSection.class?._id + classSection.section?._id || csIdx}
+                                        className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                                          isSelected 
+                                            ? "border-blue-500 bg-blue-50 shadow-md" 
+                                            : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
+                                        }`}
+                                        onClick={async () => {
+                                          if (!classId || !sectionId) {
+                                            setChatHistory((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "bot",
+                                                text: "❌ Error: Missing class or section ID. Please try again.",
+                                              },
+                                            ]);
+                                            return;
+                                          }
+                                          
+                                          const newSelection = {
+                                            classId: classId,
+                                            sectionId: sectionId,
+                                            className: className,
+                                            sectionName: sectionName,
+                                          };
+                                          setSelectedClassSection(newSelection);
+                                          
+                                          // Fetch course progress
+                                          setIsProcessing(true);
+                                          try {
+                                            const authToken = localStorage.getItem('token');
+                                            console.log("Fetching course progress for:", { classId, sectionId, className, sectionName });
+                                            const progressResponse = await courseProgressAPI.getProgress({
+                                              classId: classId,
+                                              sectionId: sectionId,
+                                              bearer_token: authToken || undefined,
+                                              academic_session: "2025-26",
+                                              branch_token: "demo",
+                                            });
+
+                                            console.log("Course progress API response:", progressResponse);
+
+                                            if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+                                              // The API returns data.resp according to the controller
+                                              const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+                                              setCourseProgressData(progressData);
+                                              
+                                              // Format a nice summary message
+                                              const teacherDiarys = progressData.teacherDiarys || progressData || [];
+                                              const totalSubjects = Array.isArray(teacherDiarys) ? teacherDiarys.length : 0;
+                                              const summaryText = totalSubjects > 0 
+                                                ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
+                                                : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
+                                              
+                                              setChatHistory((prev) => [
+                                                ...prev,
+                                                {
+                                                  type: "bot",
+                                                  text: summaryText,
+                                                  courseProgress: progressData,
+                                                  classSection: {
+                                                    classId: classId,
+                                                    sectionId: sectionId,
+                                                    className: className,
+                                                    sectionName: sectionName,
+                                                  },
+                                                },
+                                              ]);
+                                            } else {
+                                              console.warn("Unexpected progress response:", progressResponse);
+                                              setChatHistory((prev) => [
+                                                ...prev,
+                                                {
+                                                  type: "bot",
+                                                  text: progressResponse.message || "Failed to fetch course progress. Please try again.",
+                                                },
+                                              ]);
+                                            }
+                                          } catch (err: any) {
+                                            console.error("Error fetching course progress:", err);
+                                            setChatHistory((prev) => [
+                                              ...prev,
+                                              {
+                                                type: "bot",
+                                                text: `❌ Error fetching course progress: ${err.message || "Unknown error"}`,
+                                              },
+                                            ]);
+                                          } finally {
+                                            setIsProcessing(false);
+                                          }
+                                        }}
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <div>
+                                            <h4 className="text-base font-semibold text-gray-900">
+                                              {className}
+                                            </h4>
+                                            <p className="text-sm text-gray-600 mt-1">
+                                              Section: {sectionName}
+                                            </p>
+                                          </div>
+                                          {isSelected && (
+                                            <div className="text-blue-600 text-xl">✓</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        
+                        {/* Show course progress data - render regardless of text/answer */}
+                        {msg.courseProgress && (msg as any).classSection && (
+                          <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg shadow-md">
+                            <div className="mb-4 pb-3 border-b border-gray-200">
+                              <h4 className="text-lg font-semibold text-gray-900">
+                                📊 Course Progress: {(msg as any).classSection.className} {(msg as any).classSection.sectionName}
+                              </h4>
+                              {(msg.courseProgress as any).meta && (
+                                <p className="text-sm text-gray-600 mt-1">
+                                  Total Subjects: {(msg.courseProgress as any).meta.totalSubjects || 0}
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                              {(() => {
+                                const progressData = msg.courseProgress as any;
+                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
+                                
+                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) {
+                                  return (
+                                    <div className="text-center py-8 text-gray-500">
+                                      No course progress data available.
+                                    </div>
+                                  );
+                                }
+                                
+                                return teacherDiarys.map((subject: any, subjectIdx: number) => {
+                                  const subjectName = subject.name || "Unknown Subject";
+                                  const avgProgress = subject.avrage_progress || subject.average_progress || 0;
+                                  const chapters = subject.chapters || [];
+                                  
+                                  // Determine progress color
+                                  const getProgressColor = (progress: number) => {
+                                    if (progress >= 75) return "bg-green-500";
+                                    if (progress >= 50) return "bg-yellow-500";
+                                    if (progress >= 25) return "bg-orange-500";
+                                    return "bg-red-500";
+                                  };
+                                  
+                                  const getProgressBgColor = (progress: number) => {
+                                    if (progress >= 75) return "bg-green-100";
+                                    if (progress >= 50) return "bg-yellow-100";
+                                    if (progress >= 25) return "bg-orange-100";
+                                    return "bg-red-100";
+                                  };
+                                  
+                                  return (
+                                    <div
+                                      key={subject.id || subjectIdx}
+                                      className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm"
+                                    >
+                                      {/* Subject Header */}
+                                      <div className="mb-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <h5 className="text-base font-semibold text-gray-900">
+                                            📚 {subjectName}
+                                          </h5>
+                                          <span className={`text-sm font-bold px-2 py-1 rounded ${
+                                            avgProgress >= 75 ? "text-green-700 bg-green-100" :
+                                            avgProgress >= 50 ? "text-yellow-700 bg-yellow-100" :
+                                            avgProgress >= 25 ? "text-orange-700 bg-orange-100" :
+                                            "text-red-700 bg-red-100"
+                                          }`}>
+                                            {avgProgress}%
+                                          </span>
+                                        </div>
+                                        {/* Subject Progress Bar */}
+                                        <div className={`w-full h-3 rounded-full overflow-hidden ${getProgressBgColor(avgProgress)}`}>
+                                          <div
+                                            className={`h-full ${getProgressColor(avgProgress)} transition-all duration-500 ease-out`}
+                                            style={{ width: `${Math.min(avgProgress, 100)}%` }}
+                                          />
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Chapters List */}
+                                      {chapters.length > 0 ? (
+                                        <div className="space-y-2">
+                                          <h6 className="text-sm font-medium text-gray-700 mb-2">
+                                            Chapters ({chapters.length}):
+                                          </h6>
+                                          {chapters.map((chapter: any, chapterIdx: number) => {
+                                            const chapterName = chapter.name || "Unknown Chapter";
+                                            const chapterProgress = chapter.coverage_status || 0;
+                                            
+                                            return (
+                                              <div
+                                                key={chapter.id || chapterIdx}
+                                                className="bg-white border border-gray-200 rounded-md p-3 hover:shadow-sm transition-shadow"
+                                              >
+                                                <div className="flex items-center justify-between mb-1">
+                                                  <span className="text-sm text-gray-800 font-medium">
+                                                    {chapterName}
+                                                  </span>
+                                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                                    chapterProgress >= 75 ? "text-green-700 bg-green-100" :
+                                                    chapterProgress >= 50 ? "text-yellow-700 bg-yellow-100" :
+                                                    chapterProgress >= 25 ? "text-orange-700 bg-orange-100" :
+                                                    "text-red-700 bg-red-100"
+                                                  }`}>
+                                                    {chapterProgress}%
+                                                  </span>
+                                                </div>
+                                                {/* Chapter Progress Bar */}
+                                                <div className={`w-full h-2 rounded-full overflow-hidden ${getProgressBgColor(chapterProgress)}`}>
+                                                  <div
+                                                    className={`h-full ${getProgressColor(chapterProgress)} transition-all duration-500 ease-out`}
+                                                    style={{ width: `${Math.min(chapterProgress, 100)}%` }}
+                                                  />
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div className="text-sm text-gray-500 italic">
+                                          No chapters available
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                        
                         {msg.text ? (
                           <div>{msg.text}</div>
                         ) : (
@@ -3316,6 +4320,176 @@ const AudioStreamerChatBot = ({
                               // Always show answer content
                               return (
                                 <>
+                                  {/* Show leave approval requests if in leave_approval flow */}
+                                  {activeFlow === "leave_approval" && idx === chatHistory.length - 1 && (
+                                    <>
+                                      {loadingLeaveRequests ? (
+                                        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                          <div className="flex items-center gap-3">
+                                            <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                            <span className="text-blue-900 font-medium">Loading pending leave requests...</span>
+                                          </div>
+                                        </div>
+                                      ) : leaveApprovalRequests.length > 0 ? (
+                                        <div className="mt-4 space-y-4">
+                                          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <p className="text-sm text-blue-900 font-medium">
+                                              📋 Found <strong>{leaveApprovalRequests.length}</strong> pending leave request(s). Please review and take action.
+                                            </p>
+                                          </div>
+                                          {leaveApprovalRequests.map((request, reqIdx) => {
+                                        const startDate = new Date(request.start_date).toLocaleDateString();
+                                        const endDate = new Date(request.end_date).toLocaleDateString();
+                                        const employeeName = request.employee?.personalInfo?.employeeName || "Unknown";
+                                        const employeeId = request.employee?.personalInfo?.employeeId || "";
+                                        const leaveType = request.leave_type?.name || "Unknown";
+                                        const description = request.description || "No description";
+                                        const photoPath = request.employee?.personalInfo?.photoDocument?.path;
+                                        
+                                        return (
+                                          <div
+                                            key={request.uuid || reqIdx}
+                                            className="bg-white border border-gray-300 rounded-lg p-4 shadow-md"
+                                          >
+                                            <div className="flex items-start gap-4 mb-4">
+                                              {photoPath && (
+                                                <img
+                                                  src={photoPath}
+                                                  alt={employeeName}
+                                                  className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
+                                                />
+                                              )}
+                                              <div className="flex-1">
+                                                <h4 className="text-lg font-semibold text-gray-900 mb-1">
+                                                  {employeeName}
+                                                </h4>
+                                                <p className="text-sm text-gray-600 mb-2">ID: {employeeId}</p>
+                                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                                  <div>
+                                                    <span className="font-medium text-gray-700">Leave Type:</span>{" "}
+                                                    <span className="text-gray-900">{leaveType}</span>
+                                                  </div>
+                                                  <div>
+                                                    <span className="font-medium text-gray-700">Duration:</span>{" "}
+                                                    <span className="text-gray-900">
+                                                      {startDate === endDate ? startDate : `${startDate} - ${endDate}`}
+                                                    </span>
+                                                  </div>
+                                                  <div className="col-span-2">
+                                                    <span className="font-medium text-gray-700">Reason:</span>{" "}
+                                                    <span className="text-gray-900">{description}</span>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                            <div className="flex gap-3 pt-4 border-t border-gray-200">
+                                              <button
+                                                onClick={async () => {
+                                                  try {
+                                                    const authToken = localStorage.getItem('token');
+                                                    await leaveApprovalAPI.approve({
+                                                      leave_request_uuid: request.uuid,
+                                                      bearer_token: authToken || undefined,
+                                                      academic_session: "2025-26",
+                                                      branch_token: "demo",
+                                                    });
+                                                    setLeaveApprovalRequests((prev) =>
+                                                      prev.filter((r) => r.uuid !== request.uuid)
+                                                    );
+                                                    setChatHistory((prev) => [
+                                                      ...prev,
+                                                      {
+                                                        type: "bot",
+                                                        text: `✅ Leave request for ${employeeName} has been approved successfully!`,
+                                                      },
+                                                    ]);
+                                                  } catch (err: any) {
+                                                    setChatHistory((prev) => [
+                                                      ...prev,
+                                                      {
+                                                        type: "bot",
+                                                        text: `❌ Error approving leave request: ${err.message || "Unknown error"}`,
+                                                      },
+                                                    ]);
+                                                  }
+                                                }}
+                                                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md font-medium hover:bg-green-600 transition-colors cursor-pointer"
+                                              >
+                                                ✓ Approve
+                                              </button>
+                                              <div className="flex-1 flex gap-2">
+                                                <input
+                                                  type="text"
+                                                  placeholder="Rejection reason (optional)"
+                                                  value={rejectReason[request.uuid] || ""}
+                                                  onChange={(e) =>
+                                                    setRejectReason((prev) => ({
+                                                      ...prev,
+                                                      [request.uuid]: e.target.value,
+                                                    }))
+                                                  }
+                                                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                                                />
+                                                <button
+                                                  onClick={async () => {
+                                                    try {
+                                                      const authToken = localStorage.getItem('token');
+                                                      const reason = rejectReason[request.uuid] || "No reason provided";
+                                                      await leaveApprovalAPI.reject({
+                                                        leave_request_uuid: request.uuid,
+                                                        reject_reason: reason,
+                                                        bearer_token: authToken || undefined,
+                                                        academic_session: "2025-26",
+                                                        branch_token: "demo",
+                                                      });
+                                                      setLeaveApprovalRequests((prev) =>
+                                                        prev.filter((r) => r.uuid !== request.uuid)
+                                                      );
+                                                      setRejectReason((prev) => {
+                                                        const newReasons = { ...prev };
+                                                        delete newReasons[request.uuid];
+                                                        return newReasons;
+                                                      });
+                                                      setChatHistory((prev) => [
+                                                        ...prev,
+                                                        {
+                                                          type: "bot",
+                                                          text: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                        },
+                                                      ]);
+                                                    } catch (err: any) {
+                                                      setChatHistory((prev) => [
+                                                        ...prev,
+                                                        {
+                                                          type: "bot",
+                                                          text: `❌ Error rejecting leave request: ${err.message || "Unknown error"}`,
+                                                        },
+                                                      ]);
+                                                    }
+                                                  }}
+                                                  className="px-4 py-2 bg-red-500 text-white rounded-md font-medium hover:bg-red-600 transition-colors cursor-pointer"
+                                                >
+                                                  ✗ Reject
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <div className="mt-4 p-6 bg-green-50 border-2 border-green-200 rounded-lg text-center">
+                                          <div className="text-4xl mb-3">✅</div>
+                                          <p className="text-green-900 font-semibold text-lg">
+                                            No pending leave requests found!
+                                          </p>
+                                          <p className="text-green-700 text-sm mt-2">
+                                            All leave requests have been processed or there are no pending requests at this time.
+                                          </p>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
                                   {/* Show table if this message has attendance data */}
                                   {(() => {
                                     console.log(
@@ -3909,23 +5083,26 @@ const AudioStreamerChatBot = ({
             <div className="relative">
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv,image/*"
+                accept={activeFlow === "assignment" ? ".pdf,.doc,.docx,image/*" : ".xlsx,.xls,.csv,image/*"}
                 id="file-upload-input"
                 className="hidden"
-                disabled={activeFlow !== "attendance"}
+                disabled={activeFlow !== "attendance" && activeFlow !== "assignment"}
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
-                  if (file && activeFlow === "attendance") {
+                  if (!file) return;
+                  
+                  if (activeFlow === "attendance") {
+                    // Show upload message
+                    setChatHistory((prev) => [
+                      ...prev,
+                      {
+                        type: "user",
+                        text: `Uploaded ${file.type.startsWith("image/") ? "image" : "file"
+                          }: ${file.name}`,
+                      },
+                    ]);
+                    
                     try {
-                      // Show upload message
-                      setChatHistory((prev) => [
-                        ...prev,
-                        {
-                          type: "user",
-                          text: `Uploaded ${file.type.startsWith("image/") ? "image" : "file"
-                            }: ${file.name}`,
-                        },
-                      ]);
 
                       if (file.type.startsWith("image/")) {
                         // For images, follow the same step-by-step flow as text-based attendance
@@ -4090,23 +5267,94 @@ const AudioStreamerChatBot = ({
                             }
                           }
                         }
-                      } else {
-                        if (attendanceStep === "class_info") {
+                      } else if (attendanceStep === "student_details") {
+                        // Handle non-image files for attendance
+                        const result = await uploadFile(file);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text:
+                              result.message || "File processing completed.",
+                          },
+                        ]);
+                      } else if (attendanceStep === "class_info") {
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "Please provide class information first before uploading student data files.",
+                          },
+                        ]);
+                      }
+                    } catch (err) {
+                      setChatHistory((prev) => [
+                        ...prev,
+                        {
+                          type: "bot",
+                          text: `File upload failed: ${(err as Error).message}`,
+                        },
+                      ]);
+                    }
+                  } else if (activeFlow === "assignment") {
+                    // Handle assignment file upload
+                    try {
+                      const result = await uploadAssignmentFile(file);
+                      if (result.status === "success") {
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: `✅ File uploaded successfully: ${result.data?.filename || file.name}\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
+                          },
+                        ]);
+                        // Send the file UUID to the assignment chat to add it to attachments
+                        const fileUuid = result.data?.file_uuid;
+                        console.log("File upload result:", result);
+                        console.log("Extracted fileUuid:", fileUuid);
+                        
+                        if (fileUuid) {
+                          const fileMessage = `Add file ${fileUuid} to attachments`;
+                          console.log("Sending file message to assignment chat:", fileMessage);
+                          
+                          // Trigger assignment chat with file info
+                          setTimeout(async () => {
+                            try {
+                              const authToken = localStorage.getItem('token');
+                              console.log("Calling assignmentChat with message:", fileMessage, "session:", sessionId || userId);
+                              
+                              const data = await aiAPI.assignmentChat({
+                                session_id: sessionId || userId,
+                                user_id: userId,
+                                query: fileMessage,
+                                bearer_token: authToken || undefined,
+                                academic_session: "2025-26",
+                                branch_token: "demo",
+                              });
+                              
+                              console.log("Assignment chat response:", data);
+                              
+                              if (data.status === "success" && data.data) {
+                                const answer = data.data.answer || "File added to assignment.";
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    answer: answer,
+                                    activeTab: "answer" as const,
+                                  },
+                                ]);
+                              }
+                            } catch (err) {
+                              console.error("Error adding file to assignment:", err);
+                            }
+                          }, 500);
+                        } else {
                           setChatHistory((prev) => [
                             ...prev,
                             {
                               type: "bot",
-                              text: "Please provide class information first before uploading student data files.",
-                            },
-                          ]);
-                        } else if (attendanceStep === "student_details") {
-                          const result = await uploadFile(file);
-                          setChatHistory((prev) => [
-                            ...prev,
-                            {
-                              type: "bot",
-                              text:
-                                result.message || "File processing completed.",
+                              text: "⚠️ File uploaded but could not be attached. Please try uploading again.",
                             },
                           ]);
                         }
@@ -4125,16 +5373,16 @@ const AudioStreamerChatBot = ({
                 }}
               />
               <motion.label
-                htmlFor={activeFlow === "attendance" ? "file-upload-input" : undefined}
-                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${activeFlow === "attendance"
+                htmlFor={activeFlow === "attendance" || activeFlow === "assignment" ? "file-upload-input" : undefined}
+                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${activeFlow === "attendance" || activeFlow === "assignment"
                   ? "cursor-pointer"
                   : "cursor-not-allowed"
                   }`}
-                whileHover={activeFlow === "attendance" ? { scale: 1.08, y: -2 } : {}}
-                whileTap={activeFlow === "attendance" ? { scale: 0.95 } : {}}
-                title={activeFlow === "attendance" ? "Upload Excel or Image" : "Enable attendance flow to upload"}
+                whileHover={activeFlow === "attendance" || activeFlow === "assignment" ? { scale: 1.08, y: -2 } : {}}
+                whileTap={activeFlow === "attendance" || activeFlow === "assignment" ? { scale: 0.95 } : {}}
+                title={activeFlow === "attendance" ? "Upload Excel or Image" : activeFlow === "assignment" ? "Upload Assignment File (PDF, DOCX, Image)" : "Enable assignment or attendance flow to upload"}
                 onClick={(e) => {
-                  if (activeFlow !== "attendance") {
+                  if (activeFlow !== "attendance" && activeFlow !== "assignment") {
                     e.preventDefault();
                     e.stopPropagation();
                   }
