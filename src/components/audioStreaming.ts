@@ -31,7 +31,7 @@ export const startStreaming = async (
   selectedLanguage: string
 ) => {
   const { socketRef, audioContextRef, processorRef, sourceRef, micStreamRef } = refs;
-  const { setIsRecording, setInputText, handleSubmit } = callbacks;
+  const { setIsRecording, setInputText } = callbacks;
 
   // Request microphone only when starting recording
   const stream = await navigator.mediaDevices.getUserMedia({

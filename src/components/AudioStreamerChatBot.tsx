@@ -82,7 +82,7 @@ const AudioStreamerChatBot = ({
   const [attendanceData, setAttendanceData] = useState<any[]>([]); // <-- add for editable attendance
   const [attendanceStep, setAttendanceStep] = useState<
     "class_info" | "student_details" | "completed"
-  >("class_info"); // <-- add for step tracking
+  >("class_info");
   const [pendingClassInfo, setPendingClassInfo] = useState<{
     class_: string;
     section: string;
@@ -103,9 +103,9 @@ const AudioStreamerChatBot = ({
   const [classSections, setClassSections] = useState<any[]>([]); // <-- add for course progress class sections
   const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
   const [selectedClassSection, setSelectedClassSection] = useState<{ classId: string; sectionId: string; className?: string; sectionName?: string } | null>(null); // <-- add for selected class/section
-  const [courseProgressData, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
+  const [_courseProgressData, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
   const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
-  const [lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
+  const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -227,11 +227,10 @@ const AudioStreamerChatBot = ({
             const finalInput = updated.trim();
             if (finalInput && !isProcessing) {
               // Auto submit the voice input
-              handleSubmit(finalInput);
-              setInputText(""); // Clear input after submit
+              setInputText(finalInput);
+              handleSubmit();
             }
-          }, 3000); // 3 seconds
-          
+          }, 3000); 
           setFullVoiceAutoSubmitTimer(timer);
         }
         
@@ -298,8 +297,6 @@ const AudioStreamerChatBot = ({
     try {
       const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
       if (result.status === "success" && result.data?.file_uuid) {
-        // Send message to assignment chat with file UUID
-        const fileMessage = `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`;
         // The backend will handle adding this to attachments
         return result;
       }
@@ -997,7 +994,7 @@ const AudioStreamerChatBot = ({
                   // Auto activate mic for corrections
                   setTimeout(() => {
                     if (!isRecording) {
-                      startRecording();
+                      startStreaming();
                     }
                   }, 500);
                 },
@@ -1019,7 +1016,7 @@ const AudioStreamerChatBot = ({
             // Auto activate mic after bot message
             setTimeout(() => {
               if (!isRecording) {
-                startRecording();
+                startStreaming();
               }
             }, 500);
           }
@@ -1034,7 +1031,7 @@ const AudioStreamerChatBot = ({
           // Auto activate mic for retry
           setTimeout(() => {
             if (!isRecording) {
-              startRecording();
+              startStreaming();
             }
           }, 500);
         }
@@ -1049,7 +1046,7 @@ const AudioStreamerChatBot = ({
         // Auto activate mic for retry
         setTimeout(() => {
           if (!isRecording) {
-            startRecording();
+            startStreaming();
           }
         }, 500);
       } finally {
@@ -1207,9 +1204,9 @@ const AudioStreamerChatBot = ({
             branch_token: "demo",
           });
 
-          if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+          if ((String(progressResponse.status) === "200" || progressResponse.status === "success") && progressResponse.data) {
             // The API returns data.resp according to the controller
-            const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+            const progressData = (progressResponse.data as any).resp || progressResponse.data.progress || progressResponse.data;
             setCourseProgressData(progressData);
             
             // Format a nice summary message
@@ -2424,46 +2421,46 @@ const AudioStreamerChatBot = ({
     }
     .bot-actions-bottom {
       display: flex;
-      gap: clamp(0.4rem, 1.5vw, 0.7rem);
+      gap: clamp(0.25rem, 1vw, 0.5rem);
       align-items: flex-end;
       justify-content: flex-end;
-      margin-top: 1.1rem;
-      margin-bottom: 0.2rem;
+      margin-top: 0.75rem;
+      margin-bottom: 0.1rem;
       position: relative;
       flex-wrap: wrap;
     }
     .bot-action-btn {
-      background: rgba(255, 255, 255, 0.9);
-      border: 1px solid rgba(212, 165, 116, 0.25);
+      background: transparent;
+      border: 1px solid rgba(212, 165, 116, 0.2);
       border-radius: 50%;
-      width: clamp(32px, 5vw, 38px);
-      height: clamp(32px, 5vw, 38px);
+      width: clamp(28px, 4vw, 32px);
+      height: clamp(28px, 4vw, 32px);
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      font-size: clamp(0.9em, 2.5vw, 1.1em);
-      transition: all 0.3s ease;
+      font-size: clamp(0.85em, 2vw, 0.95em);
+      transition: all 0.2s ease;
       position: relative;
       color: #8B7355;
-      box-shadow: 0 2px 6px rgba(212, 165, 116, 0.15);
-      padding: clamp(0.4rem, 1vw, 0.6rem);
+      padding: 0;
+      min-width: clamp(28px, 4vw, 32px);
+      min-height: clamp(28px, 4vw, 32px);
     }
     .bot-action-btn:hover {
-      background: linear-gradient(135deg, #D4A574 0%, #C9A882 100%);
-      color: #fff;
-      border-color: #D4A574;
-      transform: scale(1.1) translateY(-2px);
-      box-shadow: 0 4px 12px rgba(212, 165, 116, 0.3);
+      background: rgba(212, 165, 116, 0.1);
+      color: #D4A574;
+      border-color: rgba(212, 165, 116, 0.4);
+      transform: scale(1.05);
     }
     .bot-action-btn.thumbs-up-active {
-      background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-      color: white;
+      background: rgba(34, 197, 94, 0.1);
+      color: #22c55e;
       border-color: #22c55e;
     }
     .bot-action-btn.thumbs-down-active {
-      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-      color: white;
+      background: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
       border-color: #ef4444;
     }
     .bot-action-btn:disabled {
@@ -2882,10 +2879,10 @@ const AudioStreamerChatBot = ({
         }
         .chatbot-input-area {
           display: flex;
-          gap: 0.875rem;
+          gap: 0.75rem;
           align-items: center;
           margin-top: 0;
-          padding: 1.25rem 1.5rem;
+          padding: 0.625rem 1.25rem;
           background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
@@ -2899,7 +2896,7 @@ const AudioStreamerChatBot = ({
         .chatbot-input {
           flex: 1;
           min-width: 0;
-          padding: 0.875rem 1.25rem;
+          padding: 0.50rem 1.25rem;
           border-radius: 24px;
           border: 1.5px solid rgba(212, 165, 116, 0.25);
           font-size: clamp(0.95rem, 2vw, 1.05rem);
@@ -2921,16 +2918,16 @@ const AudioStreamerChatBot = ({
         .chatbot-btn {
           border: none;
           border-radius: 50%;
-          width: 48px;
-          height: 48px;
-          min-width: 48px;
-          min-height: 48px;
+          width: 40px;
+          height: 40px;
+          min-width: 40px;
+          min-height: 40px;
           display: flex;
           align-items: center;
           justify-content: center;
           color: #fff;
           cursor: pointer;
-          font-size: 20px;
+          font-size: 18px;
           box-shadow: 0 2px 8px rgba(212, 165, 116, 0.25);
           transition: all 0.3s ease;
           background: linear-gradient(135deg, #D4A574 0%, #C9A882 100%);
@@ -3005,7 +3002,7 @@ const AudioStreamerChatBot = ({
           background: rgba(255, 255, 255, 0.8);
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
-          padding: 1.25rem 1.5rem;
+          padding: 0.625rem 1.25rem;
           border-bottom: 1px solid rgba(212, 165, 116, 0.15);
           display: flex;
           align-items: center;
@@ -3029,32 +3026,39 @@ const AudioStreamerChatBot = ({
           align-items: center;
           gap: 0.75rem;
         }
-        .chatbot-header-title::before {
-          content: '🤖';
-          font-size: 1.5rem;
-          filter: none;
-          -webkit-text-fill-color: initial;
+        .chatbot-header-title .robot-icon {
+          width: 3rem;
+          height: 3rem;
+          flex-shrink: 0;
+          object-fit: contain;
         }
         
         /* Three-dot menu styles */
+        .three-dot-menu-container {
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          padding: 4px;
+        }
+        
         .three-dot-menu-btn {
-          background: linear-gradient(135deg, #D4A574 0%, #C9A882 100%);
+          background: transparent;
           border: none;
-          border-radius: 12px;
-          width: 44px;
-          height: 44px;
+          width: 36px;
+          height: 36px;
           display: flex;
           align-items: center;
           justify-content: center;
-          color: white;
+          color: #8B7355;
           cursor: pointer;
-          box-shadow: 0 2px 8px rgba(212, 165, 116, 0.25);
           transition: all 0.3s ease;
+          border-radius: 8px;
         }
         
         .three-dot-menu-btn:hover {
-          box-shadow: 0 4px 16px rgba(212, 165, 116, 0.35);
-          transform: translateY(-2px);
+          background: rgba(139, 115, 85, 0.1);
+          color: #D4A574;
         }
         
         .three-dot-menu {
@@ -3189,7 +3193,7 @@ const AudioStreamerChatBot = ({
 
         @media (max-width: 768px) {
           .chatbot-header-section {
-            padding: 0.875rem 1rem;
+            padding: 0.5rem 1rem;
           }
           .chatbot-header-title {
             font-size: clamp(1rem, 2.2vw, 1.15rem);
@@ -3206,7 +3210,7 @@ const AudioStreamerChatBot = ({
             padding: 0.75rem 1rem;
           }
           .chatbot-input-area {
-            padding: 0.875rem 0.75rem;
+            padding: 0.5rem 0.75rem;
             gap: 0.625rem;
           }
           .chatbot-input {
@@ -3214,11 +3218,11 @@ const AudioStreamerChatBot = ({
             font-size: clamp(0.9rem, 1.9vw, 1rem);
           }
           .chatbot-btn {
-            width: 40px;
-            height: 40px;
-            min-width: 40px;
-            min-height: 40px;
-            font-size: 18px;
+            width: 36px;
+            height: 36px;
+            min-width: 36px;
+            min-height: 36px;
+            font-size: 16px;
           }
         }
 
@@ -3236,7 +3240,7 @@ const AudioStreamerChatBot = ({
             padding: 0.5rem 0.625rem;
           }
           .chatbot-header-section {
-            padding: 0.75rem 0.875rem;
+            padding: 0.5rem 0.875rem;
           }
           .chatbot-mode-badge {
             padding: 0.4rem 0.75rem;
@@ -3249,12 +3253,12 @@ const AudioStreamerChatBot = ({
             gap: 0.875rem;
           }
           .chatbot-msg-bubble {
-            max-width: min(78vw, 500px);
+            max-width: 80vw;
             padding: 0.7rem 0.875rem;
             font-size: clamp(0.875rem, 1.8vw, 0.95rem);
           }
           .chatbot-input-area {
-            padding: 0.75rem 0.625rem;
+            padding: 0.5rem 0.625rem;
             gap: 0.5rem;
           }
           .chatbot-input {
@@ -3262,11 +3266,11 @@ const AudioStreamerChatBot = ({
             font-size: clamp(0.875rem, 1.7vw, 0.9rem);
           }
           .chatbot-btn {
-            width: 38px;
-            height: 38px;
-            min-width: 38px;
-            min-height: 38px;
-            font-size: 17px;
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            min-height: 34px;
+            font-size: 16px;
           }
           .bot-text-btn {
             padding: 0.625rem 1.25rem;
@@ -3298,7 +3302,7 @@ const AudioStreamerChatBot = ({
             padding: 0.45rem 0.5rem;
           }
           .chatbot-header-section {
-            padding: 0.625rem 0.75rem;
+            padding: 0.45rem 0.75rem;
           }
           .chatbot-header-title {
             font-size: clamp(0.95rem, 2vw, 1.05rem);
@@ -3311,31 +3315,31 @@ const AudioStreamerChatBot = ({
             padding: 0.75rem 0.5rem;
           }
           .chatbot-msg-bubble {
-            max-width: min(75vw, 450px);
+            max-width: 80vw;
             padding: 0.625rem 0.75rem;
             font-size: clamp(0.85rem, 1.6vw, 0.9rem);
           }
           .chatbot-input-area {
-            padding: 0.625rem 0.5rem;
+            padding: 0.45rem 0.5rem;
           }
           .chatbot-input {
             padding: 0.625rem 0.7rem;
             font-size: clamp(0.8rem, 1.5vw, 0.85rem);
           }
           .chatbot-btn {
-            width: 36px;
-            height: 36px;
-            min-width: 36px;
-            min-height: 36px;
-            font-size: 16px;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            min-height: 32px;
+            font-size: 15px;
           }
         }
 
         /* Touch Device Optimizations */
         @media (hover: none) and (pointer: coarse) {
           .chatbot-btn {
-            min-width: 44px;
-            min-height: 44px;
+            min-width: 38px;
+            min-height: 38px;
           }
           .chatbot-btn:hover {
             transform: none;
@@ -3357,8 +3361,15 @@ const AudioStreamerChatBot = ({
         <div className="chatbot-container">
           {/* Header Section - Improved Design */}
           <div className="chatbot-header-section">
-            <h1 className="chatbot-header-title">Chat with Sofisto</h1>
-            <div className="relative right-12" ref={menuRef}>
+            <h1 className="chatbot-header-title">
+              <img 
+                src="/sofisto-img.png" 
+                alt="Sofisto Robot" 
+                className="robot-icon"
+              />
+              Chat with Sofisto
+            </h1>
+            <div className="three-dot-menu-container" ref={menuRef}>
               <motion.button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
                 className="three-dot-menu-btn"
@@ -3517,7 +3528,7 @@ const AudioStreamerChatBot = ({
                                   // Auto activate mic after bot message
                                   setTimeout(() => {
                                     if (!isRecording) {
-                                      startRecording();
+                                      startStreaming();
                                     }
                                   }, 500);
                                 } else {
@@ -3958,62 +3969,106 @@ const AudioStreamerChatBot = ({
             {/* Attendance Flow Step Indicator */}
             {(activeFlow === "attendance" ||
               activeFlow === "voice_attendance") && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-4">
-                  <div
-                    className={`flex items-center gap-2 ${attendanceStep === "class_info"
-                      ? "text-blue-600 font-semibold"
-                      : "text-gray-600 font-normal"
-                      }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${attendanceStep === "class_info"
-                        ? "bg-blue-600 text-white"
-                        : "bg-blue-100 text-gray-600"
-                        }`}
-                    >
-                      {attendanceStep === "class_info" ? "1" : "✓"}
-                    </span>
-                    {activeFlow === "voice_attendance"
-                      ? "Class Info (Voice)"
-                      : "Class Information"}
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="bg-white border-2 border-[#D4A574] rounded-xl p-2 sm:p-3 mb-2 shadow-lg shadow-[#D4A574]/10"
+                >
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+                    {/* Step 1 */}
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="relative flex-shrink-0">
+                        <motion.span
+                          animate={attendanceStep !== "class_info" ? { scale: 1 } : { scale: [1, 1.1, 1] }}
+                          transition={{ duration: 0.3 }}
+                          className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all duration-300 ${
+                            attendanceStep === "class_info"
+                              ? "bg-gradient-to-br from-[#D4A574] to-[#C9A882] text-white shadow-lg shadow-[#D4A574]/30 ring-2 ring-[#D4A574] ring-offset-1"
+                              : attendanceStep === "completed"
+                              ? "bg-gradient-to-br from-[#22c55e] to-[#16a34a] text-white shadow-md"
+                              : "bg-[#F5E6D3] text-[#8B7355] border-2 border-[#D4A574]/30"
+                          }`}
+                        >
+                          {attendanceStep === "class_info" ? "1" : "✓"}
+                        </motion.span>
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className={`text-xs sm:text-sm font-semibold truncate ${
+                          attendanceStep === "class_info" ? "text-[#D4A574]" : "text-[#8B7355]"
+                        }`}>
+                          {activeFlow === "voice_attendance" ? "Class Info (Voice)" : "Class Information"}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Connector 1 */}
+                    <div className="hidden sm:flex items-center flex-shrink-0">
+                      <div className={`h-0.5 w-8 sm:w-10 rounded-full transition-all duration-300 ${
+                        attendanceStep !== "class_info" ? "bg-gradient-to-r from-[#D4A574] to-[#D4A574]" : "bg-[#E5D4C0]"
+                      }`}></div>
+                    </div>
+                    <div className="sm:hidden w-full h-0.5 bg-[#E5D4C0] rounded-full"></div>
+                    
+                    {/* Step 2 */}
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="relative flex-shrink-0">
+                        <motion.span
+                          animate={attendanceStep === "student_details" ? { scale: [1, 1.1, 1] } : { scale: 1 }}
+                          transition={{ duration: 0.3 }}
+                          className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all duration-300 ${
+                            attendanceStep === "student_details"
+                              ? "bg-gradient-to-br from-[#D4A574] to-[#C9A882] text-white shadow-lg shadow-[#D4A574]/30 ring-2 ring-[#D4A574] ring-offset-1"
+                              : attendanceStep === "completed"
+                              ? "bg-gradient-to-br from-[#22c55e] to-[#16a34a] text-white shadow-md"
+                              : "bg-[#F5E6D3] text-[#8B7355] border-2 border-[#D4A574]/30"
+                          }`}
+                        >
+                          {attendanceStep === "completed" ? "✓" : "2"}
+                        </motion.span>
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className={`text-xs sm:text-sm font-semibold truncate ${
+                          attendanceStep === "student_details" ? "text-[#D4A574]" : "text-[#8B7355]"
+                        }`}>
+                          {activeFlow === "voice_attendance" ? "Student Details (Voice)" : "Student Details"}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Connector 2 */}
+                    <div className="hidden sm:flex items-center flex-shrink-0">
+                      <div className={`h-0.5 w-8 sm:w-10 rounded-full transition-all duration-300 ${
+                        attendanceStep === "completed" ? "bg-gradient-to-r from-[#D4A574] to-[#22c55e]" : "bg-[#E5D4C0]"
+                      }`}></div>
+                    </div>
+                    <div className="sm:hidden w-full h-0.5 bg-[#E5D4C0] rounded-full"></div>
+                    
+                    {/* Step 3 */}
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <div className="relative flex-shrink-0">
+                        <motion.span
+                          animate={attendanceStep === "completed" ? { scale: [1, 1.1, 1] } : { scale: 1 }}
+                          transition={{ duration: 0.3 }}
+                          className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all duration-300 ${
+                            attendanceStep === "completed"
+                              ? "bg-gradient-to-br from-[#22c55e] to-[#16a34a] text-white shadow-lg shadow-[#22c55e]/30 ring-2 ring-[#22c55e] ring-offset-1"
+                              : "bg-[#F5E6D3] text-[#8B7355] border-2 border-[#D4A574]/30"
+                          }`}
+                        >
+                          {attendanceStep === "completed" ? "✓" : "3"}
+                        </motion.span>
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className={`text-xs sm:text-sm font-semibold truncate ${
+                          attendanceStep === "completed" ? "text-[#22c55e]" : "text-[#8B7355]"
+                        }`}>
+                          Complete
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="w-0.5 h-5 bg-blue-200"></div>
-                  <div
-                    className={`flex items-center gap-2 ${attendanceStep === "student_details"
-                      ? "text-blue-600 font-semibold"
-                      : "text-gray-600 font-normal"
-                      }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${attendanceStep === "student_details"
-                        ? "bg-blue-600 text-white"
-                        : "bg-blue-100 text-gray-600"
-                        }`}
-                    >
-                      {attendanceStep === "completed" ? "✓" : "2"}
-                    </span>
-                    {activeFlow === "voice_attendance"
-                      ? "Student Details (Voice)"
-                      : "Student Details"}
-                  </div>
-                  <div className="w-0.5 h-5 bg-blue-200"></div>
-                  <div
-                    className={`flex items-center gap-2 ${attendanceStep === "completed"
-                      ? "text-green-600 font-semibold"
-                      : "text-gray-600 font-normal"
-                      }`}
-                  >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${attendanceStep === "completed"
-                        ? "bg-green-600 text-white"
-                        : "bg-blue-100 text-gray-600"
-                        }`}
-                    >
-                      {attendanceStep === "completed" ? "✓" : "3"}
-                    </span>
-                    Complete
-                  </div>
-                </div>
+                </motion.div>
               )}
             {/* Removed separate editable component - editing is now inline in the table */}
             <div className="chatbot-messages">
@@ -4112,9 +4167,9 @@ const AudioStreamerChatBot = ({
 
                                             console.log("Course progress API response:", progressResponse);
 
-                                            if ((progressResponse.status === 200 || progressResponse.status === "success") && progressResponse.data) {
+                                            if ((String(progressResponse.status) === "200" || progressResponse.status === "success") && progressResponse.data) {
                                               // The API returns data.resp according to the controller
-                                              const progressData = progressResponse.data.resp || progressResponse.data.progress || progressResponse.data;
+                                              const progressData = (progressResponse.data as any).resp || progressResponse.data.progress || progressResponse.data;
                                               setCourseProgressData(progressData);
                                               
                                               // Format a nice summary message
@@ -5069,16 +5124,16 @@ const AudioStreamerChatBot = ({
             </div>
           </div>
           {/* Input Area with Upload Buttons */}
-          <div className="chatbot-input-area p-2 sm:p-4">
-            {/* Emoji Button */}
-            <motion.button
+          <div className="chatbot-input-area">
+           
+            {/* <motion.button
               className="w-10 h-10 sm:w-12 sm:h-12 min-w-10 min-h-10 sm:min-w-12 sm:min-h-12 text-xl sm:text-2xl flex items-center justify-center rounded-full transition-all shadow-[0_2px_8px_rgba(212,165,116,0.25)] bg-gradient-to-br from-[#D4A574] to-[#C9A882] hover:scale-110 hover:shadow-[0_4px_16px_rgba(212,165,116,0.35)]"
               whileHover={{ scale: 1.1, rotate: 5 }}
               whileTap={{ scale: 0.95 }}
               title="Emoji"
             >
               😊
-            </motion.button>
+            </motion.button> */}
             {/* Single Upload for Excel and Image */}
             <div className="relative">
               <input
@@ -5374,7 +5429,7 @@ const AudioStreamerChatBot = ({
               />
               <motion.label
                 htmlFor={activeFlow === "attendance" || activeFlow === "assignment" ? "file-upload-input" : undefined}
-                className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${activeFlow === "attendance" || activeFlow === "assignment"
+                className={`chatbot-btn upload-btn ${activeFlow === "attendance" || activeFlow === "assignment"
                   ? "cursor-pointer"
                   : "cursor-not-allowed"
                   }`}
@@ -5388,7 +5443,7 @@ const AudioStreamerChatBot = ({
                   }
                 }}
               >
-                <FiUpload className="w-5 h-5 sm:w-6 sm:h-6" />
+                <FiUpload />
               </motion.label>
             </div>
             <input
@@ -5404,14 +5459,14 @@ const AudioStreamerChatBot = ({
             />
             <button
               onClick={isRecording ? stopStreaming : startStreaming}
-              className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${isRecording ? " recording" : ""}`}
+              className={`chatbot-btn mic${isRecording ? " recording" : ""}`}
               title={isRecording ? "Stop Recording" : "Start Recording"}
             >
               {isRecording ? <FiMicOff /> : <FiMic />}
             </button>
             <button
               onClick={handleSubmit}
-              className="chatbot-btn send w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl"
+              className="chatbot-btn send"
               title="Send Message"
               disabled={isRecording}
             >
