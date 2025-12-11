@@ -1,0 +1,128 @@
+.markdown-table-container {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    margin: 1rem 0;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    background: white;
+}
+
+.markdown-table-container::-webkit-scrollbar {
+    height: 8px;
+}
+
+.markdown-table-container::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+}
+
+.markdown-table-container::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+.markdown-table-container::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.markdown-table-container table {
+    width: 100%;
+    min-width: max-content;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+.markdown-table-container thead {
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.markdown-table-container th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: #1e293b;
+    border-bottom: 2px solid #e2e8f0;
+    white-space: nowrap;
+    min-width: 120px;
+    background: #f8fafc;
+}
+
+.markdown-table-container td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #e2e8f0;
+    color: #475569;
+    white-space: nowrap;
+    min-width: 120px;
+}
+
+.markdown-table-container tbody tr:nth-child(even) {
+    background-color: #f9fafb;
+}
+
+.markdown-table-container tbody tr:hover {
+    background-color: #f1f5f9;
+}
+
+@media (max-width: 768px) {
+    .markdown-table-container {
+        font-size: 0.75rem;
+        margin: 0.75rem 0;
+    }
+
+    .markdown-table-container th,
+    .markdown-table-container td {
+        padding: 0.5rem 0.75rem;
+        min-width: 100px;
+    }
+
+    .markdown-table-container::after {
+        position: absolute;
+        bottom: 0.5rem;
+        right: 0.5rem;
+        font-size: 0.65rem;
+        color: #94a3b8;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        pointer-events: none;
+        opacity: 0.7;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+    .markdown-table-container {
+        font-size: 0.8125rem;
+    }
+
+    .markdown-table-container th,
+    .markdown-table-container td {
+        padding: 0.625rem 0.875rem;
+        min-width: 110px;
+    }
+}
+
+@media (min-width: 1025px) {
+
+    .markdown-table-container th,
+    .markdown-table-container td {
+        min-width: 140px;
+    }
+}
+
+.markdown-table-container td:has(time),
+.markdown-table-container th:contains('Date'),
+.markdown-table-container th:contains('Time') {
+    min-width: 100px;
+}
+
+.markdown-table-container td[data-wrap="true"] {
+    white-space: normal;
+    max-width: 300px;
+    word-wrap: break-word;
+}

@@ -13,6 +13,8 @@ import {
   FiVolume2,
 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
+import "./markdown-tables.css";
+
 
 // Added icons
 import ReactMarkdown from "react-markdown";
@@ -1327,11 +1329,21 @@ const AudioStreamerChatBot = ({
   };
 
   // Memoized answer component to prevent refresh on re-renders
-  const MemoizedAnswer = memo(
+ const MemoizedAnswer = memo(
     ({ answer, messageIdx }: { answer: string; messageIdx: number }) => {
       return (
-        <div key={`answer-${messageIdx}-${answer.slice(0, 20)}`}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <div key={`answer-${messageIdx}-${answer.slice(0, 20)}`} className="markdown-content">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              // Wrap tables in a scrollable container
+              table: ({ node, ...props }) => (
+                <div className="markdown-table-container">
+                  <table {...props} />
+                </div>
+              ),
+            }}
+          >
             {answer || ""}
           </ReactMarkdown>
         </div>
@@ -1346,7 +1358,7 @@ const AudioStreamerChatBot = ({
     }
   );
 
-  MemoizedAnswer.displayName = "MemoizedAnswer";
+
 
   // TTS playback function
   const handlePlayTTS = async (idx: number, text: string) => {
