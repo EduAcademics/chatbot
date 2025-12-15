@@ -445,6 +445,29 @@ const AudioStreamerChatBot = ({
     setInputText("");
     setIsProcessing(true);
 
+    // CHECK FOR EXIT KEYWORDS - Exit current flow immediately
+    const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
+    const isExitCommand = exitKeywords.some(
+      (keyword) => userMessage.toLowerCase().trim() === keyword
+    );
+
+    if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
+      console.log("🚪 Exit command detected, exiting flow:", activeFlow);
+      setActiveFlow("none");
+      setAttendanceStep("class_info");
+      setPendingClassInfo(null);
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "bot",
+          text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
+        },
+      ]);
+      setIsProcessing(false);
+      setDetectedFlow(null);
+      return;
+    }
+
     // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
     let targetFlow = activeFlow;
     let classificationResult = null;
@@ -527,7 +550,6 @@ const AudioStreamerChatBot = ({
         "skip",
         "approve",
         "reject",
-        "cancel",
         "continue",
         "sick",
         "casual",
@@ -638,23 +660,12 @@ const AudioStreamerChatBot = ({
         console.log("📍 Initializing assignment flow state");
         console.log("📍 Setting activeFlow to 'assignment'");
 
-        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in assignment flow
+        // IMPORTANT: Set activeFlow BEFORE processing the message
         setActiveFlow("assignment");
 
-        console.log("📍 Adding welcome message");
-        // Add welcome message matching manual mode
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "📚 **Assignment Creation Flow Activated!** I'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?",
-          },
-        ]);
-
-        console.log("📍 Setting isProcessing to false and returning");
-        // Stop here - don't process the initialization message, wait for user's next input
-        setIsProcessing(false);
-        return;
+        console.log("📍 Processing first assignment message");
+        // Don't return here - let the user's message be processed by the API
+        // This avoids duplicate prompts for the assignment name
       }
 
       // Initialize leave flow
@@ -1281,14 +1292,17 @@ const AudioStreamerChatBot = ({
             console.log("Leave application data:", leaveData);
           }
 
-          // If submission failed (error message), exit the flow
+          // If submission failed (error message), stay in the flow to allow retry
           if (
             answer.includes("❌") ||
             answer.includes("error") ||
             answer.includes("failed")
           ) {
-            console.log("⚠️ Leave submission error detected, exiting flow");
-            setActiveFlow("none");
+            console.log(
+              "⚠️ Leave submission error detected, staying in flow for retry"
+            );
+            // Keep the activeFlow as "leave" so the next message stays in leave flow
+            setActiveFlow("leave");
           }
 
           // If submission succeeded (success message), exit the flow
@@ -1308,6 +1322,8 @@ const AudioStreamerChatBot = ({
                 "Sorry, there was an error processing your leave request.",
             },
           ]);
+          // Keep the leave flow active for retry
+          setActiveFlow("leave");
         }
       } catch (err) {
         setChatHistory((prev) => [
@@ -1317,6 +1333,8 @@ const AudioStreamerChatBot = ({
             text: "Sorry, there was an error processing your leave request.",
           },
         ]);
+        // Keep the leave flow active for retry
+        setActiveFlow("leave");
       } finally {
         setIsProcessing(false);
       }
@@ -4022,7 +4040,7 @@ const AudioStreamerChatBot = ({
                                 ...prev,
                                 {
                                   type: "bot",
-                                  text: "📚 **Assignment Creation Flow Activated (Manual override)!**\n\nI'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?",
+                                  text: "📚 **Assignment Creation Flow Activated!** I'll guide you through creating an assignment step by step. Just answer my questions naturally!",
                                 },
                               ]);
                             }}
