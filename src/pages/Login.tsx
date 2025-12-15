@@ -50,9 +50,11 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f8f6f3] via-[#faf8f6] to-[#efeae4] px-4 py-6 md:py-10 relative overflow-hidden">
       {/* Sofisto AI Header */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-[#C9A882] px-4 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
-        <span className="text-2xl">
-          🤖
-        </span>
+        <img 
+          src="/sofisto-img.png" 
+          alt="Sofisto" 
+          className="w-10 h-10 md:w-12 md:h-12 object-contain"
+        />
         <h2 className="m-0 text-[clamp(0.9rem,2vw,1.1rem)] text-white font-semibold tracking-[-0.3px]">
           Sofisto AI
         </h2>
@@ -93,13 +95,17 @@ const Login = () => {
 
       {/* Chatbot illustration - decorative element */}
       <motion.div
-        className="absolute top-10 right-4 md:top-20 md:right-20 w-20 h-20 md:w-32 md:h-32 opacity-10 md:opacity-20"
+        className="absolute top-10 right-4 md:top-20 md:right-20 w-24 h-24 md:w-40 md:h-40 opacity-10 md:opacity-20"
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: [0.1, 0.2, 0.1], scale: [1, 1.05, 1] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       >
-        <div className="w-full h-full bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-full flex items-center justify-center text-4xl md:text-6xl">
-          🤖
+        <div className="w-full h-full bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-full flex items-center justify-center p-2 md:p-4">
+          <img 
+            src="/sofisto-img.png" 
+            alt="Sofisto" 
+            className="w-full h-full object-contain"
+          />
         </div>
       </motion.div>
 
@@ -113,12 +119,16 @@ const Login = () => {
         {/* Header with chatbot icon */}
         <div className="flex flex-col items-center mb-4 md:mb-5">
           <motion.div
-            className="w-14 h-14 md:w-18 md:h-18 mb-3 bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-2xl flex items-center justify-center shadow-lg"
+            className="w-20 h-20 md:w-24 md:h-24 mb-3 bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-2xl flex items-center justify-center shadow-lg p-2 md:p-3"
             initial={{ opacity: 0, scale: 0 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
           >
-            <span className="text-2xl md:text-3xl">🤖</span>
+            <img 
+              src="/sofisto-img.png" 
+              alt="Sofisto Robot" 
+              className="w-full h-full object-contain"
+            />
           </motion.div>
         <motion.h1
             className="text-center bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] bg-clip-text text-transparent text-xl md:text-2xl font-bold mb-1"

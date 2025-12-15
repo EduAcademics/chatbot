@@ -1,5 +1,5 @@
 export type TabType = "answer" | "references" | "query";
-export type FlowType = "none" | "query" | "attendance" | "voice_attendance";
+export type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "full_voice_attendance";
 
 export interface ChatMessage {
   type: "user" | "bot";

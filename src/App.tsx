@@ -78,7 +78,11 @@ function App() {
           transition={{ duration: 0.4 }}
           className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/60 px-8 py-6 md:px-10 md:py-8 flex flex-col items-center gap-4"
         >
-          <span className="text-3xl md:text-4xl">🤖</span>
+          <img 
+            src="/sofisto-img.png" 
+            alt="Sofisto Robot" 
+            className="w-16 h-16 md:w-20 md:h-20 object-contain"
+          />
           <p className="text-[#8B7355] text-sm md:text-base font-medium">
             Preparing your chat experience...
           </p>

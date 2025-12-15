@@ -66,12 +66,16 @@ const UserInfoBox = ({
         {/* Header */}
         <div className="text-center mb-5">
           <motion.div
-            className="w-16 h-16 mx-auto mb-3 bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-2xl flex items-center justify-center shadow-lg"
+            className="w-16 h-16 mx-auto mb-3 bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-2xl flex items-center justify-center shadow-lg p-2"
             initial={{ opacity: 0, scale: 0 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ type: "spring", stiffness: 200 }}
           >
-            <span className="text-3xl">🤖</span>
+            <img 
+              src="/sofisto-img.png" 
+              alt="Sofisto Robot" 
+              className="w-full h-full object-contain"
+            />
           </motion.div>
           <h2 className="text-2xl md:text-3xl font-semibold bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] bg-clip-text text-transparent mb-1.5">
             Welcome to <span className="text-[#b5895b]">Sofisto</span>
