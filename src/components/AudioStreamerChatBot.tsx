@@ -1,4 +1,4 @@
-﻿//audiostremerchatbot.tsx
+﻿
 import { useEffect, useRef, useState } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
@@ -25,7 +25,9 @@ import {
   userAPI,
   leaveApprovalAPI,
   courseProgressAPI,
+  getAIHeaders,
 } from "../services/api";
+import { API_BASE_URL } from "../config/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType =
@@ -134,9 +136,17 @@ const AudioStreamerChatBot = ({
 
   // Auto-routing states
   const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
-  const [detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
-  const [classificationConfidence, setClassificationConfidence] =
-    useState<number>(0);
+  const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
+  const [_classificationConfidence, setClassificationConfidence] =useState<number>(0);
+  const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
+  const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
+  // Shared helper: get academic session and branch token dynamically
+  const getErpContext = () => {
+    const academic_session =
+      localStorage.getItem("academic_session") || "2025-26";
+    const branch_token = localStorage.getItem("branch_token") || "demo";
+    return { academic_session, branch_token };
+  };
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -263,6 +273,7 @@ const AudioStreamerChatBot = ({
             }
           }, 3000); 
           setFullVoiceAutoSubmitTimer(timer);
+          
         }
         
         return updated;
@@ -420,14 +431,10 @@ const AudioStreamerChatBot = ({
   }> => {
     try {
       const response = await fetch(
-        `${
-          import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
-        }/v1/ai/classify-query`,
+        `${API_BASE_URL}/v1/ai/classify-query`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+           headers: getAIHeaders(),
           body: JSON.stringify({
             query: message,
             user_id: userId,
@@ -1282,14 +1289,15 @@ const AudioStreamerChatBot = ({
       try {
         // Get auth token from localStorage
         const authToken = localStorage.getItem("token");
+        const { academic_session, branch_token } = getErpContext();
 
         const data = await aiAPI.leaveChat({
           session_id: sessionId || userId,
           user_id: userId, // Pass user_id (will be mapped to employee UUID)
           query: userMessage,
           bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session: "2025-26", // Can be made configurable
-          branch_token: "demo", // Can be made configurable
+          academic_session,
+          branch_token,
         });
 
         if (data.status === "success" && data.data) {
@@ -1354,14 +1362,15 @@ const AudioStreamerChatBot = ({
       try {
         // Get auth token from localStorage
         const authToken = localStorage.getItem("token");
+        const { academic_session, branch_token } = getErpContext();
 
         const data = await aiAPI.assignmentChat({
           session_id: sessionId || userId,
           user_id: userId, // Pass user_id (will be mapped to employee UUID)
           query: userMessage,
           bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session: "2025-26", // Can be made configurable
-          branch_token: "demo", // Can be made configurable
+          academic_session,
+          branch_token,
         });
 
         if (data.status === "success" && data.data) {
@@ -1435,12 +1444,13 @@ const AudioStreamerChatBot = ({
           // Fetch class sections if not already loaded
           setLoadingClassSections(true);
           const authToken = localStorage.getItem("token");
+          const { academic_session, branch_token } = getErpContext();
           const response = await courseProgressAPI.fetchClassSections({
             page: 1,
             limit: 50,
             bearer_token: authToken || undefined,
-            academic_session: "2025-26",
-            branch_token: "demo",
+            academic_session,
+            branch_token,
           });
 
           if (
@@ -1472,12 +1482,13 @@ const AudioStreamerChatBot = ({
         } else if (selectedClassSection) {
           // If a class section is already selected, refresh the progress
           const authToken = localStorage.getItem("token");
+          const { academic_session, branch_token } = getErpContext();
           const progressResponse = await courseProgressAPI.getProgress({
             classId: selectedClassSection.classId,
             sectionId: selectedClassSection.sectionId,
             bearer_token: authToken || undefined,
-            academic_session: "2025-26",
-            branch_token: "demo",
+            academic_session,
+            branch_token,
           });
 
           if (
@@ -1565,14 +1576,15 @@ const AudioStreamerChatBot = ({
         try {
           setLoadingLeaveRequests(true);
           const authToken = localStorage.getItem("token");
+          const { academic_session, branch_token } = getErpContext();
 
           const response = await leaveApprovalAPI.fetchPendingRequests({
             user_id: userId,
             page: 1,
             limit: 50,
             bearer_token: authToken || undefined,
-            academic_session: "2025-26",
-            branch_token: "demo",
+            academic_session,
+            branch_token,
           });
 
           if (response.status === 200 && response.data) {
@@ -1627,7 +1639,7 @@ const AudioStreamerChatBot = ({
   };
 
   // Memoized answer component to prevent refresh on re-renders
- const MemoizedAnswer = memo(
+  const MemoizedAnswer = memo(
     ({ answer, messageIdx }: { answer: string; messageIdx: number }) => {
       return (
         <div key={`answer-${messageIdx}-${answer.slice(0, 20)}`} className="markdown-content">
@@ -3035,16 +3047,15 @@ const AudioStreamerChatBot = ({
         }
         .chatbot-container {
           width: 100%;
-          height: 100%;
+          height: 100vh;
           background: transparent;
           padding: 0;
           display: flex;
           flex-direction: column;
           gap: 0;
-          min-height: 100vh;
           box-sizing: border-box;
-          height: 100vh;
           position: relative;
+          overflow: hidden;
         }
         .chatbot-header {
           color: #8B7355;
@@ -3096,6 +3107,7 @@ const AudioStreamerChatBot = ({
           flex-direction: column;
           margin-bottom: 0;
           min-height: 0;
+          flex-shrink: 1;
         }
 
         .chatbot-chatbox::-webkit-scrollbar {
@@ -3201,17 +3213,18 @@ const AudioStreamerChatBot = ({
           display: flex;
           gap: 0.75rem;
           align-items: center;
-          margin-top: 0;
+          margin-top: auto;
           padding: 0.625rem 1.25rem;
           background: rgba(255, 255, 255, 0.85);
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
           border-top: 1px solid rgba(212, 165, 116, 0.15);
           flex-wrap: wrap;
-          position: sticky;
-          bottom: 0;
-          z-index: 10;
+          position: relative;
+          z-index: 100;
           box-shadow: 0 -2px 10px rgba(212, 165, 116, 0.08);
+          width: 100%;
+          flex-shrink: 0;
         }
         .chatbot-input {
           flex: 1;
@@ -3532,6 +3545,9 @@ const AudioStreamerChatBot = ({
           .chatbot-input-area {
             padding: 0.5rem 0.75rem;
             gap: 0.625rem;
+            position: relative;
+            z-index: 100;
+            width: 100%;
           }
           .chatbot-input {
             padding: 0.75rem 0.875rem;
@@ -3580,6 +3596,9 @@ const AudioStreamerChatBot = ({
           .chatbot-input-area {
             padding: 0.5rem 0.625rem;
             gap: 0.5rem;
+            position: relative;
+            z-index: 100;
+            width: 100%;
           }
           .chatbot-input {
             padding: 0.7rem 0.75rem;
@@ -3641,6 +3660,9 @@ const AudioStreamerChatBot = ({
           }
           .chatbot-input-area {
             padding: 0.45rem 0.5rem;
+            position: relative;
+            z-index: 100;
+            width: 100%;
           }
           .chatbot-input {
             padding: 0.625rem 0.7rem;
@@ -3979,14 +4001,16 @@ const AudioStreamerChatBot = ({
                               setLoadingLeaveRequests(true);
                               try {
                                 const authToken = localStorage.getItem("token");
+                              const { academic_session, branch_token } =
+                                getErpContext();
                                 const response =
                                   await leaveApprovalAPI.fetchPendingRequests({
                                     user_id: userId,
                                     page: 1,
                                     limit: 50,
                                     bearer_token: authToken || undefined,
-                                    academic_session: "2025-26",
-                                    branch_token: "demo",
+                                  academic_session,
+                                  branch_token,
                                   });
                                 if (response.status === 200 && response.data) {
                                   const pendingRequests =
@@ -4112,6 +4136,8 @@ const AudioStreamerChatBot = ({
                               setLoadingClassSections(true);
                               try {
                                 const authToken = localStorage.getItem("token");
+                                const { academic_session, branch_token } =
+                                  getErpContext();
                                 console.log(
                                   "Fetching class sections with token:",
                                   authToken ? "present" : "missing"
@@ -4121,8 +4147,8 @@ const AudioStreamerChatBot = ({
                                     page: 1,
                                     limit: 50,
                                     bearer_token: authToken || undefined,
-                                    academic_session: "2025-26",
-                                    branch_token: "demo",
+                                    academic_session,
+                                    branch_token,
                                   });
 
                                 console.log(
@@ -4636,18 +4662,17 @@ const AudioStreamerChatBot = ({
                                                     sectionName,
                                                   }
                                                 );
+                                              const { academic_session, branch_token } =
+                                                getErpContext();
                                                 const progressResponse =
-                                                  await courseProgressAPI.getProgress(
-                                                    {
-                                                      classId: classId,
-                                                      sectionId: sectionId,
+                                                await courseProgressAPI.getProgress({
+                                                  classId,
+                                                  sectionId,
                                                       bearer_token:
                                                         authToken || undefined,
-                                                      academic_session:
-                                                        "2025-26",
-                                                      branch_token: "demo",
-                                                    }
-                                                  );
+                                                  academic_session,
+                                                  branch_token,
+                                                });
 
                                                 console.log(
                                                   "Course progress API response:",
@@ -5076,6 +5101,10 @@ const AudioStreamerChatBot = ({
                                                               localStorage.getItem(
                                                                 "token"
                                                               );
+                                                            const {
+                                                              academic_session,
+                                                              branch_token,
+                                                            } = getErpContext();
                                                             await leaveApprovalAPI.approve(
                                                               {
                                                                 leave_request_uuid:
@@ -5083,10 +5112,8 @@ const AudioStreamerChatBot = ({
                                                                 bearer_token:
                                                                   authToken ||
                                                                   undefined,
-                                                                academic_session:
-                                                                  "2025-26",
-                                                                branch_token:
-                                                                  "demo",
+                                                                academic_session,
+                                                                branch_token,
                                                               }
                                                             );
                                                             setLeaveApprovalRequests(
@@ -5158,6 +5185,10 @@ const AudioStreamerChatBot = ({
                                                                   request.uuid
                                                                 ] ||
                                                                 "No reason provided";
+                                                              const {
+                                                                academic_session,
+                                                                branch_token,
+                                                              } = getErpContext();
                                                               await leaveApprovalAPI.reject(
                                                                 {
                                                                   leave_request_uuid:
@@ -5167,10 +5198,8 @@ const AudioStreamerChatBot = ({
                                                                   bearer_token:
                                                                     authToken ||
                                                                     undefined,
-                                                                  academic_session:
-                                                                    "2025-26",
-                                                                  branch_token:
-                                                                    "demo",
+                                                                  academic_session,
+                                                                  branch_token,
                                                                 }
                                                               );
                                                               setLeaveApprovalRequests(
@@ -6112,8 +6141,7 @@ const AudioStreamerChatBot = ({
                                 user_id: userId,
                                 query: fileMessage,
                                 bearer_token: authToken || undefined,
-                                academic_session: "2025-26",
-                                branch_token: "demo",
+                                ...getErpContext(),
                               });
 
                               console.log("Assignment chat response:", data);
