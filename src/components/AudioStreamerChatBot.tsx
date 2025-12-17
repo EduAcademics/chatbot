@@ -147,6 +147,13 @@ const AudioStreamerChatBot = ({
     const branch_token = localStorage.getItem("branch_token") || "demo";
     return { academic_session, branch_token };
   };
+  const [autoRouting, setAutoRouting] = useState<boolean>(true);
+  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
+    "auto"
+  );
+  const [detectedFlow, setDetectedFlow] = useState<string | null>(null);
+  const [classificationConfidence, setClassificationConfidence] =
+    useState<number>(0);
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -481,6 +488,29 @@ const AudioStreamerChatBot = ({
     setInputText("");
     setIsProcessing(true);
 
+    // CHECK FOR EXIT KEYWORDS - Exit current flow immediately
+    const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
+    const isExitCommand = exitKeywords.some(
+      (keyword) => userMessage.toLowerCase().trim() === keyword
+    );
+
+    if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
+      console.log("🚪 Exit command detected, exiting flow:", activeFlow);
+      setActiveFlow("none");
+      setAttendanceStep("class_info");
+      setPendingClassInfo(null);
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "bot",
+          text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
+        },
+      ]);
+      setIsProcessing(false);
+      setDetectedFlow(null);
+      return;
+    }
+
     // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
     let targetFlow = activeFlow;
     let classificationResult = null;
@@ -563,7 +593,6 @@ const AudioStreamerChatBot = ({
         "skip",
         "approve",
         "reject",
-        "cancel",
         "continue",
         "sick",
         "casual",
@@ -674,23 +703,12 @@ const AudioStreamerChatBot = ({
         console.log("📍 Initializing assignment flow state");
         console.log("📍 Setting activeFlow to 'assignment'");
 
-        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in assignment flow
+        // IMPORTANT: Set activeFlow BEFORE processing the message
         setActiveFlow("assignment");
 
-        console.log("📍 Adding welcome message");
-        // Add welcome message matching manual mode
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "📚 **Assignment Creation Flow Activated!** I'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?",
-          },
-        ]);
-
-        console.log("📍 Setting isProcessing to false and returning");
-        // Stop here - don't process the initialization message, wait for user's next input
-        setIsProcessing(false);
-        return;
+        console.log("📍 Processing first assignment message");
+        // Don't return here - let the user's message be processed by the API
+        // This avoids duplicate prompts for the assignment name
       }
 
       // Initialize leave flow
@@ -1318,14 +1336,17 @@ const AudioStreamerChatBot = ({
             console.log("Leave application data:", leaveData);
           }
 
-          // If submission failed (error message), exit the flow
+          // If submission failed (error message), stay in the flow to allow retry
           if (
             answer.includes("❌") ||
             answer.includes("error") ||
             answer.includes("failed")
           ) {
-            console.log("⚠️ Leave submission error detected, exiting flow");
-            setActiveFlow("none");
+            console.log(
+              "⚠️ Leave submission error detected, staying in flow for retry"
+            );
+            // Keep the activeFlow as "leave" so the next message stays in leave flow
+            setActiveFlow("leave");
           }
 
           // If submission succeeded (success message), exit the flow
@@ -1345,6 +1366,8 @@ const AudioStreamerChatBot = ({
                 "Sorry, there was an error processing your leave request.",
             },
           ]);
+          // Keep the leave flow active for retry
+          setActiveFlow("leave");
         }
       } catch (err) {
         setChatHistory((prev) => [
@@ -1354,6 +1377,8 @@ const AudioStreamerChatBot = ({
             text: "Sorry, there was an error processing your leave request.",
           },
         ]);
+        // Keep the leave flow active for retry
+        setActiveFlow("leave");
       } finally {
         setIsProcessing(false);
       }
@@ -3730,51 +3755,103 @@ const AudioStreamerChatBot = ({
                   transition={{ duration: 0.2 }}
                   className="three-dot-menu"
                 >
-                  {/* Auto-routing status header */}
-                  <div
-                    style={{
-                      padding: "8px 12px",
-                      backgroundColor: autoRouting ? "#e8f5e9" : "#fff3e0",
-                      borderBottom: "1px solid #ddd",
-                      fontSize: "12px",
-                      fontWeight: "bold",
-                      color: autoRouting ? "#2e7d32" : "#ef6c00",
-                    }}
-                  >
-                    {autoRouting ? "✓ Auto-routing ON" : "⚠️ Manual mode"}
-                  </div>
+                  {/* Routing Mode Selection */}
+                  <div style={{ padding: "8px 0" }}>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: "bold",
+                        padding: "8px 12px",
+                        color: "#666",
+                      }}
+                    >
+                      Routing Mode:
+                    </div>
 
-                  {/* Toggle auto-routing */}
-                  <div
-                    className="menu-item-option"
-                    onClick={() => {
-                      setAutoRouting(!autoRouting);
-                      if (!autoRouting) {
-                        // Switching to auto mode
+                    {/* Manual */}
+                    <div
+                      className="menu-item-option"
+                      onClick={() => {
+                        setRouterMode("manual");
+                        setAutoRouting(false);
                         setActiveFlow("none");
                         setUserOptionSelected(false);
-                      }
-                      setIsMenuOpen(false);
-                      setChatHistory((prev) => [
-                        ...prev,
-                        {
-                          type: "bot",
-                          text: !autoRouting
-                            ? "🤖 Auto-routing enabled! I'll automatically detect which flow to use based on your message."
-                            : "🔧 Manual mode activated. Please select a specific flow from the menu.",
-                        },
-                      ]);
-                    }}
-                    style={{
-                      backgroundColor: "#f5f5f5",
-                      fontWeight: "600",
-                    }}
-                  >
-                    <span className="menu-option-label">
-                      {autoRouting
-                        ? "🔧 Switch to Manual"
-                        : "🤖 Enable Auto-routing"}
-                    </span>
+                        setIsMenuOpen(false);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "Manual mode activated. Select a flow from the menu.",
+                          },
+                        ]);
+                      }}
+                      style={{
+                        backgroundColor:
+                          routerMode === "manual" ? "#f0f0f0" : "white",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      Manual
+                    </div>
+
+                    {/* Auto Route */}
+                    <div
+                      className="menu-item-option"
+                      onClick={() => {
+                        setRouterMode("auto");
+                        setAutoRouting(true);
+                        setActiveFlow("none");
+                        setUserOptionSelected(false);
+                        setIsMenuOpen(false);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "Auto-routing enabled. I'll detect the flow automatically.",
+                          },
+                        ]);
+                      }}
+                      style={{
+                        backgroundColor:
+                          routerMode === "auto" ? "#f0f0f0" : "white",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      Auto Route
+                    </div>
+
+                    {/* LLM Route */}
+                    <div
+                      className="menu-item-option"
+                      onClick={() => {
+                        setRouterMode("llm");
+                        setAutoRouting(true);
+                        setActiveFlow("none");
+                        setUserOptionSelected(false);
+                        setIsMenuOpen(false);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "LLM routing enabled. Using AI-powered flow detection.",
+                          },
+                        ]);
+                      }}
+                      style={{
+                        backgroundColor:
+                          routerMode === "llm" ? "#f0f0f0" : "white",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        borderBottom: "1px solid #ddd",
+                      }}
+                    >
+                      LLM Route
+                    </div>
                   </div>
 
                   {/* Divider */}
@@ -4099,7 +4176,7 @@ const AudioStreamerChatBot = ({
                                 ...prev,
                                 {
                                   type: "bot",
-                                  text: "📚 **Assignment Creation Flow Activated (Manual override)!**\n\nI'll guide you through creating an assignment step by step. Just answer my questions naturally!\n\nLet's start - what would you like to name this assignment?",
+                                  text: "📚 **Assignment Creation Flow Activated!** I'll guide you through creating an assignment step by step. Just answer my questions naturally!",
                                 },
                               ]);
                             }}
@@ -4543,6 +4620,7 @@ const AudioStreamerChatBot = ({
               </div>
             )}
             {/* Removed separate editable component - editing is now inline in the table */}
+
             <div className="chatbot-messages">
               {chatHistory.map((msg, idx) => (
                 <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
