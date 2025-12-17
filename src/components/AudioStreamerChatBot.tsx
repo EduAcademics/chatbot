@@ -131,8 +131,11 @@ const AudioStreamerChatBot = ({
   const [, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
 
   // Auto-routing states
-  const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
-  const [detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
+  const [autoRouting, setAutoRouting] = useState<boolean>(true);
+  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
+    "auto"
+  );
+  const [detectedFlow, setDetectedFlow] = useState<string | null>(null);
   const [classificationConfidence, setClassificationConfidence] =
     useState<number>(0);
 
@@ -3673,51 +3676,103 @@ const AudioStreamerChatBot = ({
                   transition={{ duration: 0.2 }}
                   className="three-dot-menu"
                 >
-                  {/* Auto-routing status header */}
-                  <div
-                    style={{
-                      padding: "8px 12px",
-                      backgroundColor: autoRouting ? "#e8f5e9" : "#fff3e0",
-                      borderBottom: "1px solid #ddd",
-                      fontSize: "12px",
-                      fontWeight: "bold",
-                      color: autoRouting ? "#2e7d32" : "#ef6c00",
-                    }}
-                  >
-                    {autoRouting ? "✓ Auto-routing ON" : "⚠️ Manual mode"}
-                  </div>
+                  {/* Routing Mode Selection */}
+                  <div style={{ padding: "8px 0" }}>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: "bold",
+                        padding: "8px 12px",
+                        color: "#666",
+                      }}
+                    >
+                      Routing Mode:
+                    </div>
 
-                  {/* Toggle auto-routing */}
-                  <div
-                    className="menu-item-option"
-                    onClick={() => {
-                      setAutoRouting(!autoRouting);
-                      if (!autoRouting) {
-                        // Switching to auto mode
+                    {/* Manual */}
+                    <div
+                      className="menu-item-option"
+                      onClick={() => {
+                        setRouterMode("manual");
+                        setAutoRouting(false);
                         setActiveFlow("none");
                         setUserOptionSelected(false);
-                      }
-                      setIsMenuOpen(false);
-                      setChatHistory((prev) => [
-                        ...prev,
-                        {
-                          type: "bot",
-                          text: !autoRouting
-                            ? "🤖 Auto-routing enabled! I'll automatically detect which flow to use based on your message."
-                            : "🔧 Manual mode activated. Please select a specific flow from the menu.",
-                        },
-                      ]);
-                    }}
-                    style={{
-                      backgroundColor: "#f5f5f5",
-                      fontWeight: "600",
-                    }}
-                  >
-                    <span className="menu-option-label">
-                      {autoRouting
-                        ? "🔧 Switch to Manual"
-                        : "🤖 Enable Auto-routing"}
-                    </span>
+                        setIsMenuOpen(false);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "Manual mode activated. Select a flow from the menu.",
+                          },
+                        ]);
+                      }}
+                      style={{
+                        backgroundColor:
+                          routerMode === "manual" ? "#f0f0f0" : "white",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      Manual
+                    </div>
+
+                    {/* Auto Route */}
+                    <div
+                      className="menu-item-option"
+                      onClick={() => {
+                        setRouterMode("auto");
+                        setAutoRouting(true);
+                        setActiveFlow("none");
+                        setUserOptionSelected(false);
+                        setIsMenuOpen(false);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "Auto-routing enabled. I'll detect the flow automatically.",
+                          },
+                        ]);
+                      }}
+                      style={{
+                        backgroundColor:
+                          routerMode === "auto" ? "#f0f0f0" : "white",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                      }}
+                    >
+                      Auto Route
+                    </div>
+
+                    {/* LLM Route */}
+                    <div
+                      className="menu-item-option"
+                      onClick={() => {
+                        setRouterMode("llm");
+                        setAutoRouting(true);
+                        setActiveFlow("none");
+                        setUserOptionSelected(false);
+                        setIsMenuOpen(false);
+                        setChatHistory((prev) => [
+                          ...prev,
+                          {
+                            type: "bot",
+                            text: "LLM routing enabled. Using AI-powered flow detection.",
+                          },
+                        ]);
+                      }}
+                      style={{
+                        backgroundColor:
+                          routerMode === "llm" ? "#f0f0f0" : "white",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        fontSize: "12px",
+                        borderBottom: "1px solid #ddd",
+                      }}
+                    >
+                      LLM Route
+                    </div>
                   </div>
 
                   {/* Divider */}
@@ -4482,6 +4537,7 @@ const AudioStreamerChatBot = ({
               </div>
             )}
             {/* Removed separate editable component - editing is now inline in the table */}
+
             <div className="chatbot-messages">
               {chatHistory.map((msg, idx) => (
                 <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
