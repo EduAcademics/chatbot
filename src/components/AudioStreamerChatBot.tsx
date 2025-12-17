@@ -134,12 +134,16 @@ const AudioStreamerChatBot = ({
   } | null>(null); // <-- add for selected class/section
   const [, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
 
-  // Auto-routing states
-  const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
-  const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
-  const [_classificationConfidence, setClassificationConfidence] =useState<number>(0);
+  // Auto-routing states merge on 17-12-2025 manvi + lakshmi
+
+  const [autoRouting, setAutoRouting] = useState<boolean>(true);
+  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">("auto");
+  const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
+  const [_classificationConfidence, setClassificationConfidence] = useState<number>(0);
   const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
+  
+  
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
     const academic_session =
@@ -147,13 +151,27 @@ const AudioStreamerChatBot = ({
     const branch_token = localStorage.getItem("branch_token") || "demo";
     return { academic_session, branch_token };
   };
-  const [autoRouting, setAutoRouting] = useState<boolean>(true);
-  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
-    "auto"
-  );
-  const [detectedFlow, setDetectedFlow] = useState<string | null>(null);
-  const [classificationConfidence, setClassificationConfidence] =
-    useState<number>(0);
+
+
+  // const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
+  // const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
+  // const [_classificationConfidence, setClassificationConfidence] =useState<number>(0);
+  // const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
+  // const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
+  // // Shared helper: get academic session and branch token dynamically
+  // const getErpContext = () => {
+  //   const academic_session =
+  //     localStorage.getItem("academic_session") || "2025-26";
+  //   const branch_token = localStorage.getItem("branch_token") || "demo";
+  //   return { academic_session, branch_token };
+  // };
+  // const [autoRouting, setAutoRouting] = useState<boolean>(true);
+  // const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
+  //   "auto"
+  // );
+  // const [detectedFlow, setDetectedFlow] = useState<string | null>(null);
+  // const [classificationConfidence, setClassificationConfidence] =
+  //   useState<number>(0);
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
