@@ -25,21 +25,12 @@ import {
   userAPI,
   leaveApprovalAPI,
   courseProgressAPI,
-  getAIHeaders,
 } from "../services/api";
-import { API_BASE_URL } from "../config/api";
+import type { FlowType } from "./chatRouter";
+import { useVoiceEngine } from "./useVoiceEngine";
+import { useChatController } from "./useChatController";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
-type FlowType =
-  | "none"
-  | "query"
-  | "attendance"
-  | "voice_attendance"
-  | "full_voice_attendance" | "leave"
-  | "leave_approval"
-  | "assignment"
-  | "course_progress"; // <-- add full_voice_attendance flow
-const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
   roles,
@@ -49,18 +40,10 @@ const AudioStreamerChatBot = ({
   roles: string;
   email: string;
 }) => {
-  const socketRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hoveredMenuItem, setHoveredMenuItem] = useState<string | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [inputText, setInputText] = useState("");
   const [chatHistory, setChatHistory] = useState<
@@ -140,9 +123,6 @@ const AudioStreamerChatBot = ({
   const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">("auto");
   const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
   const [_classificationConfidence, setClassificationConfidence] = useState<number>(0);
-  const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
-  const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
-  
   
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
@@ -226,116 +206,21 @@ const AudioStreamerChatBot = ({
     fetchUserSession();
   }, [userId]);
 
-  const convertFloat32ToInt16 = (buffer: Float32Array) => {
-    const int16Buffer = new Int16Array(buffer.length);
-    for (let i = 0; i < buffer.length; i++) {
-      const s = Math.max(-1, Math.min(1, buffer[i]));
-      int16Buffer[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-    return int16Buffer;
-  };
-
-  const startStreaming = async () => {
-    // Request microphone only when starting recording
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio:
-        selectedDeviceId === "default"
-          ? true
-          : { deviceId: { exact: selectedDeviceId } },
-    });
-    micStreamRef.current = stream;
-
-    const audioContext = new AudioContext({ sampleRate: 16000 });
-    audioContextRef.current = audioContext;
-
-    const source = audioContext.createMediaStreamSource(stream);
-    sourceRef.current = source;
-
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    processorRef.current = processor;
-
-    const socket = new WebSocket(`${wsBase}/ws/speech_to_text`);
-    socketRef.current = socket;
-
-    socket.onopen = () => {
-      socket.send(selectedLanguage);
-
-      processor.onaudioprocess = (e) => {
-        const floatSamples = e.inputBuffer.getChannelData(0);
-        const int16Samples = convertFloat32ToInt16(floatSamples);
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(int16Samples.buffer);
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      setIsRecording(true);
-    };
-
-    socket.onmessage = (event: MessageEvent) => {
-      const newText = event.data;
-      setInputText((prev) => {
-        const updated = prev + " " + newText;
-        
-        // For full voice attendance flow, implement 3-second auto-submit
-        if (activeFlow === "full_voice_attendance") {
-          const currentTime = Date.now();
-          setLastVoiceInputTime(currentTime);
-          
-          // Clear existing timer
-          if (fullVoiceAutoSubmitTimer) {
-            clearTimeout(fullVoiceAutoSubmitTimer);
-          }
-          
-          // Set new 3-second timer for auto-submit
-          const timer = setTimeout(() => {
-            const finalInput = updated.trim();
-            if (finalInput && !isProcessing) {
-              // Auto submit the voice input
-              setInputText(finalInput);
-              handleSubmit();
-            }
-          }, 3000); 
-          setFullVoiceAutoSubmitTimer(timer);
-          
-        }
-        
-        return updated;
-      });
-    };
-
-    socket.onerror = (err) => console.error("WebSocket error:", err);
-    socket.onclose = () => {
-      setIsRecording(false);
-      console.log("WebSocket closed");
-    };
-  };
-
-  const stopStreaming = () => {
-    processorRef.current?.disconnect();
-    processorRef.current = null;
-
-    sourceRef.current?.disconnect();
-    sourceRef.current = null;
-
-    audioContextRef.current?.close();
-    audioContextRef.current = null;
-
-    // Stop and release microphone stream
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-    }
-
-    if (socketRef.current) {
-      socketRef.current.close();
-      socketRef.current = null;
-    }
-
-    setIsRecording(false);
-    handleSubmit();
-  };
+  // Voice engine hook - handles WebSocket + AudioContext + mic
+  const voiceEngine = useVoiceEngine({
+    selectedDeviceId,
+    selectedLanguage,
+    activeFlow,
+    isProcessing,
+    onTextUpdate: (text: string) => {
+      setInputText((prev) => prev + " " + text);
+    },
+    onAutoSubmit: () => {
+      if (inputText.trim() && handleSubmitMessage) {
+        handleSubmitMessage(inputText.trim());
+      }
+    },
+  });
 
   // --- Upload file handler for attendance flow ---
   const uploadFile = async (file: File) => {
@@ -444,1241 +329,333 @@ const AudioStreamerChatBot = ({
     }
   };
 
-  /**
-   * Classify user query to determine appropriate flow
-   */
-  const classifyQuery = async (
-    message: string
-  ): Promise<{
-    flow: string;
-    confidence: number;
-    entities: any;
-  }> => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/v1/ai/classify-query`,
+  // Unified attendance data manager
+  const getAttendanceDataForApproval = (messageIndex?: number) => {
+    console.log("=== getAttendanceDataForApproval DEBUG ===");
+    console.log("messageIndex:", messageIndex);
+    console.log("chatHistory.length:", chatHistory.length);
+    console.log("Global attendanceData:", attendanceData);
+    console.log("Global attendanceData.length:", attendanceData.length);
+    console.log("Global classInfo:", classInfo);
+    console.log("editingMessageIndex:", editingMessageIndex);
+
+    // Debug: Show all messages in chat history
+    console.log("=== CHAT HISTORY DEBUG ===");
+    chatHistory.forEach((msg, idx) => {
+      console.log(`Message ${idx}:`, {
+        type: msg.type,
+        hasAttendanceSummary: !!msg.attendance_summary,
+        attendanceSummaryLength: msg.attendance_summary?.length || 0,
+        hasClassInfo: !!msg.class_info,
+        classInfo: msg.class_info,
+        hasButtons: !!(msg as any).buttons,
+      });
+    });
+
+    // Priority 1: If we're currently editing, use the global state (edited data)
+    if (editingMessageIndex !== null && attendanceData.length > 0) {
+      console.log("✅ Priority 1: Using edited data from global state");
+      return {
+        attendanceData: attendanceData,
+        classInfo: classInfo,
+        source: "edited_global_state",
+      };
+    }
+
+    // Priority 2: Try to find the most recent message with attendance data
+    console.log(
+      "🔍 Priority 2: Searching for attendance data in chat history..."
+    );
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      const msg = chatHistory[i];
+      console.log(`Checking message ${i}:`, {
+        type: msg.type,
+        hasAttendanceSummary: !!msg.attendance_summary,
+        attendanceSummaryLength: msg.attendance_summary?.length || 0,
+        hasClassInfo: !!msg.class_info,
+        classInfo: msg.class_info,
+        hasButtons: !!(msg as any).buttons,
+      });
+
+      if (
+        msg.type === "bot" &&
+        msg.attendance_summary &&
+        msg.attendance_summary.length > 0
+      ) {
+        console.log(
+          `✅ Found attendance data in message ${i}:`,
+          msg.attendance_summary
+        );
+        return {
+          attendanceData: msg.attendance_summary,
+          classInfo: msg.class_info || classInfo,
+          source: `message_${i}`,
+        };
+      }
+    }
+
+    // Priority 2.5: Try to find any message with buttons (attendance message)
+    console.log("🔍 Priority 2.5: Searching for messages with buttons...");
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      const msg = chatHistory[i];
+      if (
+        msg.type === "bot" &&
+        (msg as any).buttons &&
+        (msg as any).buttons.length > 0
+      ) {
+        console.log(
+          `Found message with buttons at index ${i}:`,
+          (msg as any).buttons
+        );
+        // Try to get data from this message or use global state
+        if (msg.attendance_summary && msg.attendance_summary.length > 0) {
+          console.log(
+            `✅ Using attendance data from button message ${i}:`,
+            msg.attendance_summary
+          );
+          return {
+            attendanceData: msg.attendance_summary,
+            classInfo: msg.class_info || classInfo,
+            source: `button_message_${i}`,
+          };
+        } else if (attendanceData.length > 0) {
+          console.log(
+            `✅ Using global state for button message ${i}:`,
+            attendanceData
+          );
+          return {
+            attendanceData: attendanceData,
+            classInfo: classInfo,
+            source: `button_message_global_${i}`,
+          };
+        }
+      }
+    }
+
+    // Priority 3: Use provided message index if valid
+    if (messageIndex !== undefined && messageIndex < chatHistory.length) {
+      const currentMessage = chatHistory[messageIndex];
+      console.log(
+        `🔍 Priority 3: Checking provided message index ${messageIndex}:`,
         {
-          method: "POST",
-           headers: getAIHeaders(),
-          body: JSON.stringify({
-            query: message,
-            user_id: userId,
-            user_roles: roles ? roles.split(",") : [],
-          }),
+          hasAttendanceSummary: !!currentMessage?.attendance_summary,
+          attendanceSummaryLength:
+            currentMessage?.attendance_summary?.length || 0,
+          hasClassInfo: !!currentMessage?.class_info,
         }
       );
 
-      const data = await response.json();
+      if (
+        currentMessage?.attendance_summary &&
+        currentMessage.attendance_summary.length > 0
+      ) {
+        console.log(
+          `✅ Using provided message index ${messageIndex}:`,
+          currentMessage.attendance_summary
+        );
+        return {
+          attendanceData: currentMessage.attendance_summary,
+          classInfo: currentMessage.class_info || classInfo,
+          source: `provided_message_${messageIndex}`,
+        };
+      }
+    }
 
-      if (data.status === "success") {
-        const { flow, confidence, entities } = data.data;
+    // Priority 4: Use global state as fallback
+    if (attendanceData.length > 0) {
+      console.log("✅ Priority 4: Using global state as fallback");
+      return {
+        attendanceData: attendanceData,
+        classInfo: classInfo,
+        source: "global_state_fallback",
+      };
+    }
 
-        console.log("🔍 Query Classification:", {
-          query: message,
-          detectedFlow: flow,
-          confidence: `${(confidence * 100).toFixed(0)}%`,
-          entities,
+    // Priority 5: Last resort - try to get data from session storage
+    try {
+      const sessionAttendanceData = sessionStorage.getItem(
+        "pendingAttendanceData"
+      );
+      const sessionClassInfo = sessionStorage.getItem("pendingClassInfo");
+
+      if (sessionAttendanceData) {
+        const parsedAttendanceData = JSON.parse(sessionAttendanceData);
+        const parsedClassInfo = sessionClassInfo
+          ? JSON.parse(sessionClassInfo)
+          : null;
+
+        console.log("✅ Priority 5: Using session storage data:", {
+          attendanceData: parsedAttendanceData,
+          classInfo: parsedClassInfo,
         });
 
-        return { flow, confidence, entities };
+        return {
+          attendanceData: parsedAttendanceData,
+          classInfo: parsedClassInfo,
+          source: "session_storage",
+        };
       }
+    } catch (err) {
+      console.log("Error reading from session storage:", err);
+    }
 
-      // Fallback
-      return { flow: "query", confidence: 0.8, entities: {} };
-    } catch (error) {
-      console.error("❌ Classification error:", error);
-      return { flow: "query", confidence: 0.8, entities: {} };
+    console.log("❌ No attendance data found in any priority");
+    return null;
+  };
+
+  // Create attendance buttons helper
+  const createAttendanceButtons = (
+    attendanceData: any[],
+    classInfo: any,
+    messageIndex: number,
+    type: "text" | "voice" | "image"
+  ): { label: string; action: () => void }[] => {
+    if (type === "text") {
+      return [
+        {
+          label: "Edit Attendance",
+          action: () => {
+            setAttendanceData(attendanceData);
+            setClassInfo(classInfo);
+            setEditingMessageIndex(messageIndex);
+            setChatHistory((prev) => {
+              const updatedHistory = [...prev];
+              const lastMessage = updatedHistory[updatedHistory.length - 1];
+              if (lastMessage && lastMessage.type === "bot") {
+                (lastMessage as any).isBeingEdited = true;
+              }
+              return updatedHistory;
+            });
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
+              },
+            ]);
+          },
+        },
+        {
+          label: "Approve",
+          action: () => handleTextAttendanceApproval(messageIndex),
+        },
+        {
+          label: "Reject",
+          action: () => handleTextAttendanceRejection(),
+        },
+      ];
+    } else if (type === "voice") {
+      return [
+        {
+          label: "Edit Attendance",
+          action: () => {
+            setAttendanceData(attendanceData);
+            setClassInfo(classInfo);
+            setEditingMessageIndex(messageIndex);
+            setChatHistory((prev) => {
+              const updatedHistory = [...prev];
+              const lastMessage = updatedHistory[updatedHistory.length - 1];
+              if (lastMessage && lastMessage.type === "bot") {
+                (lastMessage as any).isBeingEdited = true;
+              }
+              return updatedHistory;
+            });
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
+              },
+            ]);
+          },
+        },
+        {
+          label: "Approve",
+          action: () => handleVoiceAttendanceApproval(messageIndex),
+        },
+        {
+          label: "Reject",
+          action: () => handleVoiceAttendanceRejection(),
+        },
+      ];
+    } else {
+      return [
+        {
+          label: "Edit Attendance",
+          action: () => {
+            setAttendanceData(attendanceData);
+            setClassInfo(classInfo);
+            setEditingMessageIndex(messageIndex);
+            setChatHistory((prev) => {
+              const updatedHistory = [...prev];
+              const lastMessage = updatedHistory[updatedHistory.length - 1];
+              if (lastMessage && lastMessage.type === "bot") {
+                (lastMessage as any).isBeingEdited = true;
+              }
+              return updatedHistory;
+            });
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
+              },
+            ]);
+          },
+        },
+        {
+          label: "Approve",
+          action: () => handleOCRApproval(),
+        },
+        {
+          label: "Reject",
+          action: () => handleOCRRejection(),
+        },
+      ];
     }
   };
 
+  // Chat controller hook - orchestrates everything, replaces handleSubmit
+  const { handleSubmit: handleSubmitMessage } = useChatController({
+    userId,
+    roles,
+    email,
+    sessionId,
+    activeFlow,
+    attendanceStep,
+    pendingClassInfo,
+    classSections,
+    selectedClassSection,
+    leaveApprovalRequests,
+    loadingLeaveRequests,
+    userOptionSelected,
+    autoRouting,
+    onUpdateChatHistory: (message: any) => {
+      setChatHistory((prev) => [...prev, message]);
+    },
+    onSetActiveFlow: setActiveFlow,
+    onSetAttendanceStep: setAttendanceStep,
+    onSetPendingClassInfo: setPendingClassInfo,
+    onSetAttendanceData: setAttendanceData,
+    onSetClassInfo: setClassInfo,
+    onSetClassSections: setClassSections,
+    onSetSelectedClassSection: setSelectedClassSection,
+    onSetLeaveApprovalRequests: setLeaveApprovalRequests,
+    onSetUserOptionSelected: setUserOptionSelected,
+    onSetIsProcessing: setIsProcessing,
+    onSetDetectedFlow: setDetectedFlow,
+    onSetClassificationConfidence: setClassificationConfidence,
+    getAttendanceDataForApproval,
+    getEditingMessageIndex: () => editingMessageIndex,
+    getChatHistoryLength: () => chatHistory.length,
+    createAttendanceButtons,
+  });
+
+  // Legacy handleSubmit wrapper for backward compatibility
   const handleSubmit = async () => {
-    if (!inputText.trim()) return;
-    const userMessage = inputText.trim();
-
-    console.log("🚀 handleSubmit START:", {
-      userMessage,
-      activeFlow,
-      userOptionSelected,
-      autoRouting,
-    });
-
-    setChatHistory((prev) => [...prev, { type: "user", text: userMessage }]);
+    if (!inputText.trim() || !handleSubmitMessage) return;
+    handleSubmitMessage(inputText.trim());
     setInputText("");
-    setIsProcessing(true);
-
-    // CHECK FOR EXIT KEYWORDS - Exit current flow immediately
-    const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
-    const isExitCommand = exitKeywords.some(
-      (keyword) => userMessage.toLowerCase().trim() === keyword
-    );
-
-    if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
-      console.log("🚪 Exit command detected, exiting flow:", activeFlow);
-      setActiveFlow("none");
-      setAttendanceStep("class_info");
-      setPendingClassInfo(null);
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          type: "bot",
-          text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
-        },
-      ]);
-      setIsProcessing(false);
-      setDetectedFlow(null);
-      return;
-    }
-
-    // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
-    let targetFlow = activeFlow;
-    let classificationResult = null;
-
-    // Don't re-classify if we're in the middle of a multi-step flow
-    const inAttendanceFlow =
-      activeFlow === "attendance" &&
-      attendanceStep === "student_details" &&
-      pendingClassInfo;
-    const inVoiceAttendanceFlow =
-      activeFlow === "voice_attendance" &&
-      attendanceStep === "student_details" &&
-      pendingClassInfo;
-
-    // For leave/assignment, check if message looks like a NEW request (indicates flow switch)
-    // Keywords that DEFINITELY indicate starting a NEW flow
-    const newFlowKeywords = [
-      "mark attendance",
-      "take attendance",
-      "attendance for",
-      "apply leave",
-      "apply for leave",
-      "need leave",
-      "want leave",
-      "create assignment",
-      "give assignment",
-      "new assignment",
-      "show me",
-      "list all",
-      "show",
-      "list",
-      "course progress",
-      "syllabus",
-      "view",
-      "display",
-    ];
-    const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
-      userMessage.toLowerCase().includes(keyword)
-    );
-
-    // Stay in active flow if user is responding (not starting new request)
-    // If already in leave/assignment and message doesn't look like a new request, stay in flow
-    // Don't check userOptionSelected - if activeFlow is set, we're in that flow
-    const inLeaveFlow = activeFlow === "leave" && !looksLikeNewRequest;
-    const inAssignmentFlow =
-      activeFlow === "assignment" && !looksLikeNewRequest;
-
-    console.log("🔧 Auto-routing check:", {
-      autoRouting,
-      activeFlow,
-      userOptionSelected,
-      attendanceStep,
-      pendingClassInfo,
-      inAttendanceFlow,
-      inVoiceAttendanceFlow,
-      inLeaveFlow,
-      inAssignmentFlow,
-      looksLikeNewRequest,
-      message: userMessage,
-    });
-
-    if (
-      inAttendanceFlow ||
-      inVoiceAttendanceFlow ||
-      inLeaveFlow ||
-      inAssignmentFlow
-    ) {
-      // Stay in current flow if we're in the middle of a multi-step process
-      console.log("📍 Staying in current flow (multi-step process active)");
-      targetFlow = activeFlow;
-      // Don't show old detection when in multi-step flow
-      setDetectedFlow(null);
-    } else if (autoRouting) {
-      // Skip classification for short confirmation words and common flow responses (save API call)
-      const simpleResponses = [
-        "yes",
-        "no",
-        "ok",
-        "okay",
-        "skip",
-        "approve",
-        "reject",
-        "continue",
-        "sick",
-        "casual",
-        "earned",
-        "medical",
-        "urgent",
-        "personal",
-        "maternity",
-        "paternity",
-        "today",
-        "tomorrow",
-        "yesterday",
-        "monday",
-        "tuesday",
-        "wednesday",
-        "thursday",
-        "friday",
-        "saturday",
-        "sunday",
-      ];
-      const isSimpleResponse = simpleResponses.includes(
-        userMessage.toLowerCase().trim()
-      );
-
-      if (isSimpleResponse && activeFlow !== "none" && activeFlow !== "query") {
-        // Keep current flow for simple confirmation words
-        console.log(
-          "📍 Simple response detected, keeping current flow:",
-          activeFlow
-        );
-        targetFlow = activeFlow;
-      } else if (
-        activeFlow !== "none" &&
-        activeFlow !== "query" &&
-        userMessage.length < 50 &&
-        !looksLikeNewRequest
-      ) {
-        // Short message in an active flow (likely a response to a question) - stay in current flow
-        console.log(
-          "📍 Short response in active flow, staying in:",
-          activeFlow
-        );
-        targetFlow = activeFlow;
-      } else {
-        // Run classification for every new query when auto-routing is enabled
-        console.log("📍 Running classification...");
-        try {
-          classificationResult = await classifyQuery(userMessage);
-          console.log("✅ Classification complete:", classificationResult);
-          targetFlow = classificationResult.flow as FlowType;
-
-          // Map backend flow names to frontend flow types
-          if (targetFlow === ("assignment_create" as any)) {
-            targetFlow = "assignment";
-          } else if (targetFlow === ("assignment_submit" as any)) {
-            targetFlow = "assignment"; // For now, both map to same flow
-          }
-        } catch (error) {
-          console.error("❌ Classification error:", error);
-          targetFlow = "query"; // Fallback to query on error
-        }
-      }
-
-      console.log("📍 Target flow determined:", targetFlow);
-
-      // Update UI to show detected flow
-      setDetectedFlow(targetFlow);
-
-      // Only update confidence if we actually ran classification
-      if (classificationResult) {
-        setClassificationConfidence(classificationResult.confidence);
-
-        // Low confidence warning (but still proceed)
-        if (classificationResult.confidence < 0.25) {
-          console.warn("⚠️ Low classification confidence, defaulting to query");
-          targetFlow = "query";
-        }
-      }
-
-      // Set userOptionSelected to true when auto-routing detects a flow
-      setUserOptionSelected(true);
-
-      // IMPORTANT: Initialize flow state when detected (same as manual mode)
-      if (targetFlow === "attendance" || targetFlow === "voice_attendance") {
-        console.log("📍 Initializing attendance flow state");
-        setAttendanceStep("class_info");
-        setPendingClassInfo(null);
-
-        // Add welcome message for auto-detected attendance flow
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "✅ Attendance flow detected! I'll help you mark attendance. Please provide class information (class name, section, and date). For example: 'Class 3 A on 2025-12-06' or 'Class 6 section B today'.",
-          },
-        ]);
-      }
-
-      // Check if this is a new flow initialization (user just switched flows)
-      const isNewFlowInitialization =
-        classificationResult &&
-        (activeFlow === "none" ||
-          activeFlow === "query" ||
-          activeFlow !== targetFlow);
-
-      // Initialize assignment flow
-      if (targetFlow === "assignment" && isNewFlowInitialization) {
-        console.log("📍 Initializing assignment flow state");
-        console.log("📍 Setting activeFlow to 'assignment'");
-
-        // IMPORTANT: Set activeFlow BEFORE processing the message
-        setActiveFlow("assignment");
-
-        console.log("📍 Processing first assignment message");
-        // Don't return here - let the user's message be processed by the API
-        // This avoids duplicate prompts for the assignment name
-      }
-
-      // Initialize leave flow
-      if (targetFlow === "leave" && isNewFlowInitialization) {
-        console.log("📍 Initializing leave flow state");
-
-        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in leave flow
-        setActiveFlow("leave");
-
-        // Add welcome message matching manual mode
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "📝 **Leave Application Flow Activated!** I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
-          },
-        ]);
-
-        // Stop here - don't process the initialization message, wait for user's next input
-        setIsProcessing(false);
-        return;
-      }
-    } else {
-      console.log("📍 Using current activeFlow:", activeFlow);
-    }
-
-    // If still no flow selected after classification, prompt user
-    if (!userOptionSelected && targetFlow === "none") {
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          type: "bot",
-          text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.",
-        },
-      ]);
-      setIsProcessing(false);
-      return;
-    }
-
-    console.log("📍 Routing to flow:", targetFlow);
-    console.log("📍 Current attendance step:", attendanceStep);
-    console.log("📍 Pending class info:", pendingClassInfo);
-
-    // Update active flow for next message (unless manually overridden)
-    if (autoRouting) {
-      setActiveFlow(targetFlow);
-    }
-
-    // If we're already in attendance flow at student_details step, stay there
-    // Don't reset to class_info when user is providing student attendance data
-    if (
-      targetFlow === "attendance" &&
-      attendanceStep === "student_details" &&
-      pendingClassInfo
-    ) {
-      console.log("📍 Continuing attendance at student_details step");
-      // Keep the current step - don't reset
-    }
-
-    if (targetFlow === "query") {
-      // Query handler API
-      try {
-        const data = await aiAPI.queryHandler({
-          user_id: userId,
-          user_roles: roles,
-          query: userMessage,
-        });
-        if (data.status === "success" && data.data) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: data.data?.answer,
-              references: data.data?.references,
-              mongodbquery: data.data?.mongodbquery,
-              activeTab: "answer", // Set initial active tab
-            },
-          ]);
-        } else if (data.status === "error" && data.message) {
-          setChatHistory((prev) => [
-            ...prev,
-            { type: "bot", text: data.message },
-          ]);
-        } else {
-          setChatHistory((prev) => [
-            ...prev,
-            { type: "bot", text: "No response from AI." },
-          ]);
-        }
-      } catch (err) {
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "Sorry, there was an error processing your query.",
-          },
-        ]);
-      } finally {
-        setIsProcessing(false);
-      }
-    } else if (targetFlow === "attendance") {
-      // Step-by-step attendance flow
-      if (attendanceStep === "class_info") {
-        // First step: Collect class information
-        try {
-          const data = await aiAPI.chat({
-            session_id: sessionId || userId,
-            query: `Extract class information from: "${userMessage}". Please identify and extract:
-              1. Class name/number (e.g., 6, 10, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K, LKG, UKG, etc.)
-              2. Section (e.g., A, B, C, Section A, etc.) 
-              3. Date (any format: 2025-01-15, 15/01/2025, Jan 15 2025, 15th January 2025, 5 August 2025, etc.)
-              
-              Return the information in a structured format with class_info object containing class_, section, and date fields. If any information is missing, ask for clarification.`,
-          });
-
-          if (data.status === "success" && data.data) {
-            // Try to extract class info from the response
-            const classInfo = data.data.class_info;
-            const answer = data.data.answer || "";
-
-            // Enhanced validation for class information
-            if (
-              classInfo &&
-              classInfo.class_ &&
-              classInfo.section &&
-              classInfo.date
-            ) {
-              // Class info successfully extracted
-              setPendingClassInfo(classInfo);
-              setAttendanceStep("student_details");
-              setChatHistory((prev) => [
-                ...prev,
-                {
-                  type: "bot",
-                  text: `✅ Class information confirmed: Class ${classInfo.class_} ${classInfo.section} on ${classInfo.date}. Now please provide student details for attendance. You can type the student names and their attendance status, or upload an image with the attendance list.`,
-                },
-              ]);
-            } else {
-              // Enhanced parsing from the answer text if structured data is not available
-              // Try multiple patterns to extract class information
-              let classMatch = answer.match(/class[:\s]*(\w+)/i);
-              let sectionMatch = answer.match(/section[:\s]*(\w+)/i);
-              let dateMatch = answer.match(
-                /(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i
-              );
-
-              // If no matches from answer, try parsing from user message directly
-              if (!classMatch || !sectionMatch || !dateMatch) {
-                // Try to parse from the original user message
-
-                // Enhanced class pattern matching - handle various formats
-                classMatch =
-                  userMessage.match(
-                    /(?:class|grade|standard|nursery|kg|pre-k|prek|lkg|ukg)[:\s]*(\w+)/i
-                  ) ||
-                  userMessage.match(/(\w+)\s+(?:class|grade|standard)/i) ||
-                  userMessage.match(/(nursery|kg|pre-k|prek|lkg|ukg)/i) ||
-                  userMessage.match(/class\s+(\w+)/i) ||
-                  userMessage.match(/mark\s+attendance\s+for\s+class\s+(\w+)/i);
-
-                // Enhanced section pattern matching - handle various formats
-                sectionMatch =
-                  userMessage.match(/(?:section|sec)[:\s]*(\w+)/i) ||
-                  userMessage.match(/(\w+)\s+(?:section|sec)/i) ||
-                  userMessage.match(/\b([a-z])\b/i) ||
-                  userMessage.match(/class\s+\w+\s+(\w+)/i) ||
-                  userMessage.match(/nursery\s+(\w+)/i) ||
-                  userMessage.match(/for\s+(\w+)/i);
-
-                // Enhanced date pattern matching - handle various formats
-                dateMatch =
-                  userMessage.match(/(\d{4}-\d{2}-\d{2})/i) ||
-                  userMessage.match(/(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
-                  userMessage.match(
-                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i
-                  ) ||
-                  userMessage.match(
-                    /(\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})/i
-                  ) ||
-                  userMessage.match(
-                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i
-                  );
-              }
-
-              // Special handling for specific patterns like "Class NURSERY B for 5 August 2025"
-              if (!classMatch || !sectionMatch || !dateMatch) {
-                // Try specific patterns for common formats
-                const specificPatterns = [
-                  // "Class NURSERY B for 5 August 2025"
-                  /class\s+(\w+)\s+(\w+)\s+for\s+(\d{1,2}\s+\w+\s+\d{4})/i,
-                  // "Class Nursery Section B 2025-08-14"
-                  /class\s+(\w+)\s+section\s+(\w+)\s+(\d{4}-\d{2}-\d{2})/i,
-                  // "Mark attendance for Class NURSERY B for 5 August 2025"
-                  /mark\s+attendance\s+for\s+class\s+(\w+)\s+(\w+)\s+for\s+(\d{1,2}\s+\w+\s+\d{4})/i,
-                ];
-
-                for (const pattern of specificPatterns) {
-                  const match = userMessage.match(pattern);
-                  if (match && match[1] && match[2] && match[3]) {
-                    classMatch = match;
-                    sectionMatch = match;
-                    dateMatch = match;
-                    break;
-                  }
-                }
-              }
-
-              if (classMatch && sectionMatch && dateMatch) {
-                const extractedClassInfo = {
-                  class_: classMatch[1].toUpperCase(),
-                  section: sectionMatch[1].toUpperCase(),
-                  date: dateMatch[1],
-                };
-
-                console.log("🎯 Extracted class info:", extractedClassInfo);
-                console.log("🎯 Date match result:", dateMatch[1]);
-                setPendingClassInfo(extractedClassInfo);
-                setAttendanceStep("student_details");
-                setChatHistory((prev) => [
-                  ...prev,
-                  {
-                    type: "bot",
-                    text: `✅ Class information confirmed: Class ${extractedClassInfo.class_} ${extractedClassInfo.section} on ${extractedClassInfo.date}. Now please provide student details for attendance.`,
-                  },
-                ]);
-              } else {
-                // Ask for clarification with more specific examples including nursery
-                setChatHistory((prev) => [
-                  ...prev,
-                  {
-                    type: "bot",
-                    text: `I need more specific class information. Please provide:\n• Class/Standard/Grade (e.g., 6, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K)\n• Section (e.g., A, B, C, Section A)\n• Date (e.g., 2025-01-15, 15/01/2025, Jan 15 2025)\n\nExamples: "Class 6 A on 2025-01-15", "Nursery B on 2025-08-14", or "Grade 10 Section B for 15th January 2025"`,
-                  },
-                ]);
-              }
-            }
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  data.data?.answer ||
-                  "Please provide class information clearly.",
-              },
-            ]);
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your request. Please try again.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
-      } else if (attendanceStep === "student_details") {
-        // Second step: Collect student details
-        try {
-          const data = await aiAPI.chat({
-            session_id: sessionId || userId,
-            query: `Process and verify attendance for ${
-              pendingClassInfo
-                ? `Class ${pendingClassInfo.class_} ${pendingClassInfo.section} on ${pendingClassInfo.date}`
-                : "the class"
-            }: ${userMessage}. Please extract student names and attendance status, and verify the information for accuracy.`,
-          });
-
-          if (data.status === "success" && data.data) {
-            // Process the attendance data
-            let parsedAttendanceData = data.data.attendance_summary;
-            let parsedClassInfo = pendingClassInfo || data.data.class_info;
-
-            // Parse markdown table if present
-            const answer = data.data.answer || "";
-            if (
-              answer.includes("| Student Name |") &&
-              answer.includes("| Attendance Status |")
-            ) {
-              const lines = answer.split("\n");
-              const tableStartIndex = lines.findIndex((line: string) =>
-                line.includes("| Student Name |")
-              );
-              if (tableStartIndex !== -1) {
-                const tableLines = lines.slice(tableStartIndex + 2);
-                const extractedData = [];
-
-                for (const line of tableLines) {
-                  if (line.includes("|") && !line.includes("---")) {
-                    const cells = line
-                      .split("|")
-                      .map((cell: string) => cell.trim())
-                      .filter((cell: string) => cell);
-                    if (cells.length >= 2) {
-                      extractedData.push({
-                        student_name: cells[0],
-                        attendance_status: cells[1],
-                      });
-                    }
-                  }
-                }
-
-                if (extractedData.length > 0) {
-                  parsedAttendanceData = extractedData;
-                }
-              }
-            }
-
-            // Create the message with attendance data
-            const newMessage = {
-              type: "bot" as const,
-              answer: data.data?.answer,
-              references: data.data?.references,
-              mongodbquery: data.data?.mongodbquery,
-              activeTab: "answer" as const,
-              attendance_summary: parsedAttendanceData,
-              class_info: parsedClassInfo,
-              bulkattandance: data.data?.bulkattandance,
-              finish_collecting: data.data?.finish_collecting,
-            };
-
-            console.log("Creating new message with attendance data:", {
-              attendance_summary: parsedAttendanceData,
-              class_info: parsedClassInfo,
-              messageType: newMessage.type,
-            });
-
-            if (parsedAttendanceData && parsedAttendanceData.length > 0) {
-              console.log(
-                "🎯 Setting global state for text-based attendance:",
-                {
-                  parsedAttendanceData: parsedAttendanceData,
-                  parsedClassInfo: parsedClassInfo,
-                  dataLength: parsedAttendanceData.length,
-                }
-              );
-              setAttendanceData(parsedAttendanceData);
-              setClassInfo(parsedClassInfo);
-              setAttendanceStep("completed");
-
-              // Add the specific buttons as requested (initial state: read-only mode)
-              (newMessage as any).buttons = [
-                {
-                  label: "Edit Attendance",
-                  action: () => {
-                    console.log(
-                      "Edit Attendance clicked for text-based attendance"
-                    );
-                    console.log(
-                      "Setting attendance data:",
-                      parsedAttendanceData
-                    );
-                    console.log("Setting class info:", parsedClassInfo);
-                    console.log(
-                      "Setting editing message index to:",
-                      chatHistory.length
-                    );
-
-                    // Set the global state for editing
-                    console.log("Loading data into global state for editing:", {
-                      parsedAttendanceData,
-                      parsedClassInfo,
-                      messageIndex: chatHistory.length,
-                    });
-                    setAttendanceData(parsedAttendanceData);
-                    setClassInfo(parsedClassInfo);
-                    setEditingMessageIndex(chatHistory.length);
-
-                    // Verify the data was set
-                    setTimeout(() => {
-                      console.log("Global state after setting:", {
-                        attendanceData: attendanceData,
-                        classInfo: classInfo,
-                        editingMessageIndex: editingMessageIndex,
-                      });
-                    }, 100);
-
-                    // Force a re-render by updating the message to trigger edit mode
-                    setChatHistory((prev) => {
-                      const updatedHistory = [...prev];
-                      const lastMessage =
-                        updatedHistory[updatedHistory.length - 1];
-                      if (lastMessage && lastMessage.type === "bot") {
-                        // Mark this message as being edited
-                        (lastMessage as any).isBeingEdited = true;
-                        console.log(
-                          "Set isBeingEdited flag to true for message:",
-                          updatedHistory.length - 1
-                        );
-                      }
-                      return updatedHistory;
-                    });
-
-                    // Add a message to indicate edit mode is active
-                    setChatHistory((prev) => [
-                      ...prev,
-                      {
-                        type: "bot",
-                        text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
-                      },
-                    ]);
-                  },
-                },
-                {
-                  label: "Approve",
-                  action: () => {
-                    console.log(
-                      "🎯 Approve button clicked for text-based attendance"
-                    );
-                    console.log(
-                      "🎯 Current chatHistory.length:",
-                      chatHistory.length
-                    );
-                    console.log("🎯 Current global state:", {
-                      attendanceData: attendanceData,
-                      classInfo: classInfo,
-                      editingMessageIndex: editingMessageIndex,
-                    });
-                    handleTextAttendanceApproval(chatHistory.length);
-                  },
-                },
-                {
-                  label: "Reject",
-                  action: () => handleTextAttendanceRejection(),
-                },
-              ];
-            }
-
-            setChatHistory((prev) => [...prev, newMessage]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  data.data?.answer ||
-                  "Please provide student details clearly.",
-              },
-            ]);
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your attendance request.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
-      }
-    } else if (targetFlow === "voice_attendance") {
-      // Voice-based attendance flow
-      if (attendanceStep === "class_info") {
-        // First step: Process voice input for class information
-        try {
-          const data = await aiAPI.processVoiceClassInfo({
-            session_id: sessionId || userId,
-            voice_text: userMessage,
-          });
-
-          if (data.status === "success" && data.data) {
-            const classInfo = data.data.class_info;
-            setPendingClassInfo(classInfo);
-            setAttendanceStep("student_details");
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: `✅ ${
-                  data.data?.message || "Class information confirmed"
-                } Now you can speak the student names and their attendance status. For example: "Aarav present, Diya absent" or "Mark all present except John".`,
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  data.message ||
-                  "Please provide class information clearly via voice.",
-              },
-            ]);
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your voice input. Please try again.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
-      } else if (attendanceStep === "student_details") {
-        // Second step: Process voice input for student attendance
-        try {
-          const data = await aiAPI.processVoiceAttendance({
-            session_id: sessionId || userId,
-            voice_text: userMessage,
-            class_info: pendingClassInfo,
-          });
-
-          if (data.status === "success" && data.data) {
-            // Process the voice attendance data
-            const parsedAttendanceData = data.data.attendance_summary;
-            const parsedClassInfo = pendingClassInfo || data.data.class_info;
-
-            // Create the message with attendance data
-            const newMessage = {
-              type: "bot" as const,
-              answer: data.data.answer,
-              activeTab: "answer" as const,
-              attendance_summary: parsedAttendanceData,
-              class_info: parsedClassInfo,
-              voice_processed: data.data.voice_processed,
-            };
-
-            if (parsedAttendanceData && parsedAttendanceData.length > 0) {
-              setAttendanceData(parsedAttendanceData);
-              setClassInfo(parsedClassInfo);
-              setAttendanceStep("completed");
-
-              // Add buttons for voice attendance
-              (newMessage as any).buttons = [
-                {
-                  label: "Edit Attendance",
-                  action: () => {
-                    setAttendanceData(parsedAttendanceData);
-                    setClassInfo(parsedClassInfo);
-                    setEditingMessageIndex(chatHistory.length);
-
-                    setChatHistory((prev) => {
-                      const updatedHistory = [...prev];
-                      const lastMessage =
-                        updatedHistory[updatedHistory.length - 1];
-                      if (lastMessage && lastMessage.type === "bot") {
-                        (lastMessage as any).isBeingEdited = true;
-                      }
-                      return updatedHistory;
-                    });
-
-                    setChatHistory((prev) => [
-                      ...prev,
-                      {
-                        type: "bot",
-                        text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
-                      },
-                    ]);
-                  },
-                },
-                {
-                  label: "Approve",
-                  action: () => {
-                    handleVoiceAttendanceApproval(chatHistory.length);
-                  },
-                },
-                {
-                  label: "Reject",
-                  action: () => handleVoiceAttendanceRejection(),
-                },
-              ];
-            }
-
-            setChatHistory((prev) => [...prev, newMessage]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  data.message ||
-                  "Please provide student attendance information clearly via voice.",
-              },
-            ]);
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your voice attendance request.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
-      }
-    } else if (targetFlow === "leave") {
-      // Leave application flow
-      try {
-        // Get auth token from localStorage
-        const authToken = localStorage.getItem("token");
-        const { academic_session, branch_token } = getErpContext();
-
-        const data = await aiAPI.leaveChat({
-          session_id: sessionId || userId,
-          user_id: userId, // Pass user_id (will be mapped to employee UUID)
-          query: userMessage,
-          bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session,
-          branch_token,
-        });
-
-        if (data.status === "success" && data.data) {
-          const answer = data.data.answer || "";
-          const leaveData = data.data.leave_data;
-
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: answer,
-              activeTab: "answer" as const,
-            },
-          ]);
-
-          // If leave data is present, log it (you can add UI to display it)
-          if (leaveData) {
-            console.log("Leave application data:", leaveData);
-          }
-
-          // If submission failed (error message), stay in the flow to allow retry
-          if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
-          ) {
-            console.log(
-              "⚠️ Leave submission error detected, staying in flow for retry"
-            );
-            // Keep the activeFlow as "leave" so the next message stays in leave flow
-            setActiveFlow("leave");
-          }
-
-          // If submission succeeded (success message), exit the flow
-          if (answer.includes("✅") && answer.includes("successfully")) {
-            console.log("✅ Leave submitted successfully, exiting flow");
-            setTimeout(() => {
-              setActiveFlow("none");
-            }, 1000);
-          }
-        } else {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text:
-                data.message ||
-                "Sorry, there was an error processing your leave request.",
-            },
-          ]);
-          // Keep the leave flow active for retry
-          setActiveFlow("leave");
-        }
-      } catch (err) {
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "Sorry, there was an error processing your leave request.",
-          },
-        ]);
-        // Keep the leave flow active for retry
-        setActiveFlow("leave");
-      } finally {
-        setIsProcessing(false);
-      }
-    } else if (targetFlow === "assignment") {
-      // Assignment creation flow
-      try {
-        // Get auth token from localStorage
-        const authToken = localStorage.getItem("token");
-        const { academic_session, branch_token } = getErpContext();
-
-        const data = await aiAPI.assignmentChat({
-          session_id: sessionId || userId,
-          user_id: userId, // Pass user_id (will be mapped to employee UUID)
-          query: userMessage,
-          bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session,
-          branch_token,
-        });
-
-        if (data.status === "success" && data.data) {
-          const answer = data.data.answer || "";
-          const assignmentData = data.data.assignment_data;
-
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: answer,
-              activeTab: "answer" as const,
-            },
-          ]);
-
-          // If assignment data is present, log it (you can add UI to display it)
-          if (assignmentData) {
-            console.log("Assignment data:", assignmentData);
-          }
-
-          // If submission failed (error message), exit the flow
-          if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
-          ) {
-            console.log(
-              "⚠️ Assignment submission error detected, exiting flow"
-            );
-            setActiveFlow("none");
-          }
-
-          // If submission succeeded (success message), exit the flow
-          if (
-            answer.includes("✅") &&
-            answer.includes("successfully") &&
-            answer.includes("created")
-          ) {
-            console.log("✅ Assignment created successfully, exiting flow");
-            setTimeout(() => {
-              setActiveFlow("none");
-            }, 1000);
-          }
-        } else {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text:
-                data.message ||
-                "Sorry, there was an error processing your assignment request.",
-            },
-          ]);
-        }
-      } catch (err) {
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "Sorry, there was an error processing your assignment request.",
-          },
-        ]);
-      } finally {
-        setIsProcessing(false);
-      }
-    } else if (targetFlow === "course_progress") {
-      // Course progress flow - selection is handled via UI clicks
-      // This handles text-based queries or refreshes
-      try {
-        if (classSections.length === 0) {
-          // Fetch class sections if not already loaded
-          setLoadingClassSections(true);
-          const authToken = localStorage.getItem("token");
-          const { academic_session, branch_token } = getErpContext();
-          const response = await courseProgressAPI.fetchClassSections({
-            page: 1,
-            limit: 50,
-            bearer_token: authToken || undefined,
-            academic_session,
-            branch_token,
-          });
-
-          if (
-            (response.status === 200 || response.status === "success") &&
-            response.data?.options
-          ) {
-            const options = response.data.options || [];
-            setClassSections(options);
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: `📚 Found **${options.length}** class-section(s). Please select a class and section from the list above to view course progress.`,
-                classSections: options,
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  response.message ||
-                  "No class sections found. Please try again.",
-              },
-            ]);
-          }
-          setLoadingClassSections(false);
-        } else if (selectedClassSection) {
-          // If a class section is already selected, refresh the progress
-          const authToken = localStorage.getItem("token");
-          const { academic_session, branch_token } = getErpContext();
-          const progressResponse = await courseProgressAPI.getProgress({
-            classId: selectedClassSection.classId,
-            sectionId: selectedClassSection.sectionId,
-            bearer_token: authToken || undefined,
-            academic_session,
-            branch_token,
-          });
-
-          if (
-            ((progressResponse.status as any) === 200 ||
-              progressResponse.status === "success") &&
-            progressResponse.data
-          ) {
-            // The API returns data.resp according to the controller
-            const progressData =
-              (progressResponse.data as any).resp ||
-              progressResponse.data.progress ||
-              progressResponse.data;
-            setCourseProgressData(progressData);
-
-            // Format a nice summary message
-            const teacherDiarys =
-              progressData.teacherDiarys || progressData || [];
-            const totalSubjects = Array.isArray(teacherDiarys)
-              ? teacherDiarys.length
-              : 0;
-            const summaryText =
-              totalSubjects > 0
-                ? `📊 **Course Progress for ${
-                    selectedClassSection.className || "Class"
-                  } ${
-                    selectedClassSection.sectionName || "Section"
-                  }**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                : `📊 **Course Progress for ${
-                    selectedClassSection.className || "Class"
-                  } ${
-                    selectedClassSection.sectionName || "Section"
-                  }**\n\nNo progress data available yet.`;
-
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: summaryText,
-                courseProgress: progressData,
-                classSection: {
-                  classId: selectedClassSection.classId,
-                  sectionId: selectedClassSection.sectionId,
-                  className: selectedClassSection.className,
-                  sectionName: selectedClassSection.sectionName,
-                },
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  progressResponse.message ||
-                  "Failed to fetch course progress. Please try again.",
-              },
-            ]);
-          }
-        } else {
-          // Remind user to select from the list
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Please select a class and section from the list above to view course progress.",
-            },
-          ]);
-        }
-      } catch (err: any) {
-        console.error("Error in course progress flow:", err);
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: `❌ Error: ${err.message || "Unknown error occurred"}`,
-          },
-        ]);
-      } finally {
-        setIsProcessing(false);
-      }
-    } else if (targetFlow === "leave_approval") {
-      // Leave approval flow - only fetch if we don't have requests already
-      // The fetch should happen when flow is activated from dropdown, not on every message
-      if (leaveApprovalRequests.length === 0 && !loadingLeaveRequests) {
-        try {
-          setLoadingLeaveRequests(true);
-          const authToken = localStorage.getItem("token");
-          const { academic_session, branch_token } = getErpContext();
-
-          const response = await leaveApprovalAPI.fetchPendingRequests({
-            user_id: userId,
-            page: 1,
-            limit: 50,
-            bearer_token: authToken || undefined,
-            academic_session,
-            branch_token,
-          });
-
-          if (response.status === 200 && response.data) {
-            setLeaveApprovalRequests(response.data.leaveRequests || []);
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                answer: `📋 **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
-                activeTab: "answer" as const,
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
-                activeTab: "answer" as const,
-              },
-            ]);
-          }
-        } catch (err: any) {
-          console.error("Error fetching leave approval requests:", err);
-          const errorMessage =
-            err.message ||
-            err.response?.data?.message ||
-            "Unknown error occurred";
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
-            },
-          ]);
-        } finally {
-          setLoadingLeaveRequests(false);
-          setIsProcessing(false);
-        }
-      } else {
-        // If requests are already loaded, just acknowledge the message
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "You're in the Leave Approval flow. Please use the approve/reject buttons on the leave requests above to take action.",
-          },
-        ]);
-        setIsProcessing(false);
-      }
-    }
   };
 
   // Memoized answer component to prevent refresh on re-renders
@@ -2005,180 +982,6 @@ const AudioStreamerChatBot = ({
         ],
       },
     ]);
-  };
-
-  // Unified attendance data manager
-  const getAttendanceDataForApproval = (messageIndex?: number) => {
-    console.log("=== getAttendanceDataForApproval DEBUG ===");
-    console.log("messageIndex:", messageIndex);
-    console.log("chatHistory.length:", chatHistory.length);
-    console.log("Global attendanceData:", attendanceData);
-    console.log("Global attendanceData.length:", attendanceData.length);
-    console.log("Global classInfo:", classInfo);
-    console.log("editingMessageIndex:", editingMessageIndex);
-
-    // Debug: Show all messages in chat history
-    console.log("=== CHAT HISTORY DEBUG ===");
-    chatHistory.forEach((msg, idx) => {
-      console.log(`Message ${idx}:`, {
-        type: msg.type,
-        hasAttendanceSummary: !!msg.attendance_summary,
-        attendanceSummaryLength: msg.attendance_summary?.length || 0,
-        hasClassInfo: !!msg.class_info,
-        classInfo: msg.class_info,
-        hasButtons: !!(msg as any).buttons,
-      });
-    });
-
-    // Priority 1: If we're currently editing, use the global state (edited data)
-    if (editingMessageIndex !== null && attendanceData.length > 0) {
-      console.log("✅ Priority 1: Using edited data from global state");
-      return {
-        attendanceData: attendanceData,
-        classInfo: classInfo,
-        source: "edited_global_state",
-      };
-    }
-
-    // Priority 2: Try to find the most recent message with attendance data
-    console.log(
-      "🔍 Priority 2: Searching for attendance data in chat history..."
-    );
-    for (let i = chatHistory.length - 1; i >= 0; i--) {
-      const msg = chatHistory[i];
-      console.log(`Checking message ${i}:`, {
-        type: msg.type,
-        hasAttendanceSummary: !!msg.attendance_summary,
-        attendanceSummaryLength: msg.attendance_summary?.length || 0,
-        hasClassInfo: !!msg.class_info,
-        classInfo: msg.class_info,
-        hasButtons: !!(msg as any).buttons,
-      });
-
-      if (
-        msg.type === "bot" &&
-        msg.attendance_summary &&
-        msg.attendance_summary.length > 0
-      ) {
-        console.log(
-          `✅ Found attendance data in message ${i}:`,
-          msg.attendance_summary
-        );
-        return {
-          attendanceData: msg.attendance_summary,
-          classInfo: msg.class_info || classInfo,
-          source: `message_${i}`,
-        };
-      }
-    }
-
-    // Priority 2.5: Try to find any message with buttons (attendance message)
-    console.log("🔍 Priority 2.5: Searching for messages with buttons...");
-    for (let i = chatHistory.length - 1; i >= 0; i--) {
-      const msg = chatHistory[i];
-      if (
-        msg.type === "bot" &&
-        (msg as any).buttons &&
-        (msg as any).buttons.length > 0
-      ) {
-        console.log(
-          `Found message with buttons at index ${i}:`,
-          (msg as any).buttons
-        );
-        // Try to get data from this message or use global state
-        if (msg.attendance_summary && msg.attendance_summary.length > 0) {
-          console.log(
-            `✅ Using attendance data from button message ${i}:`,
-            msg.attendance_summary
-          );
-          return {
-            attendanceData: msg.attendance_summary,
-            classInfo: msg.class_info || classInfo,
-            source: `button_message_${i}`,
-          };
-        } else if (attendanceData.length > 0) {
-          console.log(
-            `✅ Using global state for button message ${i}:`,
-            attendanceData
-          );
-          return {
-            attendanceData: attendanceData,
-            classInfo: classInfo,
-            source: `button_message_global_${i}`,
-          };
-        }
-      }
-    }
-
-    // Priority 3: Use provided message index if valid
-    if (messageIndex !== undefined && messageIndex < chatHistory.length) {
-      const currentMessage = chatHistory[messageIndex];
-      console.log(
-        `🔍 Priority 3: Checking provided message index ${messageIndex}:`,
-        {
-          hasAttendanceSummary: !!currentMessage?.attendance_summary,
-          attendanceSummaryLength:
-            currentMessage?.attendance_summary?.length || 0,
-          hasClassInfo: !!currentMessage?.class_info,
-        }
-      );
-
-      if (
-        currentMessage?.attendance_summary &&
-        currentMessage.attendance_summary.length > 0
-      ) {
-        console.log(
-          `✅ Using provided message index ${messageIndex}:`,
-          currentMessage.attendance_summary
-        );
-        return {
-          attendanceData: currentMessage.attendance_summary,
-          classInfo: currentMessage.class_info || classInfo,
-          source: `provided_message_${messageIndex}`,
-        };
-      }
-    }
-
-    // Priority 4: Use global state as fallback
-    if (attendanceData.length > 0) {
-      console.log("✅ Priority 4: Using global state as fallback");
-      return {
-        attendanceData: attendanceData,
-        classInfo: classInfo,
-        source: "global_state_fallback",
-      };
-    }
-
-    // Priority 5: Last resort - try to get data from session storage
-    try {
-      const sessionAttendanceData = sessionStorage.getItem(
-        "pendingAttendanceData"
-      );
-      const sessionClassInfo = sessionStorage.getItem("pendingClassInfo");
-
-      if (sessionAttendanceData) {
-        const parsedAttendanceData = JSON.parse(sessionAttendanceData);
-        const parsedClassInfo = sessionClassInfo
-          ? JSON.parse(sessionClassInfo)
-          : null;
-
-        console.log("✅ Priority 5: Using session storage data:", {
-          attendanceData: parsedAttendanceData,
-          classInfo: parsedClassInfo,
-        });
-
-        return {
-          attendanceData: parsedAttendanceData,
-          classInfo: parsedClassInfo,
-          source: "session_storage",
-        };
-      }
-    } catch (err) {
-      console.log("Error reading from session storage:", err);
-    }
-
-    console.log("❌ No attendance data found in any priority");
-    return null;
   };
 
   // Unified attendance approval handler
@@ -6365,25 +5168,25 @@ const AudioStreamerChatBot = ({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) =>
-                e.key === "Enter" && !isRecording && handleSubmit()
+                e.key === "Enter" && !voiceEngine.isRecording && handleSubmit()
               }
               className="chatbot-input text-base sm:text-lg px-3 py-2 sm:px-4 sm:py-3 min-h-[40px] sm:min-h-[48px]"
-              disabled={isRecording}
+              disabled={voiceEngine.isRecording}
             />
             <button
-              onClick={isRecording ? stopStreaming : startStreaming}
+              onClick={voiceEngine.isRecording ? voiceEngine.stopStreaming : voiceEngine.startStreaming}
               className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
-                isRecording ? " recording" : ""
+                voiceEngine.isRecording ? " recording" : ""
               }`}
-              title={isRecording ? "Stop Recording" : "Start Recording"}
+              title={voiceEngine.isRecording ? "Stop Recording" : "Start Recording"}
             >
-              {isRecording ? <FiMicOff /> : <FiMic />}
+              {voiceEngine.isRecording ? <FiMicOff /> : <FiMic />}
             </button>
             <button
               onClick={handleSubmit}
               className="chatbot-btn send"
               title="Send Message"
-              disabled={isRecording}
+              disabled={voiceEngine.isRecording}
             >
               <FiSend />
             </button>
