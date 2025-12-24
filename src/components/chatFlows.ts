@@ -117,21 +117,63 @@ export const handleAttendanceFlow = async (
   const { attendanceStep, pendingClassInfo } = context;
 
   if (attendanceStep === 'class_info') {
-    // First step: Collect class information
+    // First step: Auto-fetch class information for class teachers, or collect from user
     try {
+      // Use a simple query that allows backend to auto-fetch if user_id is provided
+      const queryText = userMessage.trim() || "mark attendance";
+      
       const data = await aiAPI.chat({
         session_id: context.sessionId || context.userId,
-        query: `Extract class information from: "${userMessage}". Please identify and extract:
-          1. Class name/number (e.g., 6, 10, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K, LKG, UKG, etc.)
-          2. Section (e.g., A, B, C, Section A, etc.) 
-          3. Date (any format: 2025-01-15, 15/01/2025, Jan 15 2025, 15th January 2025, 5 August 2025, etc.)
-          
-          Return the information in a structured format with class_info object containing class_, section, and date fields. If any information is missing, ask for clarification.`,
+        user_id: context.userId,  // Pass user_id to auto-fetch class/section
+        query: queryText,
       });
 
       if (data.status === 'success' && data.data) {
         const classInfo = data.data.class_info;
         const answer = data.data.answer || '';
+
+        // Check if the answer indicates class/section/date were auto-fetched
+        // The backend will return a message like "Ready to mark attendance for Class X Section Y on date"
+        const isAutoFetched = answer.includes('Ready to mark attendance') || 
+                             (answer.includes('Class') && answer.includes('Section') && answer.includes('on'));
+        
+        if (isAutoFetched) {
+          // Try to extract class info from the answer if backend provided it in class_info
+          if (classInfo && classInfo.class_ && classInfo.section && classInfo.date) {
+            return {
+              success: true,
+              message: {
+                type: 'bot',
+                text: answer || `✅ Ready to mark attendance for Class ${classInfo.class_} Section ${classInfo.section} on ${classInfo.date}.\n\nPlease provide student attendance details.`,
+              },
+              shouldUpdateStep: 'student_details',
+              shouldUpdateClassInfo: classInfo,
+            };
+          }
+          
+          // If class_info not in response, try to parse from answer text
+          const classMatch = answer.match(/Class\s+(\w+)/i);
+          const sectionMatch = answer.match(/Section\s+(\w+)/i);
+          const dateMatch = answer.match(/on\s+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/i);
+          
+          if (classMatch && sectionMatch && dateMatch) {
+            const extractedClassInfo = {
+              class_: classMatch[1],
+              section: sectionMatch[1],
+              date: dateMatch[1],
+            };
+            
+            return {
+              success: true,
+              message: {
+                type: 'bot',
+                text: answer,
+              },
+              shouldUpdateStep: 'student_details',
+              shouldUpdateClassInfo: extractedClassInfo,
+            };
+          }
+        }
 
         // Enhanced validation for class information
         if (classInfo && classInfo.class_ && classInfo.section && classInfo.date) {
@@ -250,6 +292,7 @@ export const handleAttendanceFlow = async (
     try {
       const data = await aiAPI.chat({
         session_id: context.sessionId || context.userId,
+        user_id: context.userId,  // Pass user_id for consistency
         query: `Process and verify attendance for ${
           pendingClassInfo
             ? `Class ${pendingClassInfo.class_} ${pendingClassInfo.section} on ${pendingClassInfo.date}`

@@ -159,11 +159,8 @@ export const useChatController = (options: UseChatControllerOptions) => {
           onSetAttendanceStep('class_info');
           onSetPendingClassInfo(null);
 
-          // Add welcome message for auto-detected attendance flow
-          onUpdateChatHistory({
-            type: 'bot',
-            text: "✅ Attendance flow detected! I'll help you mark attendance. Please provide class information (class name, section, and date). For example: 'Class 3 A on 2025-12-06' or 'Class 6 section B today'.",
-          });
+          // Don't add welcome message here - let the backend auto-fetch and respond
+          // The backend will automatically fetch class/section for class teachers
         }
       }
 
