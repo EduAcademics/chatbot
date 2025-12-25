@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL } from "../config/api";
 
 // Types
 export interface LoginCredentials {
@@ -124,11 +124,11 @@ interface ProcessVoiceAttendanceResponse {
 
 interface LeaveChatRequest {
   session_id: string;
-  user_id?: string;  // Optional: user ID (will be mapped to employee UUID)
+  user_id?: string; // Optional: user ID (will be mapped to employee UUID)
   query: string;
-  bearer_token?: string;  // Optional: Bearer token for ERP API
-  academic_session?: string;  // Optional: Academic session
-  branch_token?: string;  // Optional: Branch token
+  bearer_token?: string; // Optional: Bearer token for ERP API
+  academic_session?: string; // Optional: Academic session
+  branch_token?: string; // Optional: Branch token
 }
 
 interface LeaveChatResponse {
@@ -153,11 +153,12 @@ interface LeaveChatResponse {
 
 interface AssignmentChatRequest {
   session_id: string;
-  user_id?: string;  // Optional: user ID (will be mapped to employee UUID)
+  user_id?: string; // Optional: user ID (will be mapped to employee UUID)
   query: string;
-  bearer_token?: string;  // Optional: Bearer token for ERP API
-  academic_session?: string;  // Optional: Academic session
-  branch_token?: string;  // Optional: Branch token
+  bearer_token?: string; // Optional: Bearer token for ERP API
+  academic_session?: string; // Optional: Academic session
+  branch_token?: string; // Optional: Branch token
+  is_voice_input?: boolean; // Optional: Flag indicating voice input
 }
 
 interface AssignmentChatResponse {
@@ -173,6 +174,11 @@ interface AssignmentChatResponse {
       description: string;
       attachments: any[];
     };
+    // Flow signals for voice mode
+    keep_listening?: boolean;
+    flow_status?: string;
+    fields_remaining?: number;
+    play_audio?: boolean;
   };
   message?: string;
 }
@@ -241,7 +247,7 @@ interface TextToSpeechRequest {
 
 interface FeedbackRequest {
   message_index: number;
-  feedback: 'Approved' | 'Rejected';
+  feedback: "Approved" | "Rejected";
   comment?: string;
 }
 
@@ -251,35 +257,33 @@ interface FeedbackResponse {
 
 // Helper function to get auth token
 const getAuthToken = (): string | null => {
-  return localStorage.getItem('token');
+  return localStorage.getItem("token");
 };
 
 // Helper function to get default headers
 const getDefaultHeaders = (includeAuth: boolean = false): HeadersInit => {
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (includeAuth) {
     const token = getAuthToken();
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      headers["Authorization"] = `Bearer ${token}`;
     }
   }
 
   return headers;
 };
 
-
- export const getAIHeaders = (): HeadersInit => {
+export const getAIHeaders = (): HeadersInit => {
   const headers = getDefaultHeaders(true) as Record<string, string>;
 
-  const academicSession =
-    localStorage.getItem('academic_session') || '2025-26';
-  const branchToken = localStorage.getItem('branch_token') || 'indp';
+  const academicSession = localStorage.getItem("academic_session") || "2025-26";
+  const branchToken = localStorage.getItem("branch_token") || "indp";
 
-  headers['x-academic-session'] = academicSession;
-  headers['x-branch-token'] = branchToken;
+  headers["x-academic-session"] = academicSession;
+  headers["x-branch-token"] = branchToken;
 
   return headers;
 };
@@ -288,7 +292,7 @@ const getDefaultHeaders = (includeAuth: boolean = false): HeadersInit => {
 export const authAPI = {
   login: async (credentials: LoginCredentials): Promise<LoginResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/auth/login`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(credentials),
     });
@@ -296,7 +300,7 @@ export const authAPI = {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || 'Login failed');
+      throw new Error(data.message || "Login failed");
     }
 
     return data;
@@ -307,7 +311,7 @@ export const authAPI = {
 export const userAPI = {
   fetch: async (request: UserFetchRequest): Promise<UserFetchResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/user/fetch`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(true),
       body: JSON.stringify(request),
     });
@@ -319,9 +323,11 @@ export const userAPI = {
 // AI API
 export const aiAPI = {
   // Query handler
-  queryHandler: async (request: QueryHandlerRequest): Promise<QueryHandlerResponse> => {
+  queryHandler: async (
+    request: QueryHandlerRequest
+  ): Promise<QueryHandlerResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/query-handler`, {
-      method: 'POST',
+      method: "POST",
       headers: getAIHeaders(),
       body: JSON.stringify(request),
     });
@@ -332,7 +338,7 @@ export const aiAPI = {
   // Chat endpoint (used for multiple purposes)
   chat: async (request: ChatRequest): Promise<ChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/chat`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
@@ -343,16 +349,16 @@ export const aiAPI = {
   // Upload regular file
   uploadFile: async (request: UploadFileRequest): Promise<any> => {
     const formData = new FormData();
-    formData.append('file', request.file);
-    formData.append('session_id', request.session_id);
+    formData.append("file", request.file);
+    formData.append("session_id", request.session_id);
 
     const response = await fetch(`${API_BASE_URL}/v1/ai/upload-file`, {
-      method: 'POST',
+      method: "POST",
       body: formData,
     });
 
     if (!response.ok) {
-      throw new Error('Upload failed');
+      throw new Error("Upload failed");
     }
 
     return await response.json();
@@ -363,19 +369,22 @@ export const aiAPI = {
     request: ProcessAttendanceImageRequest
   ): Promise<ProcessAttendanceImageResponse> => {
     const formData = new FormData();
-    formData.append('file', request.file);
-    formData.append('session_id', request.session_id);
-    formData.append('class_', request.class_);
-    formData.append('section', request.section);
-    formData.append('date', request.date);
+    formData.append("file", request.file);
+    formData.append("session_id", request.session_id);
+    formData.append("class_", request.class_);
+    formData.append("section", request.section);
+    formData.append("date", request.date);
 
-    const response = await fetch(`${API_BASE_URL}/v1/ai/process-attendance-image`, {
-      method: 'POST',
-      body: formData,
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/process-attendance-image`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
 
     if (!response.ok) {
-      throw new Error('Image processing failed');
+      throw new Error("Image processing failed");
     }
 
     return await response.json();
@@ -385,11 +394,14 @@ export const aiAPI = {
   processVoiceClassInfo: async (
     request: ProcessVoiceClassInfoRequest
   ): Promise<ProcessVoiceClassInfoResponse> => {
-    const response = await fetch(`${API_BASE_URL}/v1/ai/process-voice-class-info`, {
-      method: 'POST',
-      headers: getDefaultHeaders(),
-      body: JSON.stringify(request),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/process-voice-class-info`,
+      {
+        method: "POST",
+        headers: getDefaultHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
 
     return await response.json();
   },
@@ -398,51 +410,63 @@ export const aiAPI = {
   processVoiceAttendance: async (
     request: ProcessVoiceAttendanceRequest
   ): Promise<ProcessVoiceAttendanceResponse> => {
-    const response = await fetch(`${API_BASE_URL}/v1/ai/process-voice-attendance`, {
-      method: 'POST',
-      headers: getDefaultHeaders(),
-      body: JSON.stringify(request),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/process-voice-attendance`,
+      {
+        method: "POST",
+        headers: getDefaultHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
 
     return await response.json();
   },
 
   // Start full voice attendance flow
-  startFullVoiceAttendance: async (
-    request: { session_id: string }
-  ): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/v1/ai/start-full-voice-attendance`, {
-      method: 'POST',
-      headers: getDefaultHeaders(),
-      body: JSON.stringify(request),
-    });
+  startFullVoiceAttendance: async (request: {
+    session_id: string;
+  }): Promise<any> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/start-full-voice-attendance`,
+      {
+        method: "POST",
+        headers: getDefaultHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
 
     return await response.json();
   },
 
   // Process full voice attendance input
-  processFullVoiceAttendance: async (
-    request: { session_id: string; voice_text: string }
-  ): Promise<any> => {
-    const response = await fetch(`${API_BASE_URL}/v1/ai/process-full-voice-attendance`, {
-      method: 'POST',
-      headers: getDefaultHeaders(),
-      body: JSON.stringify(request),
-    });
+  processFullVoiceAttendance: async (request: {
+    session_id: string;
+    voice_text: string;
+  }): Promise<any> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/process-full-voice-attendance`,
+      {
+        method: "POST",
+        headers: getDefaultHeaders(),
+        body: JSON.stringify(request),
+      }
+    );
 
     return await response.json();
   },
 
   // Text to speech
-  textToSpeech: async (request: TextToSpeechRequest): Promise<ReadableStreamDefaultReader<Uint8Array> | null> => {
+  textToSpeech: async (
+    request: TextToSpeechRequest
+  ): Promise<ReadableStreamDefaultReader<Uint8Array> | null> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/text-to-speech`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
 
     if (!response.ok) {
-      throw new Error('TTS failed');
+      throw new Error("TTS failed");
     }
 
     return response.body?.getReader() || null;
@@ -451,7 +475,7 @@ export const aiAPI = {
   // Feedback
   feedback: async (request: FeedbackRequest): Promise<FeedbackResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/feedback`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
@@ -462,7 +486,7 @@ export const aiAPI = {
   // Leave chat
   leaveChat: async (request: LeaveChatRequest): Promise<LeaveChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/leave-chat`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
@@ -471,9 +495,11 @@ export const aiAPI = {
   },
 
   // Assignment chat
-  assignmentChat: async (request: AssignmentChatRequest): Promise<AssignmentChatResponse> => {
+  assignmentChat: async (
+    request: AssignmentChatRequest
+  ): Promise<AssignmentChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/assignment-chat`, {
-      method: 'POST',
+      method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
     });
@@ -482,18 +508,24 @@ export const aiAPI = {
   },
 
   // Upload assignment file
-  uploadAssignmentFile: async (file: File, session_id: string): Promise<any> => {
+  uploadAssignmentFile: async (
+    file: File,
+    session_id: string
+  ): Promise<any> => {
     const formData = new FormData();
-    formData.append('file', file);
-    formData.append('session_id', session_id);
+    formData.append("file", file);
+    formData.append("session_id", session_id);
 
-    const response = await fetch(`${API_BASE_URL}/v1/ai/upload-assignment-file`, {
-      method: 'POST',
-      body: formData,
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/upload-assignment-file`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
 
     if (!response.ok) {
-      throw new Error('Assignment file upload failed');
+      throw new Error("Assignment file upload failed");
     }
 
     return await response.json();
@@ -503,7 +535,9 @@ export const aiAPI = {
 // Leave Approval API
 export const leaveApprovalAPI = {
   // Fetch pending leave requests for approval
-  fetchPendingRequests: async (request: LeaveApprovalRequest): Promise<LeaveApprovalResponse> => {
+  fetchPendingRequests: async (
+    request: LeaveApprovalRequest
+  ): Promise<LeaveApprovalResponse> => {
     const params = new URLSearchParams({
       user_id: request.user_id,
       page: String(request.page || 1),
@@ -511,29 +545,29 @@ export const leaveApprovalAPI = {
     });
 
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     if (request.bearer_token) {
-      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
     }
     if (request.academic_session) {
-      headers['x-academic-session'] = request.academic_session;
+      headers["x-academic-session"] = request.academic_session;
     }
     if (request.branch_token) {
-      headers['x-branch-token'] = request.branch_token;
+      headers["x-branch-token"] = request.branch_token;
     }
 
     const response = await fetch(
       `${API_BASE_URL}/v1/ai/leave-approval-requests?${params.toString()}`,
       {
-        method: 'GET',
+        method: "GET",
         headers,
       }
     );
 
     if (!response.ok) {
-      throw new Error('Failed to fetch leave approval requests');
+      throw new Error("Failed to fetch leave approval requests");
     }
 
     return await response.json();
@@ -542,32 +576,35 @@ export const leaveApprovalAPI = {
   // Approve a leave request
   approve: async (request: ApproveLeaveRequest): Promise<any> => {
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     if (request.bearer_token) {
-      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
     }
     if (request.academic_session) {
-      headers['x-academic-session'] = request.academic_session;
+      headers["x-academic-session"] = request.academic_session;
     }
     if (request.branch_token) {
-      headers['x-branch-token'] = request.branch_token;
+      headers["x-branch-token"] = request.branch_token;
     }
 
-    const response = await fetch(`${API_BASE_URL}/v1/ai/leave-approval/approve`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        leave_request_uuid: request.leave_request_uuid,
-        bearer_token: request.bearer_token,
-        academic_session: request.academic_session,
-        branch_token: request.branch_token,
-      }),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/leave-approval/approve`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          leave_request_uuid: request.leave_request_uuid,
+          bearer_token: request.bearer_token,
+          academic_session: request.academic_session,
+          branch_token: request.branch_token,
+        }),
+      }
+    );
 
     if (!response.ok) {
-      throw new Error('Failed to approve leave request');
+      throw new Error("Failed to approve leave request");
     }
 
     return await response.json();
@@ -576,33 +613,36 @@ export const leaveApprovalAPI = {
   // Reject a leave request
   reject: async (request: RejectLeaveRequest): Promise<any> => {
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     if (request.bearer_token) {
-      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
     }
     if (request.academic_session) {
-      headers['x-academic-session'] = request.academic_session;
+      headers["x-academic-session"] = request.academic_session;
     }
     if (request.branch_token) {
-      headers['x-branch-token'] = request.branch_token;
+      headers["x-branch-token"] = request.branch_token;
     }
 
-    const response = await fetch(`${API_BASE_URL}/v1/ai/leave-approval/reject`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        leave_request_uuid: request.leave_request_uuid,
-        reject_reason: request.reject_reason,
-        bearer_token: request.bearer_token,
-        academic_session: request.academic_session,
-        branch_token: request.branch_token,
-      }),
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/leave-approval/reject`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          leave_request_uuid: request.leave_request_uuid,
+          reject_reason: request.reject_reason,
+          bearer_token: request.bearer_token,
+          academic_session: request.academic_session,
+          branch_token: request.branch_token,
+        }),
+      }
+    );
 
     if (!response.ok) {
-      throw new Error('Failed to reject leave request');
+      throw new Error("Failed to reject leave request");
     }
 
     return await response.json();
@@ -610,23 +650,7 @@ export const leaveApprovalAPI = {
 };
 
 // Course Progress API
-const ERP_API_BASE_URL = 'https://api.eduacademics.com';
-
-interface ClassSectionOption {
-  _id: string;
-  classId: string;
-  sectionId: string;
-  className?: string;
-  sectionName?: string;
-  class?: {
-    name: string;
-    _id: string;
-  };
-  section?: {
-    name: string;
-    _id: string;
-  };
-}
+const ERP_API_BASE_URL = "https://api.eduacademics.com";
 
 interface FetchClassSectionsRequest {
   page?: number;
@@ -678,70 +702,73 @@ interface GetCourseProgressResponse {
 
 export const courseProgressAPI = {
   // Fetch class and section options
-  fetchClassSections: async (request: FetchClassSectionsRequest): Promise<FetchClassSectionsResponse> => {
+  fetchClassSections: async (
+    request: FetchClassSectionsRequest
+  ): Promise<FetchClassSectionsResponse> => {
     const params = new URLSearchParams({
       page: String(request.page || 1),
       limit: String(request.limit || 20),
     });
 
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     if (request.bearer_token) {
-      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
     }
     if (request.academic_session) {
-      headers['x-academic-session'] = request.academic_session;
+      headers["x-academic-session"] = request.academic_session;
     }
     if (request.branch_token) {
-      headers['x-branch-token'] = request.branch_token;
+      headers["x-branch-token"] = request.branch_token;
     }
 
     const response = await fetch(
       `${ERP_API_BASE_URL}/v1/list-options/my-class-sections?${params.toString()}`,
       {
-        method: 'GET',
+        method: "GET",
         headers,
       }
     );
 
     if (!response.ok) {
-      throw new Error('Failed to fetch class sections');
+      throw new Error("Failed to fetch class sections");
     }
 
     return await response.json();
   },
 
   // Get course progress for a class and section
-  getProgress: async (request: GetCourseProgressRequest): Promise<GetCourseProgressResponse> => {
+  getProgress: async (
+    request: GetCourseProgressRequest
+  ): Promise<GetCourseProgressResponse> => {
     const headers: HeadersInit = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     if (request.bearer_token) {
-      headers['Authorization'] = `Bearer ${request.bearer_token}`;
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
     }
     if (request.academic_session) {
-      headers['x-academic-session'] = request.academic_session;
+      headers["x-academic-session"] = request.academic_session;
     }
     if (request.branch_token) {
-      headers['x-branch-token'] = request.branch_token;
+      headers["x-branch-token"] = request.branch_token;
     }
 
     const response = await fetch(
       `${ERP_API_BASE_URL}/v1/teacher-diary/get-progress/${request.classId}/${request.sectionId}`,
       {
-        method: 'GET',
+        method: "GET",
         headers,
       }
     );
 
     if (!response.ok) {
-      throw new Error('Failed to fetch course progress');
+      throw new Error("Failed to fetch course progress");
     }
 
     return await response.json();
   },
 };
-

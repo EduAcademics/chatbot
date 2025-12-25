@@ -1,16 +1,31 @@
 /**
  * useVoiceEngine.ts
- * 
- * RESPONSIBILITY: Voice streaming only
+ *
+ * RESPONSIBILITY: Voice streaming and continuous listening
  * - WebSocket connection management
  * - AudioContext and microphone handling
  * - Audio processing and conversion
+ * - Flow control signal handling from backend
+ * - Continuous listening mode management
  * - No flow logic, no routing logic
  */
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState } from "react";
 
 const WS_BASE = import.meta.env.VITE_WS_BASE_URL;
+
+// Flow control signal from backend
+export interface FlowSignal {
+  keep_listening: boolean;
+  flow_status:
+    | "in_progress"
+    | "ready_to_submit"
+    | "complete"
+    | "cancelled"
+    | "error";
+  fields_remaining: number;
+  play_audio: boolean;
+}
 
 export interface UseVoiceEngineOptions {
   selectedDeviceId: string;
@@ -19,12 +34,15 @@ export interface UseVoiceEngineOptions {
   isProcessing: boolean;
   onTextUpdate: (text: string) => void;
   onAutoSubmit?: () => void;
+  onFlowSignal?: (signal: FlowSignal) => void;
 }
 
 export interface UseVoiceEngineReturn {
   startStreaming: () => Promise<void>;
   stopStreaming: () => void;
   isRecording: boolean;
+  continuousMode: boolean;
+  handleFlowSignal: (signal: FlowSignal) => void;
 }
 
 const convertFloat32ToInt16 = (buffer: Float32Array): Int16Array => {
@@ -46,6 +64,7 @@ export const useVoiceEngine = (
     isProcessing,
     onTextUpdate,
     onAutoSubmit,
+    onFlowSignal,
   } = options;
 
   const socketRef = useRef<WebSocket | null>(null);
@@ -54,14 +73,17 @@ export const useVoiceEngine = (
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const [isRecording, setIsRecording] = useState<boolean>(false);
-  const fullVoiceAutoSubmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [continuousMode, setContinuousMode] = useState<boolean>(false);
+  const fullVoiceAutoSubmitTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   const startStreaming = useCallback(async () => {
     try {
       // Request microphone
       const stream = await navigator.mediaDevices.getUserMedia({
         audio:
-          selectedDeviceId === 'default'
+          selectedDeviceId === "default"
             ? true
             : { deviceId: { exact: selectedDeviceId } },
       });
@@ -100,7 +122,7 @@ export const useVoiceEngine = (
         onTextUpdate(newText);
 
         // For full voice attendance flow, implement 3-second auto-submit
-        if (activeFlow === 'full_voice_attendance' && onAutoSubmit) {
+        if (activeFlow === "full_voice_attendance" && onAutoSubmit) {
           // Clear existing timer
           if (fullVoiceAutoSubmitTimerRef.current) {
             clearTimeout(fullVoiceAutoSubmitTimerRef.current);
@@ -113,21 +135,70 @@ export const useVoiceEngine = (
             }
           }, 3000);
         }
+
+        // In continuous mode, don't auto-close the socket
+        // Let the backend signal via flow_signal whether to keep listening
       };
 
       socket.onerror = (err) => {
-        console.error('WebSocket error:', err);
+        console.error("WebSocket error:", err);
       };
 
       socket.onclose = () => {
+        setContinuousMode(false);
         setIsRecording(false);
-        console.log('WebSocket closed');
+        console.log("WebSocket closed");
       };
     } catch (error) {
-      console.error('Error starting voice streaming:', error);
+      console.error("Error starting voice streaming:", error);
       setIsRecording(false);
     }
-  }, [selectedDeviceId, selectedLanguage, activeFlow, isProcessing, onTextUpdate, onAutoSubmit]);
+  }, [
+    selectedDeviceId,
+    selectedLanguage,
+    activeFlow,
+    isProcessing,
+    onTextUpdate,
+    onAutoSubmit,
+  ]);
+
+  // Handle flow signal from backend (Component 1, Change 5)
+  const handleFlowSignal = useCallback(
+    (signal: FlowSignal) => {
+      console.log("[Voice Engine] Received flow signal:", signal);
+
+      if (signal.keep_listening) {
+        // Backend wants us to keep listening for more input
+        setContinuousMode(true);
+        console.log("[Voice Engine] Entering continuous listening mode");
+      } else {
+        // Backend signals to stop listening (exit, complete, error, etc.)
+        setContinuousMode(false);
+        console.log(
+          `[Voice Engine] Exiting listening mode - flow_status: ${signal.flow_status}`
+        );
+
+        // Close the socket and mic for final responses
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.close();
+        }
+
+        // Stop recording for completion/error states
+        if (
+          signal.flow_status === "complete" ||
+          signal.flow_status === "error"
+        ) {
+          // Will be handled by stopStreaming()
+        }
+      }
+
+      // Pass signal to parent component (AudioStreamerChatBot)
+      if (onFlowSignal) {
+        onFlowSignal(signal);
+      }
+    },
+    [onFlowSignal]
+  );
 
   const stopStreaming = useCallback(() => {
     processorRef.current?.disconnect();
@@ -155,6 +226,8 @@ export const useVoiceEngine = (
       fullVoiceAutoSubmitTimerRef.current = null;
     }
 
+    // Reset continuous mode when stopping
+    setContinuousMode(false);
     setIsRecording(false);
 
     // Call onAutoSubmit when stopping (for normal voice input)
@@ -167,6 +240,7 @@ export const useVoiceEngine = (
     startStreaming,
     stopStreaming,
     isRecording,
+    continuousMode,
+    handleFlowSignal,
   };
 };
-

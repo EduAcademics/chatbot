@@ -1,6 +1,6 @@
 /**
  * useChatController.ts
- * 
+ *
  * RESPONSIBILITY: Orchestration, replaces handleSubmit
  * - Calls router
  * - Delegates to flows
@@ -8,9 +8,11 @@
  * - Manages state transitions
  */
 
-import { useCallback } from 'react';
-import { routeMessage, FlowType, isExitCommand } from './chatRouter';
-import { executeFlow, FlowContext, FlowResult } from './chatFlows';
+import { useCallback } from "react";
+import { routeMessage, isExitCommand } from "./chatRouter";
+import type { FlowType } from "./chatRouter";
+import { executeFlow } from "./chatFlows";
+import type { FlowContext } from "./chatFlows";
 
 export interface UseChatControllerOptions {
   userId: string;
@@ -18,7 +20,7 @@ export interface UseChatControllerOptions {
   email: string;
   sessionId: string | null;
   activeFlow: FlowType;
-  attendanceStep: 'class_info' | 'student_details' | 'completed';
+  attendanceStep: "class_info" | "student_details" | "completed";
   pendingClassInfo: any;
   classSections: any[];
   selectedClassSection: any;
@@ -28,7 +30,9 @@ export interface UseChatControllerOptions {
   autoRouting: boolean;
   onUpdateChatHistory: (message: any) => void;
   onSetActiveFlow: (flow: FlowType) => void;
-  onSetAttendanceStep: (step: 'class_info' | 'student_details' | 'completed') => void;
+  onSetAttendanceStep: (
+    step: "class_info" | "student_details" | "completed"
+  ) => void;
   onSetPendingClassInfo: (info: any) => void;
   onSetAttendanceData: (data: any[]) => void;
   onSetClassInfo: (info: any) => void;
@@ -42,12 +46,19 @@ export interface UseChatControllerOptions {
   getAttendanceDataForApproval: (messageIndex?: number) => any;
   getEditingMessageIndex: () => number | null;
   getChatHistoryLength: () => number;
+  onFlowSignal?: (signals: {
+    keep_listening?: boolean;
+    flow_status?: string;
+    voice_mode_active?: boolean;
+  }) => void;
   createAttendanceButtons: (
     attendanceData: any[],
     classInfo: any,
     messageIndex: number,
-    type: 'text' | 'voice' | 'image'
+    type: "text" | "voice" | "image"
   ) => { label: string; action: () => void }[];
+  isVoiceInputRef?: React.MutableRefObject<boolean>;
+  activeFlowRef?: React.MutableRefObject<string>;
 }
 
 export const useChatController = (options: UseChatControllerOptions) => {
@@ -78,6 +89,9 @@ export const useChatController = (options: UseChatControllerOptions) => {
     onSetDetectedFlow,
     onSetClassificationConfidence,
     createAttendanceButtons,
+    onFlowSignal,
+    isVoiceInputRef,
+    activeFlowRef,
   } = options;
 
   const handleSubmit = useCallback(
@@ -86,25 +100,34 @@ export const useChatController = (options: UseChatControllerOptions) => {
 
       const trimmedMessage = userMessage.trim();
 
-      console.log('🚀 handleSubmit START:', {
+      // Use ref for more reliable active flow detection (state may be stale)
+      const currentActiveFlow = activeFlowRef?.current || activeFlow;
+
+      console.log("🚀 handleSubmit START:", {
         userMessage: trimmedMessage,
         activeFlow,
+        activeFlowRef: activeFlowRef?.current,
+        currentActiveFlow,
         userOptionSelected,
         autoRouting,
       });
 
       // Add user message to chat history
-      onUpdateChatHistory({ type: 'user', text: trimmedMessage });
+      onUpdateChatHistory({ type: "user", text: trimmedMessage });
       onSetIsProcessing(true);
 
       // CHECK FOR EXIT KEYWORDS
-      if (isExitCommand(trimmedMessage) && activeFlow !== 'none' && activeFlow !== 'query') {
-        console.log('🚪 Exit command detected, exiting flow:', activeFlow);
-        onSetActiveFlow('none');
-        onSetAttendanceStep('class_info');
+      if (
+        isExitCommand(trimmedMessage) &&
+        activeFlow !== "none" &&
+        activeFlow !== "query"
+      ) {
+        console.log("🚪 Exit command detected, exiting flow:", activeFlow);
+        onSetActiveFlow("none");
+        onSetAttendanceStep("class_info");
         onSetPendingClassInfo(null);
         onUpdateChatHistory({
-          type: 'bot',
+          type: "bot",
           text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
         });
         onSetIsProcessing(false);
@@ -112,21 +135,28 @@ export const useChatController = (options: UseChatControllerOptions) => {
         return;
       }
 
-      // Route message
+      // Route message - use currentActiveFlow (from ref) for reliable routing
       const routerContext = {
-        activeFlow,
+        activeFlow: currentActiveFlow as FlowType,
         attendanceStep,
         pendingClassInfo,
         userOptionSelected,
         autoRouting,
       };
 
-      const routingResult = await routeMessage(trimmedMessage, routerContext, userId, roles);
+      console.log("📍 Router context:", routerContext);
+
+      const routingResult = await routeMessage(
+        trimmedMessage,
+        routerContext,
+        userId,
+        roles
+      );
 
       let targetFlow = routingResult.targetFlow;
       const classificationResult = routingResult.classificationResult;
 
-      console.log('📍 Target flow determined:', targetFlow);
+      console.log("📍 Target flow determined:", targetFlow);
 
       // Update UI to show detected flow
       if (classificationResult) {
@@ -142,26 +172,26 @@ export const useChatController = (options: UseChatControllerOptions) => {
       }
 
       // Initialize flow state when detected
-      if (targetFlow === 'attendance' || targetFlow === 'voice_attendance') {
+      if (targetFlow === "attendance" || targetFlow === "voice_attendance") {
         if (
           !(
-            activeFlow === 'attendance' &&
-            attendanceStep === 'student_details' &&
+            currentActiveFlow === "attendance" &&
+            attendanceStep === "student_details" &&
             pendingClassInfo
           ) &&
           !(
-            activeFlow === 'voice_attendance' &&
-            attendanceStep === 'student_details' &&
+            currentActiveFlow === "voice_attendance" &&
+            attendanceStep === "student_details" &&
             pendingClassInfo
           )
         ) {
-          console.log('📍 Initializing attendance flow state');
-          onSetAttendanceStep('class_info');
+          console.log("📍 Initializing attendance flow state");
+          onSetAttendanceStep("class_info");
           onSetPendingClassInfo(null);
 
           // Add welcome message for auto-detected attendance flow
           onUpdateChatHistory({
-            type: 'bot',
+            type: "bot",
             text: "✅ Attendance flow detected! I'll help you mark attendance. Please provide class information (class name, section, and date). For example: 'Class 3 A on 2025-12-06' or 'Class 6 section B today'.",
           });
         }
@@ -170,23 +200,25 @@ export const useChatController = (options: UseChatControllerOptions) => {
       // Check if this is a new flow initialization
       const isNewFlowInitialization =
         classificationResult &&
-        (activeFlow === 'none' || activeFlow === 'query' || activeFlow !== targetFlow);
+        (currentActiveFlow === "none" ||
+          currentActiveFlow === "query" ||
+          currentActiveFlow !== targetFlow);
 
       // Initialize assignment flow
-      if (targetFlow === 'assignment' && isNewFlowInitialization) {
-        console.log('📍 Initializing assignment flow state');
-        onSetActiveFlow('assignment');
+      if (targetFlow === "assignment" && isNewFlowInitialization) {
+        console.log("📍 Initializing assignment flow state");
+        onSetActiveFlow("assignment");
         // Don't return here - let the user's message be processed by the API
       }
 
       // Initialize leave flow
-      if (targetFlow === 'leave' && isNewFlowInitialization) {
-        console.log('📍 Initializing leave flow state');
-        onSetActiveFlow('leave');
+      if (targetFlow === "leave" && isNewFlowInitialization) {
+        console.log("📍 Initializing leave flow state");
+        onSetActiveFlow("leave");
 
         // Add welcome message matching manual mode
         onUpdateChatHistory({
-          type: 'bot',
+          type: "bot",
           text: "📝 **Leave Application Flow Activated!** I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
         });
 
@@ -196,16 +228,16 @@ export const useChatController = (options: UseChatControllerOptions) => {
       }
 
       // If still no flow selected after classification, prompt user
-      if (!userOptionSelected && targetFlow === 'none') {
+      if (!userOptionSelected && targetFlow === "none") {
         onUpdateChatHistory({
-          type: 'bot',
+          type: "bot",
           text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.",
         });
         onSetIsProcessing(false);
         return;
       }
 
-      console.log('📍 Routing to flow:', targetFlow);
+      console.log("📍 Routing to flow:", targetFlow);
 
       // Update active flow for next message (unless manually overridden)
       if (autoRouting) {
@@ -224,28 +256,49 @@ export const useChatController = (options: UseChatControllerOptions) => {
         selectedClassSection,
         leaveApprovalRequests,
         loadingLeaveRequests,
+        isVoiceInput: isVoiceInputRef?.current || false,
       };
 
+      console.log("[useChatController] 📤 Executing flow with context:", {
+        targetFlow,
+        isVoiceInput: flowContext.isVoiceInput,
+        isVoiceInputRef: isVoiceInputRef?.current,
+      });
+
       // Execute flow
-      const flowResult = await executeFlow(targetFlow, trimmedMessage, flowContext);
+      const flowResult = await executeFlow(
+        targetFlow,
+        trimmedMessage,
+        flowContext
+      );
+
+      console.log("[useChatController] 📥 Flow result received:", {
+        success: flowResult.success,
+        hasMessage: !!flowResult.message,
+        messageType: flowResult.message?.type,
+        hasData: !!flowResult.message?.data,
+        dataKeys: flowResult.message?.data
+          ? Object.keys(flowResult.message.data)
+          : [],
+      });
 
       // Handle flow result
       if (flowResult.success && flowResult.message) {
         // Add buttons for attendance flows
         if (
-          (targetFlow === 'attendance' ||
-            targetFlow === 'voice_attendance' ||
-            targetFlow === 'full_voice_attendance') &&
+          (targetFlow === "attendance" ||
+            targetFlow === "voice_attendance" ||
+            targetFlow === "full_voice_attendance") &&
           flowResult.shouldUpdateAttendanceData &&
           flowResult.shouldUpdateAttendanceData.length > 0
         ) {
           const messageIndex = options.getChatHistoryLength();
           const attendanceType =
-            targetFlow === 'attendance'
-              ? 'text'
-              : targetFlow === 'voice_attendance'
-              ? 'voice'
-              : 'image';
+            targetFlow === "attendance"
+              ? "text"
+              : targetFlow === "voice_attendance"
+              ? "voice"
+              : "image";
 
           (flowResult.message as any).buttons = createAttendanceButtons(
             flowResult.shouldUpdateAttendanceData,
@@ -253,6 +306,61 @@ export const useChatController = (options: UseChatControllerOptions) => {
             messageIndex,
             attendanceType
           );
+        }
+
+        // Component 2, Change 4: Parse keep_listening from assignment response
+        console.log(
+          "[useChatController] Checking for assignment flow signals:",
+          {
+            targetFlow,
+            hasData: !!flowResult.message.data,
+            keepListening: flowResult.message.data?.keep_listening,
+            flowStatus: flowResult.message.data?.flow_status,
+          }
+        );
+
+        if (
+          targetFlow === "assignment" &&
+          flowResult.message.data?.keep_listening !== undefined
+        ) {
+          (flowResult.message as any).keep_listening =
+            flowResult.message.data.keep_listening;
+          (flowResult.message as any).flow_status =
+            flowResult.message.data.flow_status;
+          (flowResult.message as any).fields_remaining =
+            flowResult.message.data.fields_remaining;
+          (flowResult.message as any).play_audio =
+            flowResult.message.data.play_audio;
+
+          // VOICE MODE DETECTION: If voice input and flow signals are present, activate voice mode
+          if (
+            isVoiceInputRef?.current &&
+            flowResult.message.data?.flow_status
+          ) {
+            console.log(
+              "[useChatController] 🎤 Voice mode activated for assignment"
+            );
+            // We'll let the frontend component handle the voice mode state update
+            // Just log it for debugging
+          }
+
+          console.log(
+            "[useChatController] Assignment response with flow signals:",
+            {
+              keep_listening: flowResult.message.data.keep_listening,
+              flow_status: flowResult.message.data.flow_status,
+              fields_remaining: flowResult.message.data.fields_remaining,
+            }
+          );
+
+          // FIX 2b: Call onFlowSignal callback to trigger TTS and voice mode updates
+          if (onFlowSignal) {
+            onFlowSignal({
+              keep_listening: flowResult.message.data.keep_listening,
+              flow_status: flowResult.message.data.flow_status,
+              voice_mode_active: isVoiceInputRef?.current ? true : false,
+            });
+          }
         }
 
         onUpdateChatHistory(flowResult.message);
@@ -282,7 +390,7 @@ export const useChatController = (options: UseChatControllerOptions) => {
       }
       if (flowResult.shouldUpdateFlow) {
         setTimeout(() => {
-          onSetActiveFlow(flowResult.shouldUpdateFlow as FlowType);
+          onSetActiveFlow("none");
         }, 1000);
       }
 
@@ -323,4 +431,3 @@ export const useChatController = (options: UseChatControllerOptions) => {
     handleSubmit,
   };
 };
-

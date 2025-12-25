@@ -1,5 +1,4 @@
-﻿
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState, useCallback } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
 import {
@@ -15,7 +14,6 @@ import {
 import { SlBubbles } from "react-icons/sl";
 import "./markdown-tables.css";
 
-
 // Added icons
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -26,6 +24,7 @@ import {
   leaveApprovalAPI,
   courseProgressAPI,
 } from "../services/api";
+import { API_BASE_URL } from "../config/api";
 import type { FlowType } from "./chatRouter";
 import { useVoiceEngine } from "./useVoiceEngine";
 import { useChatController } from "./useChatController";
@@ -120,10 +119,28 @@ const AudioStreamerChatBot = ({
   // Auto-routing states merge on 17-12-2025 manvi + lakshmi
 
   const [autoRouting, setAutoRouting] = useState<boolean>(true);
-  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">("auto");
+  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
+    "auto"
+  );
   const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
-  const [_classificationConfidence, setClassificationConfidence] = useState<number>(0);
-  
+  const [_classificationConfidence, setClassificationConfidence] =
+    useState<number>(0);
+
+  // Listening indicator states (Component 2, Change 1)
+  const [listeningState, setListeningState] = useState<
+    "idle" | "listening" | "processing" | "speaking"
+  >("idle");
+  const [fieldsRemaining, setFieldsRemaining] = useState<number>(0);
+  const [flowStatus, setFlowStatus] = useState<
+    "in_progress" | "ready_to_submit" | "complete" | "cancelled" | "error"
+  >("in_progress");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_ttsPlaying, setTtsPlaying] = useState<boolean>(false);
+  const [voiceModeActive, setVoiceModeActive] = useState<boolean>(false);
+  const isVoiceInputRef = useRef<boolean>(false);
+  // Ref to track active flow for voice mode (more reliable than state in callbacks)
+  const activeFlowRef = useRef<string>("none");
+
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
     const academic_session =
@@ -131,7 +148,6 @@ const AudioStreamerChatBot = ({
     const branch_token = localStorage.getItem("branch_token") || "demo";
     return { academic_session, branch_token };
   };
-
 
   // const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
   // const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
@@ -213,11 +229,106 @@ const AudioStreamerChatBot = ({
     activeFlow,
     isProcessing,
     onTextUpdate: (text: string) => {
-      setInputText((prev) => prev + " " + text);
+      // This callback is ONLY called from STT, so any text here IS voice input
+      console.log("[AudioStreamer] 🎤 STT text received:", text, {
+        activeFlow,
+        activeFlowRef: activeFlowRef.current,
+        isVoiceInputRef: isVoiceInputRef.current,
+      });
+
+      // For assignment flow, detect "create assignment" and auto-submit
+      if (text.toLowerCase().includes("create assignment")) {
+        console.log(
+          "[AudioStreamer] 🎤 Voice trigger detected: 'create assignment'"
+        );
+        isVoiceInputRef.current = true; // Mark as voice input
+        activeFlowRef.current = "assignment"; // Set flow ref immediately
+        setVoiceModeActive(true); // Activate voice mode
+        setInputText("🎤 Sending...");
+        // Stop mic while processing
+        voiceEngine.stopStreaming();
+        setListeningState("processing");
+        // Auto-submit immediately
+        setTimeout(() => {
+          if (handleSubmitMessage) {
+            handleSubmitMessage(text.trim());
+          }
+          setInputText("");
+        }, 100);
+      } else if (
+        (activeFlowRef.current === "assignment" ||
+          activeFlow === "assignment") &&
+        isVoiceInputRef.current
+      ) {
+        // In active voice assignment flow, auto-submit voice input
+        // Use ref for more reliable check (state might not be updated yet)
+        console.log(
+          "[AudioStreamer] 🎤 Voice input in assignment flow, auto-submitting:",
+          {
+            activeFlow,
+            activeFlowRef: activeFlowRef.current,
+            isVoiceInputRef: isVoiceInputRef.current,
+            text: text.substring(0, 30),
+          }
+        );
+        setInputText("🎤 Sending...");
+        // Stop mic while processing
+        voiceEngine.stopStreaming();
+        setListeningState("processing");
+        // IMPORTANT: Keep isVoiceInputRef.current = true for TTS to work on response
+        // Auto-submit the voice input
+        setTimeout(() => {
+          if (handleSubmitMessage) {
+            console.log(
+              "[AudioStreamer] 🎤 Submitting voice message, isVoiceInputRef:",
+              isVoiceInputRef.current
+            );
+            handleSubmitMessage(text.trim());
+          }
+          setInputText("");
+        }, 100);
+      } else {
+        // Not in voice assignment mode, just update text (normal STT behavior)
+        console.log(
+          "[AudioStreamer] ℹ️ Not in voice assignment mode, appending text:",
+          {
+            activeFlow,
+            activeFlowRef: activeFlowRef.current,
+            isVoiceInputRef: isVoiceInputRef.current,
+          }
+        );
+        isVoiceInputRef.current = false;
+        setInputText((prev) => prev + " " + text);
+      }
     },
     onAutoSubmit: () => {
       if (inputText.trim() && handleSubmitMessage) {
         handleSubmitMessage(inputText.trim());
+      }
+    },
+    // Component 2, Change 3: Handle flow signals from backend
+    onFlowSignal: (signal) => {
+      console.log("[AudioStreamerChatBot] Received STT flow signal:", signal);
+
+      // Update state from STT signals (these come from WebSocket, not API)
+      if (signal.fields_remaining !== undefined) {
+        setFieldsRemaining(signal.fields_remaining);
+      }
+      if (signal.flow_status) {
+        setFlowStatus(signal.flow_status);
+      }
+
+      // Handle flow completion from STT signals
+      if (
+        signal.flow_status === "complete" ||
+        signal.flow_status === "cancelled"
+      ) {
+        setVoiceModeActive(false);
+        isVoiceInputRef.current = false;
+        setListeningState("idle");
+        console.log(
+          "[AudioStreamerChatBot] Voice mode deactivated from STT signal"
+        );
       }
     },
   });
@@ -615,6 +726,43 @@ const AudioStreamerChatBot = ({
     }
   };
 
+  // FIX 2: Handle API flow signals (assignment flow responses with flow_status, keep_listening, etc.)
+  const handleApiFlowSignals = useCallback(
+    (signals: any) => {
+      const isVoiceMode = isVoiceInputRef.current; // Use ref for synchronous check
+      console.log("[AudioStreamer] 📨 API Flow signals received:", signals);
+      console.log("[AudioStreamer] 📨 isVoiceInputRef.current:", isVoiceMode);
+
+      // Activate voice mode state if this was voice input
+      if (
+        signals.voice_mode_active &&
+        activeFlow === "assignment" &&
+        isVoiceMode
+      ) {
+        setVoiceModeActive(true);
+        console.log("[AudioStreamer] 🎤 Voice mode ACTIVATED from API signals");
+      }
+
+      // Update flow status
+      if (signals.flow_status) {
+        setFlowStatus(signals.flow_status);
+      }
+
+      // Handle flow completion - reset everything
+      if (
+        signals.flow_status === "complete" ||
+        signals.flow_status === "cancelled"
+      ) {
+        setVoiceModeActive(false);
+        isVoiceInputRef.current = false;
+        activeFlowRef.current = "none"; // Reset flow ref on completion
+        setListeningState("idle");
+        console.log("[AudioStreamer] 🎤 Voice mode DEACTIVATED - flow ended");
+      }
+    },
+    [activeFlow]
+  );
+
   // Chat controller hook - orchestrates everything, replaces handleSubmit
   const { handleSubmit: handleSubmitMessage } = useChatController({
     userId,
@@ -631,9 +779,81 @@ const AudioStreamerChatBot = ({
     userOptionSelected,
     autoRouting,
     onUpdateChatHistory: (message: any) => {
+      // Safe logging to avoid circular reference issues
+      console.log("[AudioStreamer] 📝 Message added to chat:", {
+        type: message?.type,
+        hasAnswer: !!message?.answer,
+        answerPreview: message?.answer?.substring(0, 50),
+        hasData: !!message?.data,
+        dataKeys: message?.data ? Object.keys(message.data) : [],
+        // Check both direct properties (copied by useChatController) and nested data
+        directFlowStatus: message?.flow_status,
+        nestedFlowStatus: message?.data?.flow_status,
+        directPlayAudio: message?.play_audio,
+        nestedPlayAudio: message?.data?.play_audio,
+      });
+
       setChatHistory((prev) => [...prev, message]);
+
+      // FIXED: Check isVoiceInputRef.current (synchronous) for voice detection
+      // voiceModeActive may not be updated yet due to React state batching
+      const isVoiceMode = isVoiceInputRef.current;
+      console.log("[AudioStreamer] 🎤 isVoiceInputRef.current =", isVoiceMode);
+
+      // Check for flow signals - useChatController copies them to both message.data AND message root
+      // Priority: check direct properties first (set by useChatController), then nested data
+      const flowStatus = message?.flow_status ?? message?.data?.flow_status;
+      const playAudio = message?.play_audio ?? message?.data?.play_audio;
+      const keepListening =
+        message?.keep_listening ?? message?.data?.keep_listening;
+      const answerText = message?.answer;
+
+      if (flowStatus !== undefined) {
+        console.log("[AudioStreamer] 📨 Processing assignment flow signals:", {
+          flow_status: flowStatus,
+          keep_listening: keepListening,
+          play_audio: playAudio,
+          isVoiceInput: isVoiceMode,
+          hasAnswer: !!answerText,
+        });
+
+        // Trigger TTS if this was a voice input (use ref, not state)
+        if (playAudio && isVoiceMode && answerText) {
+          console.log("[AudioStreamer] 🎤 Triggering TTS for voice mode...");
+          // Stop mic before TTS
+          voiceEngine.stopStreaming();
+          setListeningState("speaking");
+          // Small delay to ensure state is updated, pass keepListening for mic restart
+          const shouldKeepListening = keepListening === true;
+          setTimeout(() => {
+            playBotResponse(answerText, shouldKeepListening);
+          }, 100);
+        } else {
+          console.log("[AudioStreamer] ⚠️ NOT triggering TTS:", {
+            playAudio,
+            isVoiceMode,
+            hasAnswer: !!answerText,
+          });
+        }
+      } else {
+        console.log("[AudioStreamer] ℹ️ No flow signals in message");
+      }
     },
-    onSetActiveFlow: setActiveFlow,
+    onSetActiveFlow: (flow) => {
+      setActiveFlow(flow);
+      activeFlowRef.current = flow; // Keep ref in sync for callbacks
+      console.log("[AudioStreamer] 📍 Active flow updated:", flow);
+
+      // When flow is reset to "none", also reset voice mode
+      if (flow === "none") {
+        setVoiceModeActive(false);
+        isVoiceInputRef.current = false;
+        setListeningState("idle");
+        console.log(
+          "[AudioStreamer] 🎤 Voice mode reset - flow changed to none"
+        );
+      }
+    },
     onSetAttendanceStep: setAttendanceStep,
     onSetPendingClassInfo: setPendingClassInfo,
     onSetAttendanceData: setAttendanceData,
@@ -648,12 +868,24 @@ const AudioStreamerChatBot = ({
     getAttendanceDataForApproval,
     getEditingMessageIndex: () => editingMessageIndex,
     getChatHistoryLength: () => chatHistory.length,
+    onFlowSignal: handleApiFlowSignals,
     createAttendanceButtons,
+    isVoiceInputRef,
+    activeFlowRef,
   });
 
   // Legacy handleSubmit wrapper for backward compatibility
+  // FIXED: Ensure manual text submission does NOT trigger voice mode
   const handleSubmit = async () => {
     if (!inputText.trim() || !handleSubmitMessage) return;
+    // When user types manually, ensure voice mode is completely OFF
+    isVoiceInputRef.current = false;
+    setVoiceModeActive(false);
+    setListeningState("idle");
+    // Don't reset activeFlowRef here - let the router decide based on message content
+    console.log(
+      "[AudioStreamer] 📝 Manual text submission - voice mode disabled"
+    );
     handleSubmitMessage(inputText.trim());
     setInputText("");
   };
@@ -662,7 +894,10 @@ const AudioStreamerChatBot = ({
   const MemoizedAnswer = memo(
     ({ answer, messageIdx }: { answer: string; messageIdx: number }) => {
       return (
-        <div key={`answer-${messageIdx}-${answer.slice(0, 20)}`} className="markdown-content">
+        <div
+          key={`answer-${messageIdx}-${answer.slice(0, 20)}`}
+          className="markdown-content"
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -688,7 +923,123 @@ const AudioStreamerChatBot = ({
     }
   );
 
+  // Component 2, Change 5: Play bot response as TTS audio
+  // FIXED: Use refs and parameters instead of state for reliable voice mode detection
+  const playBotResponse = async (
+    text: string,
+    shouldKeepListening: boolean = true
+  ) => {
+    if (!text) return;
 
+    // Capture voice mode from ref at start (more reliable than state)
+    const isVoiceMode = isVoiceInputRef.current;
+    console.log("[AudioStreamerChatBot] playBotResponse called:", {
+      textLength: text.length,
+      shouldKeepListening,
+      isVoiceMode,
+    });
+
+    try {
+      setTtsPlaying(true);
+      setListeningState("speaking");
+
+      // CRITICAL: Stop mic while TTS plays to prevent feedback loop
+      if (isVoiceMode) {
+        voiceEngine.stopStreaming();
+        console.log("[AudioStreamerChatBot] Mic stopped for TTS playback");
+      }
+
+      console.log(
+        "[AudioStreamerChatBot] Playing TTS for:",
+        text.substring(0, 50)
+      );
+
+      // Call TTS endpoint with correct base URL
+      const response = await fetch(`${API_BASE_URL}/v1/ai/text-to-speech`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`TTS failed: ${response.statusText}`);
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setTtsPlaying(false);
+        console.log("[AudioStreamerChatBot] TTS playback finished");
+
+        // Auto-restart mic after TTS if in voice mode and should keep listening
+        // Use the captured isVoiceMode and passed shouldKeepListening parameter
+        console.log("[AudioStreamerChatBot] Checking mic restart:", {
+          isVoiceMode,
+          shouldKeepListening,
+          isVoiceInputRefCurrent: isVoiceInputRef.current,
+        });
+
+        if (isVoiceMode && shouldKeepListening) {
+          console.log(
+            "[AudioStreamerChatBot] 🎤 Auto-restarting mic after TTS"
+          );
+          setListeningState("listening");
+          voiceEngine.startStreaming().catch((err) => {
+            console.error("Failed to restart mic:", err);
+            setListeningState("idle");
+          });
+        } else {
+          console.log(
+            "[AudioStreamerChatBot] Not restarting mic - voice mode:",
+            isVoiceMode,
+            "keepListening:",
+            shouldKeepListening
+          );
+          setListeningState("idle");
+        }
+      };
+
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        setTtsPlaying(false);
+        console.error("[AudioStreamerChatBot] TTS playback error");
+
+        // On TTS error, restart mic if in voice mode
+        if (isVoiceMode && shouldKeepListening) {
+          console.log("[AudioStreamerChatBot] TTS error - restarting mic");
+          setListeningState("listening");
+          voiceEngine.startStreaming().catch((err) => {
+            console.error("Failed to restart mic after error:", err);
+            setListeningState("idle");
+          });
+        } else {
+          setListeningState("idle");
+        }
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error("[AudioStreamerChatBot] TTS Error:", error);
+      setTtsPlaying(false);
+      // On exception, restart mic if in voice mode
+      // Use captured isVoiceMode and shouldKeepListening parameter
+      if (isVoiceMode && shouldKeepListening) {
+        console.log("[AudioStreamerChatBot] TTS exception - restarting mic");
+        setListeningState("listening");
+        voiceEngine.startStreaming().catch((err) => {
+          console.error("Failed to restart mic after exception:", err);
+          setListeningState("idle");
+        });
+      } else {
+        setListeningState("idle");
+      }
+    }
+  };
 
   // TTS playback function
   const handlePlayTTS = async (idx: number, text: string) => {
@@ -1755,6 +2106,88 @@ const AudioStreamerChatBot = ({
     }
   `;
 
+  // Component 2, Change 2: ListeningIndicator Component
+  const ListeningIndicator = () => {
+    // FIXED: Only show listening indicator when voice mode is active
+    // Hide completely for manual text input
+    if (!voiceModeActive) {
+      return null;
+    }
+
+    const stateColors = {
+      idle: "#999999",
+      listening: "#4CAF50",
+      processing: "#2196F3",
+      speaking: "#FF9800",
+    };
+
+    const stateLabels = {
+      idle: "Ready",
+      listening: "Listening...",
+      processing: "Processing...",
+      speaking: "Speaking...",
+    };
+
+    return (
+      <motion.div
+        className="listening-indicator"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          padding: "8px 12px",
+          backgroundColor: "#f5f5f5",
+          borderRadius: "8px",
+          marginBottom: "8px",
+          border: `2px solid ${stateColors[listeningState]}`,
+        }}
+        animate={{
+          opacity: listeningState === "idle" ? 0.6 : 1,
+          scale: listeningState === "listening" ? [1, 1.02, 1] : 1,
+        }}
+        transition={{
+          repeat: listeningState === "listening" ? Infinity : 0,
+          duration: 1,
+        }}
+      >
+        {/* Animated pulsing circle */}
+        <motion.div
+          style={{
+            width: "12px",
+            height: "12px",
+            borderRadius: "50%",
+            backgroundColor: stateColors[listeningState],
+          }}
+          animate={
+            listeningState === "listening"
+              ? { scale: [1, 1.3, 1], opacity: [1, 0.5, 1] }
+              : {}
+          }
+          transition={{
+            repeat: listeningState === "listening" ? Infinity : 0,
+            duration: 1,
+          }}
+        />
+        {/* Status label */}
+        <span
+          style={{
+            fontSize: "12px",
+            color: stateColors[listeningState],
+            fontWeight: "500",
+          }}
+        >
+          {stateLabels[listeningState]}
+        </span>
+        {/* Fields remaining counter (if in assignment flow) */}
+        {activeFlow === "assignment" && fieldsRemaining > 0 && (
+          <span style={{ fontSize: "11px", color: "#666", marginLeft: "auto" }}>
+            {fieldsRemaining} field{fieldsRemaining > 1 ? "s" : ""} remaining
+          </span>
+        )}
+      </motion.div>
+    );
+  };
+
   return (
     <>
       {/* Class Info Modal */}
@@ -2134,6 +2567,57 @@ const AudioStreamerChatBot = ({
             box-shadow: 0 4px 16px rgba(239, 68, 68, 0.5), 0 0 0 6px rgba(239, 68, 68, 0.1);
           }
         }
+        
+        /* Component 2, Change 7: Listening Indicator Styles */
+        .listening-indicator {
+          width: 100%;
+          background: linear-gradient(135deg, #f5f5f5 0%, #f9f9f9 100%);
+        }
+        
+        .listening-indicator.listening {
+          animation: listeningPulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes listeningPulse {
+          0%, 100% {
+            background-color: #f5f5f5;
+          }
+          50% {
+            background-color: #e8f5e9;
+          }
+        }
+        
+        .listening-indicator-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background-color: #4CAF50;
+          animation: dotPulse 1s ease-in-out infinite;
+        }
+        
+        @keyframes dotPulse {
+          0%, 100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.3);
+            opacity: 0.7;
+          }
+        }
+        
+        .listening-indicator-text {
+          font-size: 12px;
+          font-weight: 500;
+          color: #666;
+        }
+        
+        .listening-indicator-counter {
+          margin-left: auto;
+          font-size: 11px;
+          color: #999;
+        }
+        
         .chatbot-btn.send {
           background: linear-gradient(135deg, #C9A882 0%, #b89772 100%);
           color: #fff;
@@ -2550,9 +3034,9 @@ const AudioStreamerChatBot = ({
           {/* Header Section - Improved Design */}
           <div className="chatbot-header-section">
             <h1 className="chatbot-header-title">
-              <img 
-                src="/sofisto-img.png" 
-                alt="Sofisto Robot" 
+              <img
+                src="/sofisto-img.png"
+                alt="Sofisto Robot"
                 className="robot-icon"
               />
               Chat with Sofisto
@@ -2899,16 +3383,16 @@ const AudioStreamerChatBot = ({
                               setLoadingLeaveRequests(true);
                               try {
                                 const authToken = localStorage.getItem("token");
-                              const { academic_session, branch_token } =
-                                getErpContext();
+                                const { academic_session, branch_token } =
+                                  getErpContext();
                                 const response =
                                   await leaveApprovalAPI.fetchPendingRequests({
                                     user_id: userId,
                                     page: 1,
                                     limit: 50,
                                     bearer_token: authToken || undefined,
-                                  academic_session,
-                                  branch_token,
+                                    academic_session,
+                                    branch_token,
                                   });
                                 if (response.status === 200 && response.data) {
                                   const pendingRequests =
@@ -3561,17 +4045,21 @@ const AudioStreamerChatBot = ({
                                                     sectionName,
                                                   }
                                                 );
-                                              const { academic_session, branch_token } =
-                                                getErpContext();
-                                                const progressResponse =
-                                                await courseProgressAPI.getProgress({
-                                                  classId,
-                                                  sectionId,
-                                                      bearer_token:
-                                                        authToken || undefined,
+                                                const {
                                                   academic_session,
                                                   branch_token,
-                                                });
+                                                } = getErpContext();
+                                                const progressResponse =
+                                                  await courseProgressAPI.getProgress(
+                                                    {
+                                                      classId,
+                                                      sectionId,
+                                                      bearer_token:
+                                                        authToken || undefined,
+                                                      academic_session,
+                                                      branch_token,
+                                                    }
+                                                  );
 
                                                 console.log(
                                                   "Course progress API response:",
@@ -4087,7 +4575,8 @@ const AudioStreamerChatBot = ({
                                                               const {
                                                                 academic_session,
                                                                 branch_token,
-                                                              } = getErpContext();
+                                                              } =
+                                                                getErpContext();
                                                               await leaveApprovalAPI.reject(
                                                                 {
                                                                   leave_request_uuid:
@@ -4765,7 +5254,6 @@ const AudioStreamerChatBot = ({
           </div>
           {/* Input Area with Upload Buttons */}
           <div className="chatbot-input-area">
-           
             {/* <motion.button
               className="w-10 h-10 sm:w-12 sm:h-12 min-w-10 min-h-10 sm:min-w-12 sm:min-h-12 text-xl sm:text-2xl flex items-center justify-center rounded-full transition-all shadow-[0_2px_8px_rgba(212,165,116,0.25)] bg-gradient-to-br from-[#D4A574] to-[#C9A882] hover:scale-110 hover:shadow-[0_4px_16px_rgba(212,165,116,0.35)]"
               whileHover={{ scale: 1.1, rotate: 5 }}
@@ -5162,6 +5650,9 @@ const AudioStreamerChatBot = ({
               </div>
             )} */}
 
+            {/* Component 2, Change 6: Show listening indicator for assignment flow */}
+            {activeFlow === "assignment" && <ListeningIndicator />}
+
             <input
               type="text"
               placeholder="Ask me anything!"
@@ -5174,11 +5665,17 @@ const AudioStreamerChatBot = ({
               disabled={voiceEngine.isRecording}
             />
             <button
-              onClick={voiceEngine.isRecording ? voiceEngine.stopStreaming : voiceEngine.startStreaming}
+              onClick={
+                voiceEngine.isRecording
+                  ? voiceEngine.stopStreaming
+                  : voiceEngine.startStreaming
+              }
               className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
                 voiceEngine.isRecording ? " recording" : ""
               }`}
-              title={voiceEngine.isRecording ? "Stop Recording" : "Start Recording"}
+              title={
+                voiceEngine.isRecording ? "Stop Recording" : "Start Recording"
+              }
             >
               {voiceEngine.isRecording ? <FiMicOff /> : <FiMic />}
             </button>
