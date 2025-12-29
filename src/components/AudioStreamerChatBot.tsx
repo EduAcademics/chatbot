@@ -120,7 +120,7 @@ const AudioStreamerChatBot = ({
 
   const [autoRouting, setAutoRouting] = useState<boolean>(true);
   const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
-    "auto"
+    "llm"
   );
   const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
   const [_classificationConfidence, setClassificationConfidence] =
@@ -3345,13 +3345,7 @@ const AudioStreamerChatBot = ({
                               setActiveFlow("leave");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              setChatHistory((prev) => [
-                                ...prev,
-                                {
-                                  type: "bot",
-                                  text: "Leave application flow activated (Manual override)! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'.",
-                                },
-                              ]);
+                              setChatHistory((prev) => [...prev]);
                             }}
                             style={{
                               opacity: activeFlow === "leave" ? 1 : 0.7,
@@ -4371,7 +4365,7 @@ const AudioStreamerChatBot = ({
                         )}
 
                         {msg.text ? (
-                          <div>{msg.text}</div>
+                          <div>{msg.text || msg.answer}</div>
                         ) : (
                           <>
                             {/* Only show answer, no tabs */}

@@ -71,7 +71,7 @@ export const handleQueryFlow = async (
         success: true,
         message: {
           type: "bot",
-          answer: data.data?.answer,
+          text: data.data?.answer,
           references: data.data?.references,
           mongodbquery: data.data?.mongodbquery,
           activeTab: "answer",

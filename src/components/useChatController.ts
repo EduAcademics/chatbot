@@ -216,15 +216,7 @@ export const useChatController = (options: UseChatControllerOptions) => {
         console.log("📍 Initializing leave flow state");
         onSetActiveFlow("leave");
 
-        // Add welcome message matching manual mode
-        onUpdateChatHistory({
-          type: "bot",
-          text: "📝 **Leave Application Flow Activated!** I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
-        });
-
-        // Stop here - don't process the initialization message
-        onSetIsProcessing(false);
-        return;
+        // Do not add a hardcoded welcome message; let backend response be shown
       }
 
       // If still no flow selected after classification, prompt user
