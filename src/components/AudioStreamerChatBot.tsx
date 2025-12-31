@@ -5485,16 +5485,7 @@ const AudioStreamerChatBot = ({
                     try {
                       const result = await uploadAssignmentFile(file);
                       if (result.status === "success") {
-                        setChatHistory((prev) => [
-                          ...prev,
-                          {
-                            type: "bot",
-                            text: `✅ File uploaded successfully: ${
-                              result.data?.filename || file.name
-                            }\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
-                          },
-                        ]);
-                        // Send the file UUID to the assignment chat to add it to attachments
+                        // Let backend handle the upload confirmation message for assignment uploads
                         const fileUuid = result.data?.file_uuid;
                         console.log("File upload result:", result);
                         console.log("Extracted fileUuid:", fileUuid);
