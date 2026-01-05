@@ -1,4 +1,29 @@
-﻿import { useEffect, useRef, useState, useCallback } from "react";
+﻿// Helper to generate a unique key for class-section
+function getClassSectionKey(section: any, idx: number) {
+  return `${section.class?._id || section.classId || "class"}-${
+    section.section?._id || section.sectionId || "section"
+  }-${idx}`;
+}
+// Helper to generate a unique key for chapters/subjects
+function getChapterKey(chapter: any, idx: number) {
+  return `${chapter.id || chapter.subjectId || "subject"}-${
+    chapter.name || chapter.subjectName || ""
+  }-${idx}`;
+}
+// Helper to generate a unique key for chat messages
+function getChatMsgKey(msg: any, idx: number) {
+  if (msg.type === "user") return `user-${idx}-${msg.text?.slice(0, 20)}`;
+  if (msg.type === "bot" && msg.text)
+    return `bot-${idx}-${msg.text.slice(0, 20)}`;
+  if (msg.type === "bot" && msg.answer)
+    return `bot-answer-${idx}-${msg.answer.slice(0, 20)}`;
+  return `${msg.type}-${idx}`;
+}
+// Helper to generate a unique key for buttons
+function getButtonKey(btn: any, idx: number) {
+  return `${btn.label || "btn"}-${idx}`;
+}
+import { useEffect, useRef, useState, useCallback } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
 import {
@@ -187,11 +212,7 @@ const AudioStreamerChatBot = ({
         references: undefined,
         mongodbquery: undefined,
       };
-
-      setChatHistory([welcomeMessage]); // replace instead of append
-      // Don't set default flow or userOptionSelected - let auto-routing handle it
-      // setActiveFlow("query");
-      // setUserOptionSelected(true);
+      setChatHistory([welcomeMessage]); // replace only for initial welcome
     }
   }, []); // run only once
 
@@ -229,6 +250,96 @@ const AudioStreamerChatBot = ({
     activeFlow,
     isProcessing,
     onTextUpdate: (text: string) => {
+      // ✅ UNIFIED: Detect leave approval voice queries and use manual flow logic
+      const isLeaveApprovalQuery =
+        text.toLowerCase().includes("leave approval") ||
+        text.toLowerCase().includes("show leave") ||
+        text.toLowerCase().includes("pending leave") ||
+        text.toLowerCase().includes("approve leave");
+
+      if (isLeaveApprovalQuery) {
+        console.log(
+          "[AudioStreamer] 🎤 Voice trigger detected: 'leave approval'"
+        );
+        // Stop mic immediately to avoid feedback
+        voiceEngine.stopStreaming();
+        setListeningState("processing");
+        setInputText("🎤 Fetching leave approvals...");
+        (async () => {
+          try {
+            const authToken = localStorage.getItem("token");
+            const { academic_session, branch_token } = getErpContext();
+            const response = await leaveApprovalAPI.fetchPendingRequests({
+              user_id: userId,
+              page: 1,
+              limit: 50,
+              bearer_token: authToken || undefined,
+              academic_session,
+              branch_token,
+            });
+            if (response.status === 200 && response.data) {
+              const pendingRequests = response.data.leaveRequests || [];
+              setLeaveApprovalRequests(pendingRequests);
+              setActiveFlow("leave_approval");
+              let formattedAnswer;
+              let voiceSummary;
+              if (pendingRequests.length > 0) {
+                formattedAnswer = `📋 **Leave Approval Dashboard**\n\nFound **${pendingRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green \"Approve\" button\n- ❌ **Reject** - Enter a rejection reason and click the red \"Reject\" button`;
+                voiceSummary = `Leave Approval Dashboard. Found ${
+                  pendingRequests.length
+                } pending leave ${
+                  pendingRequests.length === 1 ? "request" : "requests"
+                } for your approval. Please review each request below and take action by either: Approve, by clicking the green Approve button, or Reject, by entering a rejection reason and clicking the red Reject button.`;
+              } else {
+                // FIXED: Use the same dashboard format for 0 leaves as manual flow
+                formattedAnswer = `📋 **Leave Approval Dashboard**\n\nFound **0** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green \"Approve\" button\n- ❌ **Reject** - Enter a rejection reason and click the red \"Reject" button`;
+                voiceSummary =
+                  "Leave Approval Dashboard. Found 0 pending leave requests for your approval. Please review each request below and take action by either: Approve, by clicking the green Approve button, or Reject, by entering a rejection reason and clicking the red Reject button.";
+              }
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  answer: formattedAnswer,
+                  activeTab: "answer" as const,
+                },
+              ]);
+              setListeningState("speaking");
+              await playBotResponse(voiceSummary, false);
+            } else {
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  answer:
+                    "Sorry, I couldn't fetch leave approvals at the moment.",
+                  activeTab: "answer" as const,
+                },
+              ]);
+              setListeningState("idle");
+            }
+          } catch (error) {
+            console.error(
+              "[AudioStreamer] Error fetching leave approval summary:",
+              error
+            );
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: "An error occurred while fetching leave approvals.",
+                activeTab: "answer" as const,
+              },
+            ]);
+            setListeningState("idle");
+          } finally {
+            setInputText("");
+          }
+        })();
+        return;
+      }
+      // THIS IS VOICE INPUT - SET FLAG IMMEDIATELY
+      isVoiceInputRef.current = true;
       // This callback is ONLY called from STT, so any text here IS voice input
       console.log("[AudioStreamer] 🎤 STT text received:", text, {
         activeFlow,
@@ -288,17 +399,23 @@ const AudioStreamerChatBot = ({
           setInputText("");
         }, 100);
       } else {
-        // Not in voice assignment mode, just update text (normal STT behavior)
+        // Not in voice assignment mode, auto-submit voice input
         console.log(
-          "[AudioStreamer] ℹ️ Not in voice assignment mode, appending text:",
+          "[AudioStreamer] ℹ️ Not in voice assignment mode, auto-submitting:",
           {
             activeFlow,
             activeFlowRef: activeFlowRef.current,
             isVoiceInputRef: isVoiceInputRef.current,
           }
         );
-        isVoiceInputRef.current = false;
-        setInputText((prev) => prev + " " + text);
+        // isVoiceInputRef.current = false;  // ← MUST BE COMMENTED OUT
+        setInputText(text);
+        setTimeout(() => {
+          if (handleSubmitMessage) {
+            handleSubmitMessage(text);
+            setInputText(""); // Clear after submit
+          }
+        }, 100);
       }
     },
     onAutoSubmit: () => {
@@ -800,6 +917,10 @@ const AudioStreamerChatBot = ({
       const isVoiceMode = isVoiceInputRef.current;
       console.log("[AudioStreamer] 🎤 isVoiceInputRef.current =", isVoiceMode);
 
+      // DON'T reset voice flag here - it should stay true for voice flow
+      // console.log("[AudioStreamer] 🎤 isVoiceInputRef.current = false");
+      // isVoiceInputRef.current = false;  // ← COMMENTED OUT
+
       // Check for flow signals - useChatController copies them to both message.data AND message root
       // Priority: check direct properties first (set by useChatController), then nested data
       const flowStatus = message?.flow_status ?? message?.data?.flow_status;
@@ -891,6 +1012,8 @@ const AudioStreamerChatBot = ({
   };
 
   // Memoized answer component to prevent refresh on re-renders
+
+  // ...existing code...
   const MemoizedAnswer = memo(
     ({ answer, messageIdx }: { answer: string; messageIdx: number }) => {
       return (
@@ -1042,6 +1165,270 @@ const AudioStreamerChatBot = ({
   };
 
   // TTS playback function
+  // Helper function: Speak course progress summary and auto-enable mic
+  const speakCourseProgressSummary = (
+    summaryText: string,
+    autoEnableMic: boolean = false
+  ) => {
+    console.log("[Course Progress TTS] Function called!", {
+      text: summaryText,
+      autoEnableMic,
+      isVoiceInput: isVoiceInputRef.current,
+    });
+    // Only speak if this was voice input
+    if (!isVoiceInputRef.current) {
+      console.log("[Course Progress TTS] ❌ Not voice input, skipping");
+      return;
+    }
+    console.log("[Course Progress TTS] ✅ Speaking:", summaryText);
+    playBotResponse(summaryText, autoEnableMic);
+  };
+
+  // Watch for course progress messages and speak them
+  useEffect(() => {
+    const lastMessage = chatHistory[chatHistory.length - 1];
+    console.log("[Course Progress TTS] useEffect fired, checking message:", {
+      type: lastMessage?.type,
+      text: lastMessage?.text?.substring(0, 50),
+      isVoiceInput: isVoiceInputRef.current,
+      hasClassSection: !!lastMessage?.classSection,
+      hasCourseProgress: !!lastMessage?.courseProgress,
+    });
+    // Only process bot messages
+    if (lastMessage?.type !== "bot") {
+      console.log("[Course Progress TTS] Not a bot message, skipping");
+      return;
+    }
+    // Only if voice input
+    if (!isVoiceInputRef.current) {
+      console.log("[Course Progress TTS] Not voice input, skipping");
+      return;
+    }
+    // Check if this is a course progress message
+    const text = lastMessage.text || "";
+    // Response 1: Class selection
+    if (
+      text.includes("Please select a class") ||
+      text.includes("Select a class and section")
+    ) {
+      console.log("[Course Progress TTS] Detected class selection message");
+      // Always speak the exact UI message
+      speakCourseProgressSummary(
+        "Please select a class and section from the list above to view course progress.",
+        true
+      );
+      return;
+    }
+    // Response 2: No data
+    if (
+      text.includes("No progress data available") ||
+      text.includes("No course progress data")
+    ) {
+      console.log("[Course Progress TTS] Detected no data message");
+      const className = lastMessage.classSection?.className || "that class";
+      const sectionName = lastMessage.classSection?.sectionName || "";
+      speakCourseProgressSummary(
+        `No progress data available for class ${className} ${sectionName}. Please select another class.`,
+        true
+      );
+      return;
+    }
+    // Response 3: Data available (only if explicit class/section selected)
+    if (
+      lastMessage.courseProgress &&
+      lastMessage.classSection &&
+      selectedClassSection
+    ) {
+      const className = lastMessage.classSection.className || "";
+      const sectionName = lastMessage.classSection.sectionName || "";
+      const subjectCount = Array.isArray(lastMessage.courseProgress)
+        ? lastMessage.courseProgress.length
+        : 0;
+      // Only trigger TTS if subjectCount > 0
+      if (subjectCount > 0) {
+        console.log(
+          "[Course Progress TTS] Detected data available message (real data)"
+        );
+        speakCourseProgressSummary(
+          `Course Progress: Class ${className} ${sectionName}. Total Subjects: ${subjectCount}. Scroll down to see details.`,
+          false
+        );
+      } else {
+        console.log(
+          "[Course Progress TTS] Skipping TTS for placeholder/empty course progress message"
+        );
+      }
+      return;
+    }
+  }, [chatHistory, isVoiceInputRef.current]);
+
+  // Exit/reset handler for course progress flow
+  // Robust exit/reset handler for course progress flow
+  useEffect(() => {
+    // Always check last user message for exit/back/cancel
+    const lastUserMessage = chatHistory[chatHistory.length - 1];
+    if (lastUserMessage?.type === "user") {
+      const text = (lastUserMessage.text || "").toLowerCase();
+      if (["exit", "back", "cancel"].some((kw) => text.includes(kw))) {
+        console.log(
+          "[Global Exit] Exit/back/cancel detected, clearing all flow state"
+        );
+        // Clear all course progress, attendance, and session state
+        setSelectedClassSection(null);
+        setClassSections([]);
+        // Defensive: clear any possible course progress/class section state in memory
+        setTimeout(() => {
+          setSelectedClassSection(null);
+          setClassSections([]);
+        }, 0);
+        setActiveFlow("none");
+        setAttendanceData([]);
+        setClassInfo(null);
+        setEditingMessageIndex(null);
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setShowClassInfoModal(false);
+        setPendingImageFile(null);
+        setVoiceModeActive(false);
+        isVoiceInputRef.current = false;
+        activeFlowRef.current = "none";
+        setListeningState("idle");
+        sessionStorage.removeItem("pendingAttendanceData");
+        sessionStorage.removeItem("pendingClassInfo");
+        // Clear course progress data from sessionStorage, localStorage, and state
+        sessionStorage.removeItem("courseProgressData");
+        sessionStorage.removeItem("selectedClassSection");
+        sessionStorage.removeItem("classSections");
+        sessionStorage.removeItem("classInfo");
+        sessionStorage.removeItem("courseProgress");
+        localStorage.removeItem("selectedClassSection");
+        localStorage.removeItem("courseProgressData");
+        localStorage.removeItem("classSections");
+        localStorage.removeItem("classInfo");
+        localStorage.removeItem("courseProgress");
+        if (typeof setCourseProgressData === "function")
+          setCourseProgressData(null);
+        // Reset chatHistory to only the exit message (do not append to old history)
+        setChatHistory([
+          {
+            type: "bot",
+            text: "✅ Exited from all flows. Welcome back! You can ask me anything or use the dropdown to select a specific flow.",
+          },
+        ]);
+      }
+    }
+  }, [chatHistory]);
+
+  // Voice-based class selection for course progress
+  // Voice-based class selection for course progress (improved matching)
+  useEffect(() => {
+    if (activeFlow !== "course_progress" || !isVoiceInputRef.current) return;
+    if (!classSections || classSections.length === 0) return;
+    const lastMessage = chatHistory[chatHistory.length - 1];
+    if (lastMessage?.type !== "user") return;
+    const userTextRaw = lastMessage.text || "";
+    const userText = normalizeClassSectionString(userTextRaw);
+    console.log(
+      "[Voice Class Selection] Checking for class match:",
+      userTextRaw,
+      "| normalized:",
+      userText
+    );
+    let matchedSection = null;
+    for (const section of classSections) {
+      const className = section.className?.toLowerCase() || "";
+      const sectionName = section.sectionName?.toLowerCase() || "";
+      const roman = className;
+      const numeric = romanToNumeric(className) || className;
+      const romanAlt = numericToRoman(numeric) || roman;
+      // Build all possible patterns, normalized
+      const patterns = [
+        `${roman}${sectionName}`,
+        `${roman} ${sectionName}`,
+        `${roman}-${sectionName}`,
+        `${numeric}${sectionName}`,
+        `${numeric} ${sectionName}`,
+        `${numeric}-${sectionName}`,
+        `${romanAlt}${sectionName}`,
+        `${romanAlt} ${sectionName}`,
+        `${romanAlt}-${sectionName}`,
+        `${roman}section${sectionName}`,
+        `${numeric}section${sectionName}`,
+        `${romanAlt}section${sectionName}`,
+      ].map(normalizeClassSectionString);
+      for (const pattern of patterns) {
+        if (userText.includes(pattern)) {
+          matchedSection = section;
+          console.log(
+            "[Voice Class Selection] ✅ Match found:",
+            pattern,
+            section
+          );
+          break;
+        }
+      }
+      if (matchedSection) break;
+    }
+    if (matchedSection) {
+      console.log("[Voice Class Selection] Auto-selecting:", matchedSection);
+      setSelectedClassSection({
+        classId: matchedSection.classId,
+        sectionId: matchedSection.sectionId,
+        className: matchedSection.className,
+        sectionName: matchedSection.sectionName,
+      });
+    }
+  }, [chatHistory, activeFlow, classSections, isVoiceInputRef.current]);
+
+  // Helper: normalize class/section string for matching
+  function normalizeClassSectionString(str: string): string {
+    return str
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "") // remove all non-alphanumeric
+      .replace(/\s+/g, "");
+  }
+
+  // Helper: roman to numeric (returns numeric string or null)
+  function romanToNumeric(roman: string): string | null {
+    const romanMap: { [key: string]: string } = {
+      xiii: "13",
+      xii: "12",
+      xi: "11",
+      x: "10",
+      ix: "9",
+      viii: "8",
+      vii: "7",
+      vi: "6",
+      v: "5",
+      iv: "4",
+      iii: "3",
+      ii: "2",
+      i: "1",
+    };
+    return romanMap[roman.toLowerCase()] || null;
+  }
+
+  // Helper: numeric to roman (returns roman string or null)
+  function numericToRoman(num: string): string | null {
+    const numMap: { [key: string]: string } = {
+      "13": "xiii",
+      "12": "xii",
+      "11": "xi",
+      "10": "x",
+      "9": "ix",
+      "8": "viii",
+      "7": "vii",
+      "6": "vi",
+      "5": "v",
+      "4": "iv",
+      "3": "iii",
+      "2": "ii",
+      "1": "i",
+    };
+    return numMap[num] || null;
+  }
   const handlePlayTTS = async (idx: number, text: string) => {
     setTtsLoading(idx);
     try {
@@ -1090,14 +1477,21 @@ const AudioStreamerChatBot = ({
         feedback: type,
         comment: feedbackCommentValue,
       });
-      setChatHistory((prev) =>
-        prev.map((msg, i) =>
-          i === idx && msg.type === "bot"
-            ? { ...msg, feedback: type, feedbackMessage: data.message }
-            : msg
-        )
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "bot",
+          text: `📚 Select a class and section to view course progress: ...`,
+          // ... other properties
+        },
+      ]);
+      // After setChatHistory for class selection
+      console.log("[Course Progress] About to call TTS");
+      speakCourseProgressSummary(
+        "Select a class and section to view course progress",
+        true // Auto-enable mic for response
       );
-      setFeedbackComment((prev) => ({ ...prev, [idx]: "" }));
+      console.log("[Course Progress] TTS call completed");
       setShowCorrectionBox(null);
     } catch (err) {
       setChatHistory((prev) =>
@@ -3505,19 +3899,16 @@ const AudioStreamerChatBot = ({
                               setActiveFlow("course_progress");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
+                              // Always clear any previous selection/state
                               setSelectedClassSection(null);
                               setCourseProgressData(null);
-
+                              setClassSections([]);
                               // Fetch class sections when flow is activated
                               setLoadingClassSections(true);
                               try {
                                 const authToken = localStorage.getItem("token");
                                 const { academic_session, branch_token } =
                                   getErpContext();
-                                console.log(
-                                  "Fetching class sections with token:",
-                                  authToken ? "present" : "missing"
-                                );
                                 const response =
                                   await courseProgressAPI.fetchClassSections({
                                     page: 1,
@@ -3526,38 +3917,22 @@ const AudioStreamerChatBot = ({
                                     academic_session,
                                     branch_token,
                                   });
-
-                                console.log(
-                                  "Class sections API response:",
-                                  response
-                                );
-
                                 if (
                                   (response.status === 200 ||
                                     response.status === "success") &&
                                   response.data?.options
                                 ) {
                                   const options = response.data.options || [];
-                                  console.log(
-                                    "Parsed class sections:",
-                                    options
-                                  );
                                   setClassSections(options);
-                                  setChatHistory((prev) => [
-                                    ...prev,
+                                  setChatHistory([
                                     {
                                       type: "bot",
-                                      text: `📊 **Course Progress Flow Activated (Manual override)!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
+                                      text: `📊 **Course Progress Flow Activated!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
                                       classSections: options,
                                     },
                                   ]);
                                 } else {
-                                  console.warn(
-                                    "Unexpected response structure:",
-                                    response
-                                  );
-                                  setChatHistory((prev) => [
-                                    ...prev,
+                                  setChatHistory([
                                     {
                                       type: "bot",
                                       text: `⚠️ ${
@@ -3568,12 +3943,7 @@ const AudioStreamerChatBot = ({
                                   ]);
                                 }
                               } catch (err: any) {
-                                console.error(
-                                  "Error fetching class sections:",
-                                  err
-                                );
-                                setChatHistory((prev) => [
-                                  ...prev,
+                                setChatHistory([
                                   {
                                     type: "bot",
                                     text: `❌ Error loading class sections: ${
@@ -3716,9 +4086,9 @@ const AudioStreamerChatBot = ({
                           >
                             {selectedDeviceId === "default" ? "✓ " : ""}Default
                           </div>
-                          {devices.map((device) => (
+                          {devices.map((device, idx) => (
                             <div
-                              key={device.deviceId}
+                              key={device.deviceId || idx}
                               onClick={() => {
                                 setSelectedDeviceId(device.deviceId);
                                 setIsMenuOpen(false);
@@ -3811,9 +4181,9 @@ const AudioStreamerChatBot = ({
                             gap: "0.25rem",
                           }}
                         >
-                          {languages.map((lang) => (
+                          {languages.map((lang, idx) => (
                             <div
-                              key={lang.value}
+                              key={lang.value || idx}
                               onClick={() => {
                                 setSelectedLanguage(lang.value);
                                 setIsMenuOpen(false);
@@ -3922,7 +4292,10 @@ const AudioStreamerChatBot = ({
 
             <div className="chatbot-messages">
               {chatHistory.map((msg, idx) => (
-                <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
+                <div
+                  key={getChatMsgKey(msg, idx)}
+                  className={`chatbot-msg-row ${msg.type}`}
+                >
                   {msg.type === "user" ? (
                     <>
                       <span className="chatbot-msg-bubble user">
@@ -3993,11 +4366,10 @@ const AudioStreamerChatBot = ({
 
                                         return (
                                           <div
-                                            key={
-                                              classSection.class?._id +
-                                                classSection.section?._id ||
+                                            key={getClassSectionKey(
+                                              classSection,
                                               csIdx
-                                            }
+                                            )}
                                             className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
                                               isSelected
                                                 ? "border-blue-500 bg-blue-50 shadow-md"
@@ -4015,17 +4387,53 @@ const AudioStreamerChatBot = ({
                                                 return;
                                               }
 
-                                              const newSelection = {
-                                                classId: classId,
-                                                sectionId: sectionId,
-                                                className: className,
-                                                sectionName: sectionName,
-                                              };
-                                              setSelectedClassSection(
-                                                newSelection
-                                              );
+                                              // Block selection and API call if selectedClassSection is null (after exit)
+                                              if (
+                                                selectedClassSection === null
+                                              ) {
+                                                // After exit, require explicit new selection
+                                                setSelectedClassSection({
+                                                  classId: classId,
+                                                  sectionId: sectionId,
+                                                  className: className,
+                                                  sectionName: sectionName,
+                                                });
+                                              } else if (
+                                                selectedClassSection.classId ===
+                                                  classId &&
+                                                selectedClassSection.sectionId ===
+                                                  sectionId
+                                              ) {
+                                                // Already selected, do nothing
+                                                return;
+                                              } else {
+                                                setSelectedClassSection({
+                                                  classId: classId,
+                                                  sectionId: sectionId,
+                                                  className: className,
+                                                  sectionName: sectionName,
+                                                });
+                                              }
 
-                                              // Fetch course progress
+                                              // Only fetch course progress if selectedClassSection is set (not null)
+                                              if (!classId || !sectionId) {
+                                                setChatHistory((prev) => [
+                                                  ...prev,
+                                                  {
+                                                    type: "bot",
+                                                    text: "Please select a class and section from the list above to view course progress.",
+                                                  },
+                                                ]);
+                                                // TTS: Speak the same message as UI
+                                                if (isVoiceInputRef.current) {
+                                                  speakCourseProgressSummary(
+                                                    "Please select a class and section from the list above to view course progress.",
+                                                    true
+                                                  );
+                                                }
+                                                return;
+                                              }
+
                                               setIsProcessing(true);
                                               try {
                                                 const authToken =
@@ -4109,6 +4517,20 @@ const AudioStreamerChatBot = ({
                                                       },
                                                     },
                                                   ]);
+                                                  // TTS: Speak summary only
+                                                  if (isVoiceInputRef.current) {
+                                                    if (totalSubjects > 0) {
+                                                      speakCourseProgressSummary(
+                                                        `Course Progress: Class ${className} ${sectionName}. Total Subjects: ${totalSubjects}. Scroll down to see details.`,
+                                                        false
+                                                      );
+                                                    } else {
+                                                      speakCourseProgressSummary(
+                                                        `No course progress data available yet for Class ${className} ${sectionName}.`,
+                                                        false
+                                                      );
+                                                    }
+                                                  }
                                                 } else {
                                                   console.warn(
                                                     "Unexpected progress response:",
@@ -4302,9 +4724,10 @@ const AudioStreamerChatBot = ({
 
                                                 return (
                                                   <div
-                                                    key={
-                                                      chapter.id || chapterIdx
-                                                    }
+                                                    key={getChapterKey(
+                                                      chapter,
+                                                      chapterIdx
+                                                    )}
                                                     className="bg-white border border-gray-200 rounded-md p-3 hover:shadow-sm transition-shadow"
                                                   >
                                                     <div className="flex items-center justify-between mb-1">
@@ -4510,7 +4933,9 @@ const AudioStreamerChatBot = ({
                                                                 ...prev,
                                                                 {
                                                                   type: "bot",
-                                                                  text: `✅ Leave request for ${employeeName} has been approved successfully!`,
+                                                                  answer: `✅ Leave request for ${employeeName} has been approved successfully!`,
+                                                                  activeTab:
+                                                                    "answer" as const,
                                                                 },
                                                               ]
                                                             );
@@ -4520,10 +4945,12 @@ const AudioStreamerChatBot = ({
                                                                 ...prev,
                                                                 {
                                                                   type: "bot",
-                                                                  text: `❌ Error approving leave request: ${
+                                                                  answer: `❌ Error approving leave request: ${
                                                                     err.message ||
                                                                     "Unknown error"
                                                                   }`,
+                                                                  activeTab:
+                                                                    "answer" as const,
                                                                 },
                                                               ]
                                                             );
@@ -4607,7 +5034,9 @@ const AudioStreamerChatBot = ({
                                                                   ...prev,
                                                                   {
                                                                     type: "bot",
-                                                                    text: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                                    answer: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                                    activeTab:
+                                                                      "answer" as const,
                                                                   },
                                                                 ]
                                                               );
@@ -4617,10 +5046,12 @@ const AudioStreamerChatBot = ({
                                                                   ...prev,
                                                                   {
                                                                     type: "bot",
-                                                                    text: `❌ Error rejecting leave request: ${
+                                                                    answer: `❌ Error rejecting leave request: ${
                                                                       err.message ||
                                                                       "Unknown error"
                                                                     }`,
+                                                                    activeTab:
+                                                                      "answer" as const,
                                                                   },
                                                                 ]
                                                               );
@@ -5194,7 +5625,7 @@ const AudioStreamerChatBot = ({
                                       {(msg as any).buttons.map(
                                         (btn: any, i: number) => (
                                           <button
-                                            key={i}
+                                            key={getButtonKey(btn, i)}
                                             className="bot-text-btn"
                                             onClick={btn.action}
                                           >

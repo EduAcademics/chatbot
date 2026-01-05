@@ -1,6 +1,32 @@
 import { API_BASE_URL } from "../config/api";
 
 // Types
+// Leave Approval Voice Endpoint Types
+interface LeaveApprovalVoiceRequest {
+  session_id: string;
+  user_id: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  is_voice_input?: boolean;
+}
+
+interface LeaveApprovalVoiceResponse {
+  status: string;
+  message: string;
+  data: {
+    answer: string;
+    keep_listening: boolean;
+    flow_status: string;
+    play_audio: boolean;
+    leaveRequests?: any[];
+    pending_count?: number;
+    references?: string;
+    mongodbquery?: string;
+  };
+  total_token_counts?: number;
+}
 export interface LoginCredentials {
   email: string;
   // password: string;
@@ -573,6 +599,38 @@ export const leaveApprovalAPI = {
     return await response.json();
   },
 
+  // ✅ NEW: Voice summary endpoint
+  fetchVoiceSummary: async (
+    request: LeaveApprovalVoiceRequest
+  ): Promise<LeaveApprovalVoiceResponse> => {
+    const headers: HeadersInit = { "Content-Type": "application/json" };
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+    const response = await fetch(`${API_BASE_URL}/v1/ai/leave-approval-voice`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        session_id: request.session_id,
+        user_id: request.user_id,
+        query: request.query,
+        bearer_token: request.bearer_token,
+        academic_session: request.academic_session,
+        branch_token: request.branch_token,
+        is_voice_input: request.is_voice_input ?? true,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to fetch leave approval voice summary");
+    }
+    return await response.json();
+  },
   // Approve a leave request
   approve: async (request: ApproveLeaveRequest): Promise<any> => {
     const headers: HeadersInit = {
