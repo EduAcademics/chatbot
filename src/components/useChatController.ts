@@ -126,9 +126,14 @@ export const useChatController = (options: UseChatControllerOptions) => {
         onSetActiveFlow("none");
         onSetAttendanceStep("class_info");
         onSetPendingClassInfo(null);
+        let exitText = `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`;
+        if (activeFlow === "course_progress") {
+          exitText = `✅ Exited from course progress flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`;
+        }
         onUpdateChatHistory({
           type: "bot",
-          text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
+          text: exitText,
+          isExitHandled: true,
         });
         onSetIsProcessing(false);
         onSetDetectedFlow(null);
@@ -221,10 +226,7 @@ export const useChatController = (options: UseChatControllerOptions) => {
 
       // If still no flow selected after classification, prompt user
       if (!userOptionSelected && targetFlow === "none") {
-        onUpdateChatHistory({
-          type: "bot",
-          text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.",
-        });
+        // Do not add menu prompt to chatHistory
         onSetIsProcessing(false);
         return;
       }

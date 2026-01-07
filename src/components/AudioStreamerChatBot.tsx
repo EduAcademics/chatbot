@@ -1,9 +1,87 @@
-﻿// Helper to generate a unique key for class-section
-function getClassSectionKey(section: any, idx: number) {
-  return `${section.class?._id || section.classId || "class"}-${
-    section.section?._id || section.sectionId || "section"
-  }-${idx}`;
+﻿import React from "react";
+// (Removed unused normalizeClassSectionString)
+
+// Helper: roman to numeric (returns numeric string or null)
+function romanToNumeric(roman: string): string | null {
+  const romanMap: { [key: string]: string } = {
+    xiii: "13",
+    xii: "12",
+    xi: "11",
+    x: "10",
+    ix: "9",
+    viii: "8",
+    vii: "7",
+    vi: "6",
+    v: "5",
+    iv: "4",
+    iii: "3",
+    ii: "2",
+    i: "1",
+  };
+  return romanMap[roman.toLowerCase()] || null;
 }
+
+// Helper: numeric to roman (returns roman string or null)
+function numericToRoman(num: string): string | null {
+  const numMap: { [key: string]: string } = {
+    "13": "xiii",
+    "12": "xii",
+    "11": "xi",
+    "10": "x",
+    "9": "ix",
+    "8": "viii",
+    "7": "vii",
+    "6": "vi",
+    "5": "v",
+    "4": "iv",
+    "3": "iii",
+    "2": "ii",
+    "1": "i",
+  };
+  return numMap[num] || null;
+}
+
+// Robust parser: match user input to class-section (numeric/roman, ignore spaces/case)
+const parseClassInput = (input: string, classSections: any[]) => {
+  // Remove all non-alphanumeric except spaces, then trim and lowercase, then strip trailing punctuation
+  let cleanedInput = (input || "")
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .trim()
+    .toLowerCase();
+  cleanedInput = cleanedInput.replace(/[.!?,;:]+$/, "");
+  const normalizedInput = cleanedInput.replace(/\s+/g, "");
+  for (const cs of classSections) {
+    const className = cs.class?.name || cs.class?.className || "";
+    const sectionName = cs.section?.name || cs.section?.sectionName || "";
+    const roman = className.toLowerCase();
+    const numeric = romanToNumeric(roman) || className;
+    const romanAlt = numericToRoman(numeric) || roman;
+    // Try all patterns: "3A", "III A", "IIIA", etc.
+    const patterns = [
+      `${roman}${sectionName}`,
+      `${roman} ${sectionName}`,
+      `${romanAlt}${sectionName}`,
+      `${romanAlt} ${sectionName}`,
+      `${numeric}${sectionName}`,
+      `${numeric} ${sectionName}`,
+      `${roman}${sectionName}`.replace(/\s+/g, ""),
+      `${numeric}${sectionName}`.replace(/\s+/g, ""),
+      `${romanAlt}${sectionName}`.replace(/\s+/g, ""),
+    ].map((s) =>
+      s
+        .replace(/[^a-zA-Z0-9 ]/g, "")
+        .trim()
+        .toLowerCase()
+        .replace(/[.!?,;:]+$/, "")
+        .replace(/\s+/g, "")
+    );
+    if (patterns.includes(normalizedInput)) {
+      return cs;
+    }
+  }
+  return null;
+};
+// (Removed unused getClassSectionKey)
 // Helper to generate a unique key for chapters/subjects
 function getChapterKey(chapter: any, idx: number) {
   return `${chapter.id || chapter.subjectId || "subject"}-${
@@ -48,7 +126,7 @@ import {
   userAPI,
   leaveApprovalAPI,
   courseProgressAPI,
-} from "../services/api";
+} from "../services/api_fixed";
 import { API_BASE_URL } from "../config/api";
 import type { FlowType } from "./chatRouter";
 import { useVoiceEngine } from "./useVoiceEngine";
@@ -156,9 +234,7 @@ const AudioStreamerChatBot = ({
     "idle" | "listening" | "processing" | "speaking"
   >("idle");
   const [fieldsRemaining, setFieldsRemaining] = useState<number>(0);
-  const [flowStatus, setFlowStatus] = useState<
-    "in_progress" | "ready_to_submit" | "complete" | "cancelled" | "error"
-  >("in_progress");
+  // Removed unused flowStatus state to avoid warning
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_ttsPlaying, setTtsPlaying] = useState<boolean>(false);
   const [voiceModeActive, setVoiceModeActive] = useState<boolean>(false);
@@ -432,7 +508,7 @@ const AudioStreamerChatBot = ({
         setFieldsRemaining(signal.fields_remaining);
       }
       if (signal.flow_status) {
-        setFlowStatus(signal.flow_status);
+        // setFlowStatus(signal.flow_status); // removed unused state
       }
 
       // Handle flow completion from STT signals
@@ -862,7 +938,7 @@ const AudioStreamerChatBot = ({
 
       // Update flow status
       if (signals.flow_status) {
-        setFlowStatus(signals.flow_status);
+        // setFlowStatus(signals.flow_status); // removed unused state
       }
 
       // Handle flow completion - reset everything
@@ -997,25 +1073,208 @@ const AudioStreamerChatBot = ({
 
   // Legacy handleSubmit wrapper for backward compatibility
   // FIXED: Ensure manual text submission does NOT trigger voice mode
-  const handleSubmit = async () => {
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!inputText.trim() || !handleSubmitMessage) return;
     // When user types manually, ensure voice mode is completely OFF
     isVoiceInputRef.current = false;
     setVoiceModeActive(false);
     setListeningState("idle");
-    // Don't reset activeFlowRef here - let the router decide based on message content
-    console.log(
-      "[AudioStreamer] 📝 Manual text submission - voice mode disabled"
-    );
-    handleSubmitMessage(inputText.trim());
+    const userInput = inputText.trim();
+    // DO NOT add user message here; useChatController handles it
+
+    // Course progress text input selection logic
+    if (
+      activeFlow === "course_progress" &&
+      classSections &&
+      classSections.length > 0
+    ) {
+      // Prevent duplicate bot prompt: only allow if last bot message is not the selection prompt
+      const lastBotMsg = [...chatHistory]
+        .reverse()
+        .find((m) => m.type === "bot");
+      const selectionPrompt =
+        "Select a class and section to view course progress";
+      if (
+        lastBotMsg &&
+        lastBotMsg.text &&
+        lastBotMsg.text.includes(selectionPrompt)
+      ) {
+        // Already prompted, do not add again
+      }
+      // Always add user input to chat history for visibility
+      setChatHistory((prev) => [...prev, { type: "user", text: userInput }]);
+      const matched = parseClassInput(userInput, classSections);
+      if (matched) {
+        try {
+          const classId = matched.class?._id || matched.class?.uuid;
+          const sectionId = matched.section?._id || matched.section?.uuid;
+          const className =
+            matched.class?.name || matched.class?.className || "";
+          const sectionName =
+            matched.section?.name || matched.section?.sectionName || "";
+          const authToken = localStorage.getItem("token");
+          const { academic_session, branch_token } = getErpContext();
+          const response = await courseProgressAPI.getProgress({
+            classId,
+            sectionId,
+            bearer_token: authToken || undefined,
+            academic_session,
+            branch_token,
+          });
+          console.log("🔍 API Response Structure:", {
+            response: response,
+            "response.data": response?.data,
+            // "response.data.data": response?.data?.data,
+          });
+          // Extract data (check nesting)
+          const progressData =
+            (response?.data as any)?.resp ||
+            response?.data?.progress ||
+            (response?.data && (response?.data as any).data) ||
+            response?.data ||
+            [];
+          const totalSubjects = Array.isArray(
+            progressData.teacherDiarys || progressData
+          )
+            ? (progressData.teacherDiarys || progressData).length
+            : 0;
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: `📊 Course Progress: ${className} ${sectionName}\nTotal Subjects: ${totalSubjects}`,
+              courseProgress: progressData,
+              classSection: {
+                classId,
+                sectionId,
+                className,
+                sectionName,
+              },
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          setActiveFlow("none");
+          setClassSections([]);
+        } catch (error) {
+          console.error("Error:", error);
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: "Error fetching progress. Please try again.",
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        }
+      } else {
+        setChatHistory((prev) => {
+          // Prevent duplicate not-found messages
+          const lastBot = [...prev].reverse().find((m) => m.type === "bot");
+          if (
+            lastBot &&
+            lastBot.text &&
+            lastBot.text.startsWith("Class not found.")
+          )
+            return prev;
+          return [
+            ...prev,
+            {
+              type: "bot",
+              text: `Class not found. Please select from: ${classSections
+                .map(
+                  (cs) =>
+                    `${cs.class?.name || cs.class?.className || ""} ${
+                      cs.section?.name || cs.section?.sectionName || ""
+                    }`
+                )
+                .join(", ")}`,
+              timestamp: new Date().toISOString(),
+            },
+          ];
+        });
+      }
+      setInputText("");
+      return;
+    }
+    // ...rest of normal handleSubmit logic
+    handleSubmitMessage(userInput);
     setInputText("");
   };
+  // Unified exit/reset handler for course progress flow (robust, always appends exit message)
+  useEffect(() => {
+    const lastUserMessage = chatHistory[chatHistory.length - 1];
+    if (lastUserMessage?.type === "user") {
+      const text = (lastUserMessage.text || "").toLowerCase();
+      if (["exit", "back", "cancel"].some((kw) => text.includes(kw))) {
+        // Always append exit message if user just exited course progress, even if flow is already 'none'
+        const exitMsg =
+          "✅ Exited from course progress flow. You can continue your previous conversation or select another flow.";
+        let shouldAppendExit = false;
+        if (
+          activeFlow === "course_progress" ||
+          activeFlowRef.current === "course_progress"
+        ) {
+          setSelectedClassSection(null);
+          setClassSections([]);
+          setActiveFlow("none");
+          setVoiceModeActive(false);
+          isVoiceInputRef.current = false;
+          activeFlowRef.current = "none";
+          setListeningState("idle");
+          sessionStorage.removeItem("courseProgressData");
+          sessionStorage.removeItem("selectedClassSection");
+          sessionStorage.removeItem("classSections");
+          sessionStorage.removeItem("classInfo");
+          sessionStorage.removeItem("courseProgress");
+          localStorage.removeItem("selectedClassSection");
+          localStorage.removeItem("courseProgressData");
+          localStorage.removeItem("classSections");
+          localStorage.removeItem("classInfo");
+          localStorage.removeItem("courseProgress");
+          if (typeof setCourseProgressData === "function")
+            setCourseProgressData(null);
+          shouldAppendExit = true;
+        } else if (activeFlow === "none" && chatHistory.length > 1) {
+          // If flow is already none, but last user message was exit/back/cancel after course progress, still append exit message
+          const lastBotMsg = [...chatHistory]
+            .reverse()
+            .find((m) => m.type === "bot" && m.text && m.text.trim());
+          if (!lastBotMsg || lastBotMsg.text !== exitMsg) {
+            shouldAppendExit = true;
+          }
+        }
+        if (shouldAppendExit) {
+          setChatHistory((prev) => {
+            // Remove any trailing empty bot message
+            let filtered = [...prev];
+            while (
+              filtered.length > 0 &&
+              filtered[filtered.length - 1].type === "bot" &&
+              !filtered[filtered.length - 1].text?.trim()
+            ) {
+              filtered.pop();
+            }
+            return [
+              ...filtered,
+              {
+                type: "bot",
+                text: exitMsg,
+              },
+            ];
+          });
+        }
+      }
+    }
+  }, [chatHistory, activeFlow]);
 
   // Memoized answer component to prevent refresh on re-renders
 
   // ...existing code...
   const MemoizedAnswer = memo(
     ({ answer, messageIdx }: { answer: string; messageIdx: number }) => {
+      // Filter out empty/blank bot messages so they are never rendered
+      if (!answer || !answer.trim()) return null;
       return (
         <div
           key={`answer-${messageIdx}-${answer.slice(0, 20)}`}
@@ -1032,7 +1291,7 @@ const AudioStreamerChatBot = ({
               ),
             }}
           >
-            {answer || ""}
+            {answer}
           </ReactMarkdown>
         </div>
       );
@@ -1262,86 +1521,90 @@ const AudioStreamerChatBot = ({
     }
   }, [chatHistory, isVoiceInputRef.current]);
 
-  // Exit/reset handler for course progress flow
-  // Robust exit/reset handler for course progress flow
-  useEffect(() => {
-    // Always check last user message for exit/back/cancel
-    const lastUserMessage = chatHistory[chatHistory.length - 1];
-    if (lastUserMessage?.type === "user") {
-      const text = (lastUserMessage.text || "").toLowerCase();
-      if (["exit", "back", "cancel"].some((kw) => text.includes(kw))) {
-        console.log(
-          "[Global Exit] Exit/back/cancel detected, clearing all flow state"
-        );
-        // Clear all course progress, attendance, and session state
-        setSelectedClassSection(null);
-        setClassSections([]);
-        // Defensive: clear any possible course progress/class section state in memory
-        setTimeout(() => {
-          setSelectedClassSection(null);
-          setClassSections([]);
-        }, 0);
-        setActiveFlow("none");
-        setAttendanceData([]);
-        setClassInfo(null);
-        setEditingMessageIndex(null);
-        setAttendanceStep("class_info");
-        setPendingClassInfo(null);
-        setLeaveApprovalRequests([]);
-        setLoadingLeaveRequests(false);
-        setShowClassInfoModal(false);
-        setPendingImageFile(null);
-        setVoiceModeActive(false);
-        isVoiceInputRef.current = false;
-        activeFlowRef.current = "none";
-        setListeningState("idle");
-        sessionStorage.removeItem("pendingAttendanceData");
-        sessionStorage.removeItem("pendingClassInfo");
-        // Clear course progress data from sessionStorage, localStorage, and state
-        sessionStorage.removeItem("courseProgressData");
-        sessionStorage.removeItem("selectedClassSection");
-        sessionStorage.removeItem("classSections");
-        sessionStorage.removeItem("classInfo");
-        sessionStorage.removeItem("courseProgress");
-        localStorage.removeItem("selectedClassSection");
-        localStorage.removeItem("courseProgressData");
-        localStorage.removeItem("classSections");
-        localStorage.removeItem("classInfo");
-        localStorage.removeItem("courseProgress");
-        if (typeof setCourseProgressData === "function")
-          setCourseProgressData(null);
-        // Reset chatHistory to only the exit message (do not append to old history)
-        setChatHistory([
-          {
-            type: "bot",
-            text: "✅ Exited from all flows. Welcome back! You can ask me anything or use the dropdown to select a specific flow.",
-          },
-        ]);
-      }
-    }
-  }, [chatHistory]);
+  // (Removed duplicate exit handler useEffect)
 
-  // Voice-based class selection for course progress
-  // Voice-based class selection for course progress (improved matching)
+  // --- Robust voice-based class selection for course progress ---
+  const [pendingClassSectionInput, setPendingClassSectionInput] =
+    React.useState<string | null>(null);
+
+  // 1. On user message, if in course_progress and classSections not ready, queue input
+  // --- Voice-based class selection for course progress (robust immediate trigger) ---
+  useEffect(() => {
+    console.log("[Voice Class Selection][EFFECT FIRED]", {
+      activeFlow,
+      isVoiceInputRef: isVoiceInputRef.current,
+      chatHistory,
+      classSections,
+      pendingClassSectionInput,
+    });
+    if (activeFlow !== "course_progress" || !isVoiceInputRef.current) return;
+    if (!chatHistory || chatHistory.length === 0) return;
+    // Find the most recent user message that is not an exit/back/cancel
+    const lastUserMsgIdx = [...chatHistory]
+      .reverse()
+      .findIndex(
+        (m) =>
+          m.type === "user" &&
+          typeof m.text === "string" &&
+          !["exit", "back", "cancel"].some(
+            (kw) => m.text && m.text.toLowerCase().includes(kw)
+          )
+      );
+    if (lastUserMsgIdx === -1) return;
+    const lastUserMsg = chatHistory[chatHistory.length - 1 - lastUserMsgIdx];
+    if (!lastUserMsg || typeof lastUserMsg.text !== "string") return;
+    const userTextRaw = lastUserMsg.text;
+    if (!classSections || classSections.length === 0) {
+      setPendingClassSectionInput(userTextRaw);
+      console.log(
+        "[Voice Class Selection][QUEUE] classSections not ready, queuing input:",
+        userTextRaw,
+        chatHistory,
+        classSections
+      );
+      return;
+    }
+    // If classSections ready, process immediately
+    console.log(
+      "[Voice Class Selection][PROCESS IMMEDIATE] classSections ready, processing input:",
+      userTextRaw,
+      classSections
+    );
+    processClassSectionInput(userTextRaw, classSections);
+  }, [chatHistory, activeFlow, classSections, isVoiceInputRef.current]);
+
+  // 2. When classSections becomes available, process any pending input
   useEffect(() => {
     if (activeFlow !== "course_progress" || !isVoiceInputRef.current) return;
+    if (!pendingClassSectionInput) return;
     if (!classSections || classSections.length === 0) return;
-    const lastMessage = chatHistory[chatHistory.length - 1];
-    if (lastMessage?.type !== "user") return;
-    const userTextRaw = lastMessage.text || "";
-    const userText = normalizeClassSectionString(userTextRaw);
+    // Process the pending input
     console.log(
-      "[Voice Class Selection] Checking for class match:",
-      userTextRaw,
-      "| normalized:",
-      userText
+      "[Voice Class Selection][PROCESS PENDING] classSections now ready, processing pending input:",
+      pendingClassSectionInput,
+      classSections
     );
+    processClassSectionInput(pendingClassSectionInput, classSections);
+    setPendingClassSectionInput(null);
+  }, [
+    classSections,
+    activeFlow,
+    isVoiceInputRef.current,
+    pendingClassSectionInput,
+  ]);
+
+  // Helper: process class-section input against classSections
+  function processClassSectionInput(userTextRaw: string, classSections: any[]) {
+    // Normalize and strip trailing punctuation for robust matching
+    const userText = normalizeClassSectionString(userTextRaw);
     let matchedSection = null;
     for (const section of classSections) {
-      const className = section.className?.toLowerCase() || "";
-      const sectionName = section.sectionName?.toLowerCase() || "";
-      const roman = className;
-      const numeric = romanToNumeric(className) || className;
+      // Use the same extraction logic as parseClassInput
+      const className = section.class?.name || section.class?.className || "";
+      const sectionName =
+        section.section?.name || section.section?.sectionName || "";
+      const roman = (className || "").toLowerCase();
+      const numeric = romanToNumeric(roman) || className;
       const romanAlt = numericToRoman(numeric) || roman;
       // Build all possible patterns, normalized
       const patterns = [
@@ -1358,6 +1621,15 @@ const AudioStreamerChatBot = ({
         `${numeric}section${sectionName}`,
         `${romanAlt}section${sectionName}`,
       ].map(normalizeClassSectionString);
+      // Debug log: print all patterns and userText
+      console.log(
+        "[Voice Class Selection][DEBUG] Patterns:",
+        patterns,
+        "| userText:",
+        userText,
+        "| userTextRaw:",
+        userTextRaw
+      );
       for (const pattern of patterns) {
         if (userText.includes(pattern)) {
           matchedSection = section;
@@ -1380,12 +1652,13 @@ const AudioStreamerChatBot = ({
         sectionName: matchedSection.sectionName,
       });
     }
-  }, [chatHistory, activeFlow, classSections, isVoiceInputRef.current]);
+  }
 
   // Helper: normalize class/section string for matching
   function normalizeClassSectionString(str: string): string {
-    return str
+    return (str || "")
       .toLowerCase()
+      .replace(/[.!?,;:]+$/, "") // strip trailing punctuation
       .replace(/[^a-z0-9]/g, "") // remove all non-alphanumeric
       .replace(/\s+/g, "");
   }
@@ -1472,7 +1745,7 @@ const AudioStreamerChatBot = ({
   ) => {
     const feedbackCommentValue = comment ?? "";
     try {
-      const data = await aiAPI.feedback({
+      await aiAPI.feedback({
         message_index: idx,
         feedback: type,
         comment: feedbackCommentValue,
@@ -3927,7 +4200,7 @@ const AudioStreamerChatBot = ({
                                   setChatHistory([
                                     {
                                       type: "bot",
-                                      text: `📊 **Course Progress Flow Activated!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
+                                      text: `📊 **Course Progress Flow Activated!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list above to view the course progress.`,
                                       classSections: options,
                                     },
                                   ]);
@@ -4342,250 +4615,21 @@ const AudioStreamerChatBot = ({
                                       course progress:
                                     </p>
                                   </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <ul className="class-section-list">
                                     {(msg as any).classSections.map(
-                                      (classSection: any, csIdx: number) => {
-                                        const className =
-                                          classSection.class?.name ||
-                                          "Unknown Class";
-                                        const sectionName =
-                                          classSection.section?.name ||
-                                          "Unknown Section";
-                                        // Use _id for get-progress API as it expects ObjectId
-                                        const classId =
-                                          classSection.class?._id ||
-                                          classSection.class?.uuid;
-                                        const sectionId =
-                                          classSection.section?._id ||
-                                          classSection.section?.uuid;
-                                        const isSelected =
-                                          selectedClassSection?.classId ===
-                                            classId &&
-                                          selectedClassSection?.sectionId ===
-                                            sectionId;
-
-                                        return (
-                                          <div
-                                            key={getClassSectionKey(
-                                              classSection,
-                                              csIdx
-                                            )}
-                                            className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                                              isSelected
-                                                ? "border-blue-500 bg-blue-50 shadow-md"
-                                                : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
-                                            }`}
-                                            onClick={async () => {
-                                              if (!classId || !sectionId) {
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: "❌ Error: Missing class or section ID. Please try again.",
-                                                  },
-                                                ]);
-                                                return;
-                                              }
-
-                                              // Block selection and API call if selectedClassSection is null (after exit)
-                                              if (
-                                                selectedClassSection === null
-                                              ) {
-                                                // After exit, require explicit new selection
-                                                setSelectedClassSection({
-                                                  classId: classId,
-                                                  sectionId: sectionId,
-                                                  className: className,
-                                                  sectionName: sectionName,
-                                                });
-                                              } else if (
-                                                selectedClassSection.classId ===
-                                                  classId &&
-                                                selectedClassSection.sectionId ===
-                                                  sectionId
-                                              ) {
-                                                // Already selected, do nothing
-                                                return;
-                                              } else {
-                                                setSelectedClassSection({
-                                                  classId: classId,
-                                                  sectionId: sectionId,
-                                                  className: className,
-                                                  sectionName: sectionName,
-                                                });
-                                              }
-
-                                              // Only fetch course progress if selectedClassSection is set (not null)
-                                              if (!classId || !sectionId) {
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: "Please select a class and section from the list above to view course progress.",
-                                                  },
-                                                ]);
-                                                // TTS: Speak the same message as UI
-                                                if (isVoiceInputRef.current) {
-                                                  speakCourseProgressSummary(
-                                                    "Please select a class and section from the list above to view course progress.",
-                                                    true
-                                                  );
-                                                }
-                                                return;
-                                              }
-
-                                              setIsProcessing(true);
-                                              try {
-                                                const authToken =
-                                                  localStorage.getItem("token");
-                                                console.log(
-                                                  "Fetching course progress for:",
-                                                  {
-                                                    classId,
-                                                    sectionId,
-                                                    className,
-                                                    sectionName,
-                                                  }
-                                                );
-                                                const {
-                                                  academic_session,
-                                                  branch_token,
-                                                } = getErpContext();
-                                                const progressResponse =
-                                                  await courseProgressAPI.getProgress(
-                                                    {
-                                                      classId,
-                                                      sectionId,
-                                                      bearer_token:
-                                                        authToken || undefined,
-                                                      academic_session,
-                                                      branch_token,
-                                                    }
-                                                  );
-
-                                                console.log(
-                                                  "Course progress API response:",
-                                                  progressResponse
-                                                );
-
-                                                if (
-                                                  ((progressResponse.status as any) ===
-                                                    200 ||
-                                                    progressResponse.status ===
-                                                      "success") &&
-                                                  progressResponse.data
-                                                ) {
-                                                  // The API returns data.resp according to the controller
-                                                  const progressData =
-                                                    (
-                                                      progressResponse.data as any
-                                                    ).resp ||
-                                                    progressResponse.data
-                                                      .progress ||
-                                                    progressResponse.data;
-                                                  setCourseProgressData(
-                                                    progressData
-                                                  );
-
-                                                  // Format a nice summary message
-                                                  const teacherDiarys =
-                                                    progressData.teacherDiarys ||
-                                                    progressData ||
-                                                    [];
-                                                  const totalSubjects =
-                                                    Array.isArray(teacherDiarys)
-                                                      ? teacherDiarys.length
-                                                      : 0;
-                                                  const summaryText =
-                                                    totalSubjects > 0
-                                                      ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                                                      : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
-
-                                                  setChatHistory((prev) => [
-                                                    ...prev,
-                                                    {
-                                                      type: "bot",
-                                                      text: summaryText,
-                                                      courseProgress:
-                                                        progressData,
-                                                      classSection: {
-                                                        classId: classId,
-                                                        sectionId: sectionId,
-                                                        className: className,
-                                                        sectionName:
-                                                          sectionName,
-                                                      },
-                                                    },
-                                                  ]);
-                                                  // TTS: Speak summary only
-                                                  if (isVoiceInputRef.current) {
-                                                    if (totalSubjects > 0) {
-                                                      speakCourseProgressSummary(
-                                                        `Course Progress: Class ${className} ${sectionName}. Total Subjects: ${totalSubjects}. Scroll down to see details.`,
-                                                        false
-                                                      );
-                                                    } else {
-                                                      speakCourseProgressSummary(
-                                                        `No course progress data available yet for Class ${className} ${sectionName}.`,
-                                                        false
-                                                      );
-                                                    }
-                                                  }
-                                                } else {
-                                                  console.warn(
-                                                    "Unexpected progress response:",
-                                                    progressResponse
-                                                  );
-                                                  setChatHistory((prev) => [
-                                                    ...prev,
-                                                    {
-                                                      type: "bot",
-                                                      text:
-                                                        progressResponse.message ||
-                                                        "Failed to fetch course progress. Please try again.",
-                                                    },
-                                                  ]);
-                                                }
-                                              } catch (err: any) {
-                                                console.error(
-                                                  "Error fetching course progress:",
-                                                  err
-                                                );
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: `❌ Error fetching course progress: ${
-                                                      err.message ||
-                                                      "Unknown error"
-                                                    }`,
-                                                  },
-                                                ]);
-                                              } finally {
-                                                setIsProcessing(false);
-                                              }
-                                            }}
-                                          >
-                                            <div className="flex items-center justify-between">
-                                              <div>
-                                                <h4 className="text-base font-semibold text-gray-900">
-                                                  {className}
-                                                </h4>
-                                                <p className="text-sm text-gray-600 mt-1">
-                                                  Section: {sectionName}
-                                                </p>
-                                              </div>
-                                              {isSelected && (
-                                                <div className="text-blue-600 text-xl">
-                                                  ✓
-                                                </div>
-                                              )}
-                                            </div>
-                                          </div>
-                                        );
-                                      }
+                                      (cs: any, idx: number) => (
+                                        <li key={idx}>
+                                          •{" "}
+                                          {cs.class?.name ||
+                                            cs.class?.className ||
+                                            "Unknown Class"}{" "}
+                                          {cs.section?.name ||
+                                            cs.section?.sectionName ||
+                                            "Unknown Section"}
+                                        </li>
+                                      )
                                     )}
-                                  </div>
+                                  </ul>
                                 </div>
                               )}
                             </>
@@ -4801,35 +4845,43 @@ const AudioStreamerChatBot = ({
                                     idx === chatHistory.length - 1 && (
                                       <>
                                         {loadingLeaveRequests ? (
-                                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                            <div className="flex items-center gap-3">
-                                              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                                              <span className="text-blue-900 font-medium">
+                                          <div className="mt-4 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl shadow-sm">
+                                            <div className="flex items-center justify-center gap-4">
+                                              <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                              <span className="text-blue-900 font-semibold text-base">
                                                 Loading pending leave
                                                 requests...
                                               </span>
                                             </div>
                                           </div>
                                         ) : leaveApprovalRequests.length > 0 ? (
-                                          <div className="mt-4 space-y-4">
-                                            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                              <p className="text-sm text-blue-900 font-medium">
-                                                📋 Found{" "}
-                                                <strong>
-                                                  {leaveApprovalRequests.length}
-                                                </strong>{" "}
-                                                pending leave request(s). Please
-                                                review and take action.
-                                              </p>
+                                          <div className="mt-4 space-y-6">
+                                            {/* Summary Header */}
+                                            <div className="p-4 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
+                                              <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-xl">
+                                                  📋
+                                                </div>
+                                                <div>
+                                                  <h3 className="text-lg font-bold">
+                                                    Leave Approval Dashboard
+                                                  </h3>
+                                                  <p className="text-sm text-blue-100">
+                                                    {
+                                                      leaveApprovalRequests.length
+                                                    }{" "}
+                                                    {leaveApprovalRequests.length ===
+                                                    1
+                                                      ? "request"
+                                                      : "requests"}{" "}
+                                                    pending review
+                                                  </p>
+                                                </div>
+                                              </div>
                                             </div>
+                                            {/* Leave Request Cards */}
                                             {leaveApprovalRequests.map(
                                               (request, reqIdx) => {
-                                                const startDate = new Date(
-                                                  request.start_date
-                                                ).toLocaleDateString();
-                                                const endDate = new Date(
-                                                  request.end_date
-                                                ).toLocaleDateString();
                                                 const employeeName =
                                                   request.employee?.personalInfo
                                                     ?.employeeName || "Unknown";
@@ -4845,165 +4897,161 @@ const AudioStreamerChatBot = ({
                                                 const photoPath =
                                                   request.employee?.personalInfo
                                                     ?.photoDocument?.path;
-
+                                                // Duration Calculation Logic
+                                                const startDate = new Date(
+                                                  request.start_date
+                                                );
+                                                const endDate = new Date(
+                                                  request.end_date
+                                                );
+                                                const startDateStr =
+                                                  startDate.toLocaleDateString(
+                                                    "en-US",
+                                                    {
+                                                      month: "short",
+                                                      day: "numeric",
+                                                      year: "numeric",
+                                                    }
+                                                  );
+                                                const endDateStr =
+                                                  endDate.toLocaleDateString(
+                                                    "en-US",
+                                                    {
+                                                      month: "short",
+                                                      day: "numeric",
+                                                      year: "numeric",
+                                                    }
+                                                  );
+                                                const isSingleDay =
+                                                  startDateStr === endDateStr;
+                                                const daysDiff =
+                                                  Math.ceil(
+                                                    (endDate.getTime() -
+                                                      startDate.getTime()) /
+                                                      (1000 * 60 * 60 * 24)
+                                                  ) + 1;
                                                 return (
                                                   <div
                                                     key={request.uuid || reqIdx}
-                                                    className="bg-white border border-gray-300 rounded-lg p-4 shadow-md"
+                                                    className="bg-white border-2 border-gray-200 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden"
                                                   >
-                                                    <div className="flex items-start gap-4 mb-4">
-                                                      {photoPath && (
-                                                        <img
-                                                          src={photoPath}
-                                                          alt={employeeName}
-                                                          className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
-                                                        />
-                                                      )}
-                                                      <div className="flex-1">
-                                                        <h4 className="text-lg font-semibold text-gray-900 mb-1">
-                                                          {employeeName}
-                                                        </h4>
-                                                        <p className="text-sm text-gray-600 mb-2">
-                                                          ID: {employeeId}
-                                                        </p>
-                                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                                          <div>
-                                                            <span className="font-medium text-gray-700">
-                                                              Leave Type:
-                                                            </span>{" "}
-                                                            <span className="text-gray-900">
-                                                              {leaveType}
-                                                            </span>
+                                                    {/* Card Header */}
+                                                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+                                                      <div className="flex items-center gap-4">
+                                                        {photoPath ? (
+                                                          <img
+                                                            src={photoPath}
+                                                            alt={employeeName}
+                                                            className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"
+                                                            onError={(e) => {
+                                                              (
+                                                                e.target as HTMLImageElement
+                                                              ).style.display =
+                                                                "none";
+                                                            }}
+                                                          />
+                                                        ) : (
+                                                          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-2xl font-bold shadow-md">
+                                                            {employeeName
+                                                              .charAt(0)
+                                                              .toUpperCase()}
                                                           </div>
-                                                          <div>
-                                                            <span className="font-medium text-gray-700">
-                                                              Duration:
-                                                            </span>{" "}
-                                                            <span className="text-gray-900">
-                                                              {startDate ===
-                                                              endDate
-                                                                ? startDate
-                                                                : `${startDate} - ${endDate}`}
+                                                        )}
+                                                        <div className="flex-1">
+                                                          <h4 className="text-xl font-bold text-gray-900 mb-1">
+                                                            {employeeName}
+                                                          </h4>
+                                                          <p className="text-sm text-gray-600 flex items-center gap-2">
+                                                            <span className="font-medium">
+                                                              Employee ID:
                                                             </span>
-                                                          </div>
-                                                          <div className="col-span-2">
-                                                            <span className="font-medium text-gray-700">
-                                                              Reason:
-                                                            </span>{" "}
-                                                            <span className="text-gray-900">
-                                                              {description}
+                                                            <span className="bg-gray-200 px-2 py-0.5 rounded-md font-mono text-xs">
+                                                              {employeeId ||
+                                                                "N/A"}
                                                             </span>
-                                                          </div>
+                                                          </p>
                                                         </div>
                                                       </div>
                                                     </div>
-                                                    <div className="flex gap-3 pt-4 border-t border-gray-200">
-                                                      <button
-                                                        onClick={async () => {
-                                                          try {
-                                                            const authToken =
-                                                              localStorage.getItem(
-                                                                "token"
-                                                              );
-                                                            const {
-                                                              academic_session,
-                                                              branch_token,
-                                                            } = getErpContext();
-                                                            await leaveApprovalAPI.approve(
-                                                              {
-                                                                leave_request_uuid:
-                                                                  request.uuid,
-                                                                bearer_token:
-                                                                  authToken ||
-                                                                  undefined,
-                                                                academic_session,
-                                                                branch_token,
-                                                              }
-                                                            );
-                                                            setLeaveApprovalRequests(
-                                                              (prev) =>
-                                                                prev.filter(
-                                                                  (r) =>
-                                                                    r.uuid !==
-                                                                    request.uuid
-                                                                )
-                                                            );
-                                                            setChatHistory(
-                                                              (prev) => [
-                                                                ...prev,
-                                                                {
-                                                                  type: "bot",
-                                                                  answer: `✅ Leave request for ${employeeName} has been approved successfully!`,
-                                                                  activeTab:
-                                                                    "answer" as const,
-                                                                },
-                                                              ]
-                                                            );
-                                                          } catch (err: any) {
-                                                            setChatHistory(
-                                                              (prev) => [
-                                                                ...prev,
-                                                                {
-                                                                  type: "bot",
-                                                                  answer: `❌ Error approving leave request: ${
-                                                                    err.message ||
-                                                                    "Unknown error"
-                                                                  }`,
-                                                                  activeTab:
-                                                                    "answer" as const,
-                                                                },
-                                                              ]
-                                                            );
-                                                          }
-                                                        }}
-                                                        className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md font-medium hover:bg-green-600 transition-colors cursor-pointer"
-                                                      >
-                                                        ✓ Approve
-                                                      </button>
-                                                      <div className="flex-1 flex gap-2">
-                                                        <input
-                                                          type="text"
-                                                          placeholder="Rejection reason (optional)"
-                                                          value={
-                                                            rejectReason[
-                                                              request.uuid
-                                                            ] || ""
-                                                          }
-                                                          onChange={(e) =>
-                                                            setRejectReason(
-                                                              (prev) => ({
-                                                                ...prev,
-                                                                [request.uuid]:
-                                                                  e.target
-                                                                    .value,
-                                                              })
-                                                            )
-                                                          }
-                                                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                                                        />
+
+                                                    {/* Card Body */}
+                                                    <div className="p-6">
+                                                      {/* Leave Details Grid */}
+                                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                                                        {/* Leave Type */}
+                                                        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                                                          <div className="flex items-center gap-2 mb-2">
+                                                            <span className="text-blue-600 text-lg">
+                                                              📝
+                                                            </span>
+                                                            <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                                                              Leave Type
+                                                            </span>
+                                                          </div>
+                                                          <p className="text-base font-semibold text-gray-900">
+                                                            {leaveType}
+                                                          </p>
+                                                        </div>
+
+                                                        {/* Duration */}
+                                                        <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                                                          <div className="flex items-center gap-2 mb-2">
+                                                            <span className="text-purple-600 text-lg">
+                                                              📅
+                                                            </span>
+                                                            <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+                                                              Duration
+                                                            </span>
+                                                          </div>
+                                                          <p className="text-base font-semibold text-gray-900">
+                                                            {isSingleDay
+                                                              ? startDateStr
+                                                              : `${startDateStr} - ${endDateStr}`}
+                                                          </p>
+                                                          <p className="text-xs text-gray-600 mt-1">
+                                                            {daysDiff}{" "}
+                                                            {daysDiff === 1
+                                                              ? "day"
+                                                              : "days"}
+                                                          </p>
+                                                        </div>
+                                                      </div>
+
+                                                      {/* Reason Section */}
+                                                      <div className="bg-amber-50 rounded-lg p-4 border border-amber-200 mb-5">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                          <span className="text-amber-600 text-lg">
+                                                            💬
+                                                          </span>
+                                                          <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                                                            Reason
+                                                          </span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-800 leading-relaxed">
+                                                          {description}
+                                                        </p>
+                                                      </div>
+
+                                                      {/* Action Buttons */}
+                                                      <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t-2 border-gray-200">
+                                                        {/* Approve Button */}
                                                         <button
                                                           onClick={async () => {
+                                                            // Keep existing onClick logic unchanged
                                                             try {
                                                               const authToken =
                                                                 localStorage.getItem(
                                                                   "token"
                                                                 );
-                                                              const reason =
-                                                                rejectReason[
-                                                                  request.uuid
-                                                                ] ||
-                                                                "No reason provided";
                                                               const {
                                                                 academic_session,
                                                                 branch_token,
                                                               } =
                                                                 getErpContext();
-                                                              await leaveApprovalAPI.reject(
+                                                              await leaveApprovalAPI.approve(
                                                                 {
                                                                   leave_request_uuid:
                                                                     request.uuid,
-                                                                  reject_reason:
-                                                                    reason,
                                                                   bearer_token:
                                                                     authToken ||
                                                                     undefined,
@@ -5019,22 +5067,12 @@ const AudioStreamerChatBot = ({
                                                                       request.uuid
                                                                   )
                                                               );
-                                                              setRejectReason(
-                                                                (prev) => {
-                                                                  const newReasons =
-                                                                    { ...prev };
-                                                                  delete newReasons[
-                                                                    request.uuid
-                                                                  ];
-                                                                  return newReasons;
-                                                                }
-                                                              );
                                                               setChatHistory(
                                                                 (prev) => [
                                                                   ...prev,
                                                                   {
                                                                     type: "bot",
-                                                                    answer: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                                    answer: `✅ Leave request for ${employeeName} has been approved successfully!`,
                                                                     activeTab:
                                                                       "answer" as const,
                                                                   },
@@ -5046,7 +5084,7 @@ const AudioStreamerChatBot = ({
                                                                   ...prev,
                                                                   {
                                                                     type: "bot",
-                                                                    answer: `❌ Error rejecting leave request: ${
+                                                                    answer: `❌ Error approving leave request: ${
                                                                       err.message ||
                                                                       "Unknown error"
                                                                     }`,
@@ -5057,10 +5095,124 @@ const AudioStreamerChatBot = ({
                                                               );
                                                             }
                                                           }}
-                                                          className="px-4 py-2 bg-red-500 text-white rounded-md font-medium hover:bg-red-600 transition-colors cursor-pointer"
+                                                          className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
                                                         >
-                                                          ✗ Reject
+                                                          <span className="text-xl">
+                                                            ✓
+                                                          </span>
+                                                          <span>Approve</span>
                                                         </button>
+
+                                                        {/* Reject Section */}
+                                                        <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                                                          <input
+                                                            type="text"
+                                                            placeholder="Rejection reason (optional)"
+                                                            value={
+                                                              rejectReason[
+                                                                request.uuid
+                                                              ] || ""
+                                                            }
+                                                            onChange={(e) =>
+                                                              setRejectReason(
+                                                                (prev) => ({
+                                                                  ...prev,
+                                                                  [request.uuid]:
+                                                                    e.target
+                                                                      .value,
+                                                                })
+                                                              )
+                                                            }
+                                                            className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200 transition-all"
+                                                          />
+                                                          <button
+                                                            onClick={async () => {
+                                                              // Keep existing onClick logic unchanged
+                                                              try {
+                                                                const authToken =
+                                                                  localStorage.getItem(
+                                                                    "token"
+                                                                  );
+                                                                const reason =
+                                                                  rejectReason[
+                                                                    request.uuid
+                                                                  ] ||
+                                                                  "No reason provided";
+                                                                const {
+                                                                  academic_session,
+                                                                  branch_token,
+                                                                } =
+                                                                  getErpContext();
+                                                                await leaveApprovalAPI.reject(
+                                                                  {
+                                                                    leave_request_uuid:
+                                                                      request.uuid,
+                                                                    reject_reason:
+                                                                      reason,
+                                                                    bearer_token:
+                                                                      authToken ||
+                                                                      undefined,
+                                                                    academic_session,
+                                                                    branch_token,
+                                                                  }
+                                                                );
+                                                                setLeaveApprovalRequests(
+                                                                  (prev) =>
+                                                                    prev.filter(
+                                                                      (r) =>
+                                                                        r.uuid !==
+                                                                        request.uuid
+                                                                    )
+                                                                );
+                                                                setRejectReason(
+                                                                  (prev) => {
+                                                                    const newReasons =
+                                                                      {
+                                                                        ...prev,
+                                                                      };
+                                                                    delete newReasons[
+                                                                      request
+                                                                        .uuid
+                                                                    ];
+                                                                    return newReasons;
+                                                                  }
+                                                                );
+                                                                setChatHistory(
+                                                                  (prev) => [
+                                                                    ...prev,
+                                                                    {
+                                                                      type: "bot",
+                                                                      answer: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                                      activeTab:
+                                                                        "answer" as const,
+                                                                    },
+                                                                  ]
+                                                                );
+                                                              } catch (err: any) {
+                                                                setChatHistory(
+                                                                  (prev) => [
+                                                                    ...prev,
+                                                                    {
+                                                                      type: "bot",
+                                                                      answer: `❌ Error rejecting leave request: ${
+                                                                        err.message ||
+                                                                        "Unknown error"
+                                                                      }`,
+                                                                      activeTab:
+                                                                        "answer" as const,
+                                                                    },
+                                                                  ]
+                                                                );
+                                                              }
+                                                            }}
+                                                            className="px-6 py-3 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-lg font-semibold hover:from-red-600 hover:to-rose-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 whitespace-nowrap"
+                                                          >
+                                                            <span className="text-xl">
+                                                              ✗
+                                                            </span>
+                                                            <span>Reject</span>
+                                                          </button>
+                                                        </div>
                                                       </div>
                                                     </div>
                                                   </div>
@@ -5069,14 +5221,17 @@ const AudioStreamerChatBot = ({
                                             )}
                                           </div>
                                         ) : (
-                                          <div className="mt-4 p-6 bg-green-50 border-2 border-green-200 rounded-lg text-center">
-                                            <div className="text-4xl mb-3">
+                                          <div className="mt-4 p-8 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl text-center shadow-lg">
+                                            <div className="text-6xl mb-4 animate-bounce">
                                               ✅
                                             </div>
-                                            <p className="text-green-900 font-semibold text-lg">
-                                              No pending leave requests found!
+                                            <h3 className="text-green-900 font-bold text-xl mb-2">
+                                              All Clear! 🎉
+                                            </h3>
+                                            <p className="text-green-700 font-medium text-base">
+                                              No pending leave requests found
                                             </p>
-                                            <p className="text-green-700 text-sm mt-2">
+                                            <p className="text-green-600 text-sm mt-2">
                                               All leave requests have been
                                               processed or there are no pending
                                               requests at this time.

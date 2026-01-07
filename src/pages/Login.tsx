@@ -1,18 +1,18 @@
-import { motion } from 'framer-motion';
-import { useState, useEffect } from 'react';
-import { FiEye, FiEyeOff, FiLock, FiMail, FiCheck } from 'react-icons/fi';
-import { authAPI } from '../services/api';
+import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import { FiEye, FiEyeOff, FiLock, FiMail, FiCheck } from "react-icons/fi";
+import { authAPI } from "../services/api_fixed";
 
 const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [emailFocused, setEmailFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [emailValid, setEmailValid] = useState(false);
   const [formData, setFormData] = useState({
-    email: '',
-    password: ''
+    email: "",
+    password: "",
   });
 
   const validateEmail = (email: string) => {
@@ -30,13 +30,13 @@ const Login = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setIsLoading(true);
 
     try {
       const data = await authAPI.login(formData);
-      localStorage.setItem('token', data.token);
-      window.location.href = '/';
+      localStorage.setItem("token", data.token);
+      window.location.href = "/";
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -44,15 +44,16 @@ const Login = () => {
     }
   };
 
-  const isFormValid = formData.email.trim() !== '' && formData.password.trim() !== '';
+  const isFormValid =
+    formData.email.trim() !== "" && formData.password.trim() !== "";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f8f6f3] via-[#faf8f6] to-[#efeae4] px-4 py-6 md:py-10 relative overflow-hidden">
       {/* Sofisto AI Header */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-[#C9A882] px-4 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
-        <img 
-          src="/sofisto-img.png" 
-          alt="Sofisto" 
+        <img
+          src="/sofisto-img.png"
+          alt="Sofisto"
           className="w-10 h-10 md:w-12 md:h-12 object-contain"
         />
         <h2 className="m-0 text-[clamp(0.9rem,2vw,1.1rem)] text-white font-semibold tracking-[-0.3px]">
@@ -75,7 +76,7 @@ const Login = () => {
             ease: "easeInOut",
           }}
         />
-      <motion.div
+        <motion.div
           className="absolute bottom-1/4 right-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-[#C9A882]/20 to-[#D4A574]/10 rounded-full blur-3xl"
           animate={{
             x: [0, -30, 0],
@@ -101,9 +102,9 @@ const Login = () => {
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       >
         <div className="w-full h-full bg-gradient-to-br from-[#D4A574] to-[#C9A882] rounded-full flex items-center justify-center p-2 md:p-4">
-          <img 
-            src="/sofisto-img.png" 
-            alt="Sofisto" 
+          <img
+            src="/sofisto-img.png"
+            alt="Sofisto"
             className="w-full h-full object-contain"
           />
         </div>
@@ -124,28 +125,28 @@ const Login = () => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
           >
-            <img 
-              src="/sofisto-img.png" 
-              alt="Sofisto Robot" 
+            <img
+              src="/sofisto-img.png"
+              alt="Sofisto Robot"
               className="w-full h-full object-contain"
             />
           </motion.div>
-        <motion.h1
+          <motion.h1
             className="text-center bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] bg-clip-text text-transparent text-xl md:text-2xl font-bold mb-1"
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.4 }}
-        >
-          Welcome Back
-        </motion.h1>
-        <motion.p
+          >
+            Welcome Back
+          </motion.h1>
+          <motion.p
             className="text-center text-[#8B7355] text-xs md:text-sm mb-4 md:mb-5 font-normal"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
-        >
+          >
             Sign in to continue to Sofisto AI
-        </motion.p>
+          </motion.p>
         </div>
 
         {error && (
@@ -161,8 +162,12 @@ const Login = () => {
           </motion.div>
         )}
 
-        <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4 md:space-y-4">
-          <motion.div 
+        <form
+          onSubmit={handleSubmit}
+          autoComplete="off"
+          className="space-y-4 md:space-y-4"
+        >
+          <motion.div
             className="relative"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -174,9 +179,9 @@ const Login = () => {
             <div className="relative">
               <div
                 className={`absolute left-4 top-1/2 -translate-y-1/2 z-[2] pointer-events-none transition-colors duration-300 flex items-center justify-center ${
-                  emailFocused 
-                    ? 'text-[#D4A574] drop-shadow-[0_0_8px_rgba(212,165,116,0.4)]' 
-                    : 'text-[#C9A882]/70'
+                  emailFocused
+                    ? "text-[#D4A574] drop-shadow-[0_0_8px_rgba(212,165,116,0.4)]"
+                    : "text-[#C9A882]/70"
                 }`}
               >
                 <motion.div
@@ -188,7 +193,7 @@ const Login = () => {
                   <FiMail size={20} className="md:w-5 md:h-5" />
                 </motion.div>
               </div>
-              
+
               {emailValid && formData.email && (
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 z-[2] pointer-events-none flex items-center justify-center">
                   <motion.div
@@ -200,42 +205,50 @@ const Login = () => {
                   </motion.div>
                 </div>
               )}
-              
-            <input
-              type="email"
+
+              <input
+                type="email"
                 placeholder="Enter your email address"
-              value={formData.email}
-              onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
-              required
-              autoFocus
+                value={formData.email}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, email: e.target.value }))
+                }
+                required
+                autoFocus
                 onFocus={() => setEmailFocused(true)}
                 onBlur={() => setEmailFocused(false)}
-                className={`w-full pl-12 md:pl-14 ${emailValid && formData.email ? 'pr-12 md:pr-14' : 'pr-4'} py-3.5 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base outline-none transition-all duration-300
+                className={`w-full pl-12 md:pl-14 ${
+                  emailValid && formData.email ? "pr-12 md:pr-14" : "pr-4"
+                } py-3.5 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base outline-none transition-all duration-300
                   ${
                     emailFocused
-                      ? 'border-2 border-[#D4A574] bg-gradient-to-br from-[#fffefb] to-white shadow-[0_0_0_4px_rgba(212,165,116,0.1),0_4px_12px_rgba(212,165,116,0.15)]'
+                      ? "border-2 border-[#D4A574] bg-gradient-to-br from-[#fffefb] to-white shadow-[0_0_0_4px_rgba(212,165,116,0.1),0_4px_12px_rgba(212,165,116,0.15)]"
                       : emailValid && formData.email
-                      ? 'border-2 border-green-400 bg-white shadow-[0_0_0_2px_rgba(34,197,94,0.1),0_2px_8px_rgba(34,197,94,0.1)]'
-                      : 'border border-[#E8E0D6] bg-white/90 hover:bg-white hover:border-[#D4A574]/50 shadow-sm'
+                      ? "border-2 border-green-400 bg-white shadow-[0_0_0_2px_rgba(34,197,94,0.1),0_2px_8px_rgba(34,197,94,0.1)]"
+                      : "border border-[#E8E0D6] bg-white/90 hover:bg-white hover:border-[#D4A574]/50 shadow-sm"
                   } text-[#5a4a3a] placeholder:text-[#C9A882]/50`}
-            />
-          </div>
+              />
+            </div>
 
             {formData.email && (
               <motion.div
                 initial={{ opacity: 0, height: 0, y: -5 }}
-                animate={{ opacity: 1, height: 'auto', y: 0 }}
+                animate={{ opacity: 1, height: "auto", y: 0 }}
                 className={`mt-2 text-xs font-medium flex items-center gap-1 ${
-                  emailValid ? 'text-green-600' : 'text-red-500'
+                  emailValid ? "text-green-600" : "text-red-500"
                 }`}
               >
-                <span>{emailValid ? '✓' : '✗'}</span>
-                <span>{emailValid ? 'Valid email format' : 'Please enter a valid email address'}</span>
+                <span>{emailValid ? "✓" : "✗"}</span>
+                <span>
+                  {emailValid
+                    ? "Valid email format"
+                    : "Please enter a valid email address"}
+                </span>
               </motion.div>
             )}
           </motion.div>
 
-          <motion.div 
+          <motion.div
             className="relative"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -247,9 +260,9 @@ const Login = () => {
             <div className="relative">
               <div
                 className={`absolute left-4 top-1/2 -translate-y-1/2 z-[2] pointer-events-none transition-colors duration-300 flex items-center justify-center ${
-                  passwordFocused 
-                    ? 'text-[#D4A574] drop-shadow-[0_0_8px_rgba(212,165,116,0.4)]' 
-                    : 'text-[#C9A882]/70'
+                  passwordFocused
+                    ? "text-[#D4A574] drop-shadow-[0_0_8px_rgba(212,165,116,0.4)]"
+                    : "text-[#C9A882]/70"
                 }`}
               >
                 <motion.div
@@ -261,37 +274,43 @@ const Login = () => {
                   <FiLock size={20} className="md:w-5 md:h-5" />
                 </motion.div>
               </div>
-              
-            <input
-              type={showPassword ? "text" : "password"}
-              placeholder="Enter your password"
-              value={formData.password}
-              onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
-              required
+
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
+                value={formData.password}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, password: e.target.value }))
+                }
+                required
                 onFocus={() => setPasswordFocused(true)}
                 onBlur={() => setPasswordFocused(false)}
                 className={`w-full pl-12 md:pl-14 pr-12 md:pr-14 py-3.5 md:py-4 rounded-xl md:rounded-2xl text-sm md:text-base outline-none transition-all duration-300
                   ${
                     passwordFocused
-                      ? 'border-2 border-[#D4A574] bg-gradient-to-br from-[#fffefb] to-white shadow-[0_0_0_4px_rgba(212,165,116,0.1),0_4px_12px_rgba(212,165,116,0.15)]'
-                      : 'border border-[#E8E0D6] bg-white/90 hover:bg-white hover:border-[#D4A574]/50 shadow-sm'
+                      ? "border-2 border-[#D4A574] bg-gradient-to-br from-[#fffefb] to-white shadow-[0_0_0_4px_rgba(212,165,116,0.1),0_4px_12px_rgba(212,165,116,0.15)]"
+                      : "border border-[#E8E0D6] bg-white/90 hover:bg-white hover:border-[#D4A574]/50 shadow-sm"
                   } text-[#5a4a3a] placeholder:text-[#C9A882]/50`}
               />
-              
+
               <div className="absolute right-4 top-1/2 -translate-y-1/2 z-[3] flex items-center justify-center">
                 <motion.button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   className="bg-transparent border-none text-[#8B7355] cursor-pointer p-2 rounded-lg flex items-center justify-center transition-colors
                     hover:text-[#D4A574] hover:bg-[#D4A574]/10"
                   whileHover={{ scale: 1.1, rotate: showPassword ? 0 : 5 }}
                   whileTap={{ scale: 0.9 }}
                 >
-                  {showPassword ? <FiEyeOff size={20} className="md:w-5 md:h-5" /> : <FiEye size={20} className="md:w-5 md:h-5" />}
+                  {showPassword ? (
+                    <FiEyeOff size={20} className="md:w-5 md:h-5" />
+                  ) : (
+                    <FiEye size={20} className="md:w-5 md:h-5" />
+                  )}
                 </motion.button>
               </div>
-          </div>
+            </div>
           </motion.div>
 
           <motion.button
@@ -303,8 +322,8 @@ const Login = () => {
             className={`group relative w-full py-4 md:py-4.5 rounded-xl md:rounded-2xl text-white border-none font-semibold text-base md:text-lg transition-all duration-300 flex items-center justify-center gap-3 overflow-hidden
               ${
                 isFormValid && !isLoading
-                  ? 'bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] cursor-pointer shadow-lg shadow-[#D4A574]/30 hover:shadow-xl hover:shadow-[#D4A574]/40'
-                  : 'bg-[#E0D5C4] cursor-not-allowed opacity-60 shadow-none'
+                  ? "bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] cursor-pointer shadow-lg shadow-[#D4A574]/30 hover:shadow-xl hover:shadow-[#D4A574]/40"
+                  : "bg-[#E0D5C4] cursor-not-allowed opacity-60 shadow-none"
               }`}
             whileHover={isFormValid && !isLoading ? { scale: 1.02, y: -2 } : {}}
             whileTap={isFormValid && !isLoading ? { scale: 0.98 } : {}}
@@ -313,12 +332,12 @@ const Login = () => {
             {isFormValid && !isLoading && (
               <motion.div
                 className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
-                initial={{ x: '-100%' }}
-                whileHover={{ x: '100%' }}
+                initial={{ x: "-100%" }}
+                whileHover={{ x: "100%" }}
                 transition={{ duration: 0.6, ease: "easeInOut" }}
               />
             )}
-            
+
             {isLoading ? (
               <>
                 <motion.span
@@ -333,7 +352,11 @@ const Login = () => {
                 <span className="relative z-10">Sign In</span>
                 <motion.span
                   animate={{ x: [0, 4, 0] }}
-                  transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  }}
                   className="relative z-10 text-xl"
                 >
                   →

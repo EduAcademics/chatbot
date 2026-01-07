@@ -1,6 +1,6 @@
 /**
  * chatRouter.ts
- * 
+ *
  * RESPONSIBILITY: Flow detection & routing
  * - classifyQuery logic
  * - confidence thresholds
@@ -9,19 +9,19 @@
  * - No React imports
  */
 
-import { API_BASE_URL } from '../config/api';
-import { getAIHeaders } from '../services/api';
+import { API_BASE_URL } from "../config/api";
+import { getAIHeaders } from "../services/api_fixed";
 
 export type FlowType =
-  | 'none'
-  | 'query'
-  | 'attendance'
-  | 'voice_attendance'
-  | 'full_voice_attendance'
-  | 'leave'
-  | 'leave_approval'
-  | 'assignment'
-  | 'course_progress';
+  | "none"
+  | "query"
+  | "attendance"
+  | "voice_attendance"
+  | "full_voice_attendance"
+  | "leave"
+  | "leave_approval"
+  | "assignment"
+  | "course_progress";
 
 export interface ClassificationResult {
   flow: string;
@@ -31,7 +31,7 @@ export interface ClassificationResult {
 
 export interface RouterContext {
   activeFlow: FlowType;
-  attendanceStep: 'class_info' | 'student_details' | 'completed';
+  attendanceStep: "class_info" | "student_details" | "completed";
   pendingClassInfo: any;
   userOptionSelected: boolean;
   autoRouting: boolean;
@@ -47,21 +47,21 @@ export const classifyQuery = async (
 ): Promise<ClassificationResult> => {
   try {
     const response = await fetch(`${API_BASE_URL}/v1/ai/classify-query`, {
-      method: 'POST',
+      method: "POST",
       headers: getAIHeaders(),
       body: JSON.stringify({
         query: message,
         user_id: userId,
-        user_roles: roles ? roles.split(',') : [],
+        user_roles: roles ? roles.split(",") : [],
       }),
     });
 
     const data = await response.json();
 
-    if (data.status === 'success') {
+    if (data.status === "success") {
       const { flow, confidence, entities } = data.data;
 
-      console.log('🔍 Query Classification:', {
+      console.log("🔍 Query Classification:", {
         query: message,
         detectedFlow: flow,
         confidence: `${(confidence * 100).toFixed(0)}%`,
@@ -72,10 +72,10 @@ export const classifyQuery = async (
     }
 
     // Fallback
-    return { flow: 'query', confidence: 0.8, entities: {} };
+    return { flow: "query", confidence: 0.8, entities: {} };
   } catch (error) {
-    console.error('❌ Classification error:', error);
-    return { flow: 'query', confidence: 0.8, entities: {} };
+    console.error("❌ Classification error:", error);
+    return { flow: "query", confidence: 0.8, entities: {} };
   }
 };
 
@@ -83,8 +83,10 @@ export const classifyQuery = async (
  * Check if message is an exit command
  */
 export const isExitCommand = (message: string): boolean => {
-  const exitKeywords = ['exit', 'cancel', 'restart', 'quit', 'stop', 'done'];
-  return exitKeywords.some((keyword) => message.toLowerCase().trim() === keyword);
+  const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
+  return exitKeywords.some(
+    (keyword) => message.toLowerCase().trim() === keyword
+  );
 };
 
 /**
@@ -92,26 +94,28 @@ export const isExitCommand = (message: string): boolean => {
  */
 export const looksLikeNewRequest = (message: string): boolean => {
   const newFlowKeywords = [
-    'mark attendance',
-    'take attendance',
-    'attendance for',
-    'apply leave',
-    'apply for leave',
-    'need leave',
-    'want leave',
-    'create assignment',
-    'give assignment',
-    'new assignment',
-    'show me',
-    'list all',
-    'show',
-    'list',
-    'course progress',
-    'syllabus',
-    'view',
-    'display',
+    "mark attendance",
+    "take attendance",
+    "attendance for",
+    "apply leave",
+    "apply for leave",
+    "need leave",
+    "want leave",
+    "create assignment",
+    "give assignment",
+    "new assignment",
+    "show me",
+    "list all",
+    "show",
+    "list",
+    "course progress",
+    "syllabus",
+    "view",
+    "display",
   ];
-  return newFlowKeywords.some((keyword) => message.toLowerCase().includes(keyword));
+  return newFlowKeywords.some((keyword) =>
+    message.toLowerCase().includes(keyword)
+  );
 };
 
 /**
@@ -119,32 +123,32 @@ export const looksLikeNewRequest = (message: string): boolean => {
  */
 export const isSimpleResponse = (message: string): boolean => {
   const simpleResponses = [
-    'yes',
-    'no',
-    'ok',
-    'okay',
-    'skip',
-    'approve',
-    'reject',
-    'continue',
-    'sick',
-    'casual',
-    'earned',
-    'medical',
-    'urgent',
-    'personal',
-    'maternity',
-    'paternity',
-    'today',
-    'tomorrow',
-    'yesterday',
-    'monday',
-    'tuesday',
-    'wednesday',
-    'thursday',
-    'friday',
-    'saturday',
-    'sunday',
+    "yes",
+    "no",
+    "ok",
+    "okay",
+    "skip",
+    "approve",
+    "reject",
+    "continue",
+    "sick",
+    "casual",
+    "earned",
+    "medical",
+    "urgent",
+    "personal",
+    "maternity",
+    "paternity",
+    "today",
+    "tomorrow",
+    "yesterday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
   ];
   return simpleResponses.includes(message.toLowerCase().trim());
 };
@@ -160,32 +164,41 @@ export const shouldStayInFlow = (
 
   // Check if we're in the middle of a multi-step attendance flow
   const inAttendanceFlow =
-    activeFlow === 'attendance' &&
-    attendanceStep === 'student_details' &&
+    activeFlow === "attendance" &&
+    attendanceStep === "student_details" &&
     pendingClassInfo;
   const inVoiceAttendanceFlow =
-    activeFlow === 'voice_attendance' &&
-    attendanceStep === 'student_details' &&
+    activeFlow === "voice_attendance" &&
+    attendanceStep === "student_details" &&
     pendingClassInfo;
 
   // For leave/assignment, check if message looks like a NEW request
   const looksLikeNew = looksLikeNewRequest(userMessage);
-  const inLeaveFlow = activeFlow === 'leave' && !looksLikeNew;
-  const inAssignmentFlow = activeFlow === 'assignment' && !looksLikeNew;
+  const inLeaveFlow = activeFlow === "leave" && !looksLikeNew;
+  const inAssignmentFlow = activeFlow === "assignment" && !looksLikeNew;
 
-  if (inAttendanceFlow || inVoiceAttendanceFlow || inLeaveFlow || inAssignmentFlow) {
+  if (
+    inAttendanceFlow ||
+    inVoiceAttendanceFlow ||
+    inLeaveFlow ||
+    inAssignmentFlow
+  ) {
     return true;
   }
 
   // Check for simple responses
-  if (isSimpleResponse(userMessage) && activeFlow !== 'none' && activeFlow !== 'query') {
+  if (
+    isSimpleResponse(userMessage) &&
+    activeFlow !== "none" &&
+    activeFlow !== "query"
+  ) {
     return true;
   }
 
   // Short message in an active flow (likely a response to a question)
   if (
-    activeFlow !== 'none' &&
-    activeFlow !== 'query' &&
+    activeFlow !== "none" &&
+    activeFlow !== "query" &&
     userMessage.length < 50 &&
     !looksLikeNew
   ) {
@@ -211,9 +224,13 @@ export const routeMessage = async (
   const { activeFlow, autoRouting } = context;
 
   // Check for exit commands
-  if (isExitCommand(userMessage) && activeFlow !== 'none' && activeFlow !== 'query') {
+  if (
+    isExitCommand(userMessage) &&
+    activeFlow !== "none" &&
+    activeFlow !== "query"
+  ) {
     return {
-      targetFlow: 'none',
+      targetFlow: "none",
       classificationResult: null,
       shouldClassify: false,
     };
@@ -242,16 +259,16 @@ export const routeMessage = async (
   let targetFlow = classificationResult.flow as FlowType;
 
   // Map backend flow names to frontend flow types
-  if (targetFlow === ('assignment_create' as any)) {
-    targetFlow = 'assignment';
-  } else if (targetFlow === ('assignment_submit' as any)) {
-    targetFlow = 'assignment';
+  if (targetFlow === ("assignment_create" as any)) {
+    targetFlow = "assignment";
+  } else if (targetFlow === ("assignment_submit" as any)) {
+    targetFlow = "assignment";
   }
 
   // Low confidence warning (but still proceed)
   if (classificationResult.confidence < 0.25) {
-    console.warn('⚠️ Low classification confidence, defaulting to query');
-    targetFlow = 'query';
+    console.warn("⚠️ Low classification confidence, defaulting to query");
+    targetFlow = "query";
   }
 
   return {
@@ -260,4 +277,3 @@ export const routeMessage = async (
     shouldClassify: true,
   };
 };
-

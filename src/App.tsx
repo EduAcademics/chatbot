@@ -5,8 +5,8 @@ import { FiLogOut } from "react-icons/fi";
 import Login from "./pages/Login";
 import AudioStreamerChatBot from "./components/AudioStreamerChatBot";
 import UserInfoBox from "./components/UserInfoBox";
-import { userAPI } from "./services/api";
-import { syncAuthFromURL} from "./utils/authStorage";
+import { userAPI } from "./services/api_fixed";
+import { syncAuthFromURL } from "./utils/authStorage";
 
 // import AttendanceTest from "./pages/AttendanceTest";
 
@@ -28,12 +28,11 @@ function App() {
 
   useEffect(() => {
     const initializeAuth = async () => {
-       syncAuthFromURL();
+      syncAuthFromURL();
       // const syncedFromURL = syncAuthFromURL();
       // if (syncedFromURL) {
       //   cleanAuthFromURL();
       // }
-
 
       const params = new URLSearchParams(window.location.search);
       const tokenFromQuery = params.get("token");
@@ -51,9 +50,15 @@ function App() {
           if (response.status === "success" && response.user_id) {
             setUserId(response.user_id);
             setRoles(response.user_roles || "");
-            window.history.replaceState({}, document.title, window.location.pathname);
+            window.history.replaceState(
+              {},
+              document.title,
+              window.location.pathname
+            );
           } else {
-            throw new Error(response.message || "Unable to fetch user details.");
+            throw new Error(
+              response.message || "Unable to fetch user details."
+            );
           }
         } catch (error) {
           console.error("Auto-authentication failed:", error);
@@ -86,9 +91,9 @@ function App() {
           transition={{ duration: 0.4 }}
           className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/60 px-8 py-6 md:px-10 md:py-8 flex flex-col items-center gap-4"
         >
-          <img 
-            src="/sofisto-img.png" 
-            alt="Sofisto Robot" 
+          <img
+            src="/sofisto-img.png"
+            alt="Sofisto Robot"
             className="w-16 h-16 md:w-20 md:h-20 object-contain"
           />
           <p className="text-[#8B7355] text-sm md:text-base font-medium">
@@ -107,32 +112,32 @@ function App() {
             path="/login"
             element={!isAuthenticated ? <Login /> : <Navigate to="/" />}
           />
-        {/* <Route path="/test-attendance" element={<AttendanceTest />} /> */}
-        <Route
-          path="/"
-          element={
-            isAuthenticated ? (
-              <MainLayout
-                userId={userId}
-                userEmail={userEmail}
-                roles={roles}
-                autoAuthError={autoAuthError}
-                onUserFetched={(id, r, email) => {
-                  setUserId(id);
-                  setRoles(r);
-                  setUserEmail(email);
-                  setAutoAuthError(null);
-                }}
-                onLogout={handleLogout}
-              />
-            ) : (
-              <Navigate to="/login" />
-            )
-          }
-        />
-        <Route path="*" element={<Navigate to="/login" />} />
-      </Routes>
-    </BrowserRouter>
+          {/* <Route path="/test-attendance" element={<AttendanceTest />} /> */}
+          <Route
+            path="/"
+            element={
+              isAuthenticated ? (
+                <MainLayout
+                  userId={userId}
+                  userEmail={userEmail}
+                  roles={roles}
+                  autoAuthError={autoAuthError}
+                  onUserFetched={(id, r, email) => {
+                    setUserId(id);
+                    setRoles(r);
+                    setUserEmail(email);
+                    setAutoAuthError(null);
+                  }}
+                  onLogout={handleLogout}
+                />
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
+          />
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      </BrowserRouter>
     </>
   );
 }
