@@ -72,6 +72,7 @@ interface QueryHandlerResponse {
 
 interface ChatRequest {
   session_id: string;
+  user_id?: string;  // Optional: User ID for auto-fetching class/section for class teachers
   query: string;
 }
 
