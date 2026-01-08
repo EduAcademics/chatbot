@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { FiMail, FiCheck } from "react-icons/fi";
-import { userAPI } from "../services/api";
+import { userAPI } from "../services/api_fixed";
 
 interface Props {
   onUserFetched: (userId: string, roles: string, email: string) => void;
@@ -9,11 +9,7 @@ interface Props {
   initialError?: string;
 }
 
-const UserInfoBox = ({
-  onUserFetched,
-  initialEmail,
-  initialError,
-}: Props) => {
+const UserInfoBox = ({ onUserFetched, initialEmail, initialError }: Props) => {
   const [email, setEmail] = useState(initialEmail ?? "");
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,9 +67,9 @@ const UserInfoBox = ({
             animate={{ opacity: 1, scale: 1 }}
             transition={{ type: "spring", stiffness: 200 }}
           >
-            <img 
-              src="/sofisto-img.png" 
-              alt="Sofisto Robot" 
+            <img
+              src="/sofisto-img.png"
+              alt="Sofisto Robot"
               className="w-full h-full object-contain"
             />
           </motion.div>

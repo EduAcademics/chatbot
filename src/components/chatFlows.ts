@@ -11,7 +11,11 @@
  * - No React imports
  */
 
-import { aiAPI, leaveApprovalAPI, courseProgressAPI } from "../services/api";
+import {
+  aiAPI,
+  leaveApprovalAPI,
+  courseProgressAPI,
+} from "../services/api_fixed";
 import type { FlowType } from "./chatRouter";
 
 export interface FlowContext {
@@ -762,7 +766,7 @@ export const handleCourseProgressFlow = async (
           success: true,
           message: {
             type: "bot",
-            text: `📚 Found **${options.length}** class-section(s). Please select a class and section from the list above to view course progress.`,
+            text: `📚 Found ${options.length} class-section(s). Please select a class and section from the list above to view course progress.`,
             classSections: options,
           },
           shouldUpdateClassSections: options,
@@ -958,7 +962,7 @@ export const executeFlow = async (
         success: false,
         message: {
           type: "bot",
-          text: "Please select an option from the menu, or I'll try to detect what you need automatically.",
+          text: "",
         },
       };
   }
