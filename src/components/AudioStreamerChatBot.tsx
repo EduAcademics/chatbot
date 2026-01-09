@@ -1,5 +1,4 @@
-﻿
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
 import {
@@ -14,7 +13,6 @@ import {
 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
 import "./markdown-tables.css";
-
 
 // Added icons
 import ReactMarkdown from "react-markdown";
@@ -35,7 +33,8 @@ type FlowType =
   | "query"
   | "attendance"
   | "voice_attendance"
-  | "full_voice_attendance" | "leave"
+  | "full_voice_attendance"
+  | "leave"
   | "leave_approval"
   | "assignment"
   | "course_progress"; // <-- add full_voice_attendance flow
@@ -54,6 +53,17 @@ const AudioStreamerChatBot = ({
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+
+  // Local lifecycle-scoped flag to mark a single request as voice-triggered.
+  // This is intentionally a request-scoped ref (not global/shared) and will
+  // only be set immediately before submitting a mic-originated request
+  // and reset right after that request completes. It is used only to gate
+  // TTS playback inside the leave-approval success handler.
+  const isVoiceTriggeredRequestRef = useRef<boolean>(false);
+  // Flag to remember that the current Course Progress flow was initiated
+  // via the microphone. This persists across the selection click so we can
+  // play the second-step TTS when the user clicks a class-section.
+  const courseProgressVoiceInitiatedRef = useRef<boolean>(false);
 
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -137,13 +147,16 @@ const AudioStreamerChatBot = ({
   // Auto-routing states merge on 17-12-2025 manvi + lakshmi
 
   const [autoRouting, setAutoRouting] = useState<boolean>(true);
-  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">("auto");
+  const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
+    "llm"
+  );
   const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
-  const [_classificationConfidence, setClassificationConfidence] = useState<number>(0);
-  const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
+  const [_classificationConfidence, setClassificationConfidence] =
+    useState<number>(0);
+  const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] =
+    useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
-  
-  
+
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
     const academic_session =
@@ -151,7 +164,6 @@ const AudioStreamerChatBot = ({
     const branch_token = localStorage.getItem("branch_token") || "demo";
     return { academic_session, branch_token };
   };
-
 
   // const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
   // const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
@@ -277,17 +289,17 @@ const AudioStreamerChatBot = ({
       const newText = event.data;
       setInputText((prev) => {
         const updated = prev + " " + newText;
-        
+
         // For full voice attendance flow, implement 3-second auto-submit
         if (activeFlow === "full_voice_attendance") {
           const currentTime = Date.now();
           setLastVoiceInputTime(currentTime);
-          
+
           // Clear existing timer
           if (fullVoiceAutoSubmitTimer) {
             clearTimeout(fullVoiceAutoSubmitTimer);
           }
-          
+
           // Set new 3-second timer for auto-submit
           const timer = setTimeout(() => {
             const finalInput = updated.trim();
@@ -296,11 +308,10 @@ const AudioStreamerChatBot = ({
               setInputText(finalInput);
               handleSubmit();
             }
-          }, 3000); 
+          }, 3000);
           setFullVoiceAutoSubmitTimer(timer);
-          
         }
-        
+
         return updated;
       });
     };
@@ -312,7 +323,7 @@ const AudioStreamerChatBot = ({
     };
   };
 
-  const stopStreaming = () => {
+  const stopStreaming = async () => {
     processorRef.current?.disconnect();
     processorRef.current = null;
 
@@ -334,7 +345,17 @@ const AudioStreamerChatBot = ({
     }
 
     setIsRecording(false);
-    handleSubmit();
+    // Mark this request as voice-triggered for the duration of the
+    // subsequent `handleSubmit()` call. This flag is intentionally
+    // request-scoped and will be cleared immediately after submission
+    // completes to avoid any leakage to other flows.
+    isVoiceTriggeredRequestRef.current = true;
+    try {
+      await handleSubmit();
+    } finally {
+      // Reset immediately after the request finishes (success or error)
+      isVoiceTriggeredRequestRef.current = false;
+    }
   };
 
   // --- Upload file handler for attendance flow ---
@@ -455,18 +476,15 @@ const AudioStreamerChatBot = ({
     entities: any;
   }> => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/v1/ai/classify-query`,
-        {
-          method: "POST",
-           headers: getAIHeaders(),
-          body: JSON.stringify({
-            query: message,
-            user_id: userId,
-            user_roles: roles ? roles.split(",") : [],
-          }),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/v1/ai/classify-query`, {
+        method: "POST",
+        headers: getAIHeaders(),
+        body: JSON.stringify({
+          query: message,
+          user_id: userId,
+          user_roles: roles ? roles.split(",") : [],
+        }),
+      });
 
       const data = await response.json();
 
@@ -658,9 +676,40 @@ const AudioStreamerChatBot = ({
         // Run classification for every new query when auto-routing is enabled
         console.log("📍 Running classification...");
         try {
-          classificationResult = await classifyQuery(userMessage);
-          console.log("✅ Classification complete:", classificationResult);
-          targetFlow = classificationResult.flow as FlowType;
+          // Deterministic lexical override: if the normalized tokens contain
+          // the token 'leave' (or 'leaves') AND at least one explicit
+          // approval token, force the leave_approval flow and skip the
+          // classifier. This prevents STT artifacts from misrouting.
+          const normalized = userMessage
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")
+            .trim();
+          const tokens = normalized.split(/\s+/).filter(Boolean);
+          const hasLeaveToken =
+            tokens.includes("leave") || tokens.includes("leaves");
+          const approvalTokens = ["approval", "approve", "approvals"];
+          const hasApprovalToken = approvalTokens.some((t) =>
+            tokens.includes(t)
+          );
+
+          if (hasLeaveToken && hasApprovalToken) {
+            console.log(
+              "📍 Lexical override: forcing leave_approval based on tokens",
+              { tokens }
+            );
+            // Mark classificationResult so downstream logic treats this as a
+            // detected/new flow (same shape as classifier result). We set a
+            // high confidence to avoid low-confidence overrides later.
+            classificationResult = {
+              flow: "leave_approval",
+              confidence: 1,
+            } as any;
+            targetFlow = "leave_approval" as FlowType;
+          } else {
+            classificationResult = await classifyQuery(userMessage);
+            console.log("✅ Classification complete:", classificationResult);
+            targetFlow = classificationResult.flow as FlowType;
+          }
 
           // Map backend flow names to frontend flow types
           if (targetFlow === ("assignment_create" as any)) {
@@ -1569,6 +1618,23 @@ const AudioStreamerChatBot = ({
                 classSections: options,
               },
             ]);
+            // If this Course Progress request was initiated via microphone,
+            // play a concise informational TTS line (plain text) and mark
+            // that the course-progress flow was voice-initiated so the
+            // subsequent class selection can also trigger TTS.
+            try {
+              if (
+                isVoiceTriggeredRequestRef.current === true &&
+                // Double-check flow
+                targetFlow === "course_progress"
+              ) {
+                courseProgressVoiceInitiatedRef.current = true;
+                const speech = `Found ${options.length} class-sections. Please select a class and section from the list above to view course progress.`;
+                void handlePlayTTS(-1, speech);
+              }
+            } catch (ttsErr) {
+              console.error("TTS playback failed:", ttsErr);
+            }
           } else {
             setChatHistory((prev) => [
               ...prev,
@@ -1699,6 +1765,31 @@ const AudioStreamerChatBot = ({
                 activeTab: "answer" as const,
               },
             ]);
+
+            // TTS: voice-only, strictly gated. Do NOT speak when input was typed
+            // or for any other flow. This uses the request-scoped ref that is set
+            // only when the microphone-based submission finalizes.
+            try {
+              if (
+                isVoiceTriggeredRequestRef.current === true &&
+                targetFlow === "leave_approval"
+              ) {
+                const count = (response.data.leaveRequests || []).length || 0;
+                let speech = "";
+                if (count > 0) {
+                  speech = `📋 Leave Approval Dashboard. Found ${count} pending leave request${
+                    count === 1 ? "" : "s"
+                  } for your approval. Please review each request below and take action by either: ✅ Approve - Click the green \"Approve\" button. ❌ Reject - Enter a rejection reason and click the red \"Reject\" button`;
+                } else {
+                  speech = `Leave Approval Dashboard. Found 0 pending leave request(s) for your approval.`;
+                }
+
+                // Use the component's TTS helper to play speech. Pass a non-disruptive index.
+                void handlePlayTTS(-1, speech);
+              }
+            } catch (ttsErr) {
+              console.error("TTS playback failed:", ttsErr);
+            }
           } else {
             setChatHistory((prev) => [
               ...prev,
@@ -1744,7 +1835,10 @@ const AudioStreamerChatBot = ({
   const MemoizedAnswer = memo(
     ({ answer, messageIdx }: { answer: string; messageIdx: number }) => {
       return (
-        <div key={`answer-${messageIdx}-${answer.slice(0, 20)}`} className="markdown-content">
+        <div
+          key={`answer-${messageIdx}-${answer.slice(0, 20)}`}
+          className="markdown-content"
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
@@ -1769,8 +1863,6 @@ const AudioStreamerChatBot = ({
       );
     }
   );
-
-
 
   // TTS playback function
   const handlePlayTTS = async (idx: number, text: string) => {
@@ -3883,9 +3975,9 @@ const AudioStreamerChatBot = ({
           {/* Header Section - Improved Design */}
           <div className="chatbot-header-section">
             <h1 className="chatbot-header-title">
-              <img 
-                src="/sofisto-img.png" 
-                alt="Sofisto Robot" 
+              <img
+                src="/sofisto-img.png"
+                alt="Sofisto Robot"
                 className="robot-icon"
               />
               Chat with Sofisto
@@ -4232,16 +4324,16 @@ const AudioStreamerChatBot = ({
                               setLoadingLeaveRequests(true);
                               try {
                                 const authToken = localStorage.getItem("token");
-                              const { academic_session, branch_token } =
-                                getErpContext();
+                                const { academic_session, branch_token } =
+                                  getErpContext();
                                 const response =
                                   await leaveApprovalAPI.fetchPendingRequests({
                                     user_id: userId,
                                     page: 1,
                                     limit: 50,
                                     bearer_token: authToken || undefined,
-                                  academic_session,
-                                  branch_token,
+                                    academic_session,
+                                    branch_token,
                                   });
                                 if (response.status === 200 && response.data) {
                                   const pendingRequests =
@@ -4894,17 +4986,21 @@ const AudioStreamerChatBot = ({
                                                     sectionName,
                                                   }
                                                 );
-                                              const { academic_session, branch_token } =
-                                                getErpContext();
-                                                const progressResponse =
-                                                await courseProgressAPI.getProgress({
-                                                  classId,
-                                                  sectionId,
-                                                      bearer_token:
-                                                        authToken || undefined,
+                                                const {
                                                   academic_session,
                                                   branch_token,
-                                                });
+                                                } = getErpContext();
+                                                const progressResponse =
+                                                  await courseProgressAPI.getProgress(
+                                                    {
+                                                      classId,
+                                                      sectionId,
+                                                      bearer_token:
+                                                        authToken || undefined,
+                                                      academic_session,
+                                                      branch_token,
+                                                    }
+                                                  );
 
                                                 console.log(
                                                   "Course progress API response:",
@@ -4960,6 +5056,36 @@ const AudioStreamerChatBot = ({
                                                       },
                                                     },
                                                   ]);
+                                                  // If the Course Progress flow was started via
+                                                  // microphone, play a short TTS summary for
+                                                  // the selected class-section. Speak only
+                                                  // one short sentence and clear the flag so
+                                                  // it does not repeat on re-renders.
+                                                  try {
+                                                    if (
+                                                      courseProgressVoiceInitiatedRef.current ===
+                                                      true
+                                                    ) {
+                                                      const classLabel = `${className} ${sectionName}`;
+                                                      let speech = "";
+                                                      if (totalSubjects > 0) {
+                                                        speech = `Course Progress for ${classLabel}. Scroll down to see details.`;
+                                                      } else {
+                                                        speech = `Course Progress for ${classLabel}. No progress data available yet.`;
+                                                      }
+                                                      void handlePlayTTS(
+                                                        -1,
+                                                        speech
+                                                      );
+                                                      courseProgressVoiceInitiatedRef.current =
+                                                        false;
+                                                    }
+                                                  } catch (ttsErr) {
+                                                    console.error(
+                                                      "TTS playback failed:",
+                                                      ttsErr
+                                                    );
+                                                  }
                                                 } else {
                                                   console.warn(
                                                     "Unexpected progress response:",
@@ -5229,35 +5355,77 @@ const AudioStreamerChatBot = ({
                                     idx === chatHistory.length - 1 && (
                                       <>
                                         {loadingLeaveRequests ? (
-                                          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                            <div className="flex items-center gap-3">
-                                              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                                              <span className="text-blue-900 font-medium">
+                                          <div className="mt-4 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl shadow-sm">
+                                            <div className="flex items-center justify-center gap-4">
+                                              <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                              <span className="text-blue-900 font-semibold text-base">
                                                 Loading pending leave
                                                 requests...
                                               </span>
                                             </div>
                                           </div>
                                         ) : leaveApprovalRequests.length > 0 ? (
-                                          <div className="mt-4 space-y-4">
-                                            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                              <p className="text-sm text-blue-900 font-medium">
-                                                📋 Found{" "}
-                                                <strong>
-                                                  {leaveApprovalRequests.length}
-                                                </strong>{" "}
-                                                pending leave request(s). Please
-                                                review and take action.
-                                              </p>
+                                          <div className="mt-4 space-y-5">
+                                            {/* Summary Header */}
+                                            <div className="p-4 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
+                                              <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-xl">
+                                                  📋
+                                                </div>
+                                                <div>
+                                                  <h3 className="text-lg font-bold">
+                                                    Leave Approval Dashboard
+                                                  </h3>
+                                                  <p className="text-sm text-blue-100">
+                                                    {
+                                                      leaveApprovalRequests.length
+                                                    }{" "}
+                                                    {leaveApprovalRequests.length ===
+                                                    1
+                                                      ? "request"
+                                                      : "requests"}{" "}
+                                                    pending review
+                                                  </p>
+                                                </div>
+                                              </div>
                                             </div>
+
+                                            {/* Leave Request Cards */}
                                             {leaveApprovalRequests.map(
                                               (request, reqIdx) => {
                                                 const startDate = new Date(
                                                   request.start_date
-                                                ).toLocaleDateString();
+                                                );
                                                 const endDate = new Date(
                                                   request.end_date
-                                                ).toLocaleDateString();
+                                                );
+                                                const startDateStr =
+                                                  startDate.toLocaleDateString(
+                                                    "en-US",
+                                                    {
+                                                      month: "short",
+                                                      day: "numeric",
+                                                      year: "numeric",
+                                                    }
+                                                  );
+                                                const endDateStr =
+                                                  endDate.toLocaleDateString(
+                                                    "en-US",
+                                                    {
+                                                      month: "short",
+                                                      day: "numeric",
+                                                      year: "numeric",
+                                                    }
+                                                  );
+                                                const isSingleDay =
+                                                  startDateStr === endDateStr;
+                                                const daysDiff =
+                                                  Math.ceil(
+                                                    (endDate.getTime() -
+                                                      startDate.getTime()) /
+                                                      (1000 * 60 * 60 * 24)
+                                                  ) + 1;
+
                                                 const employeeName =
                                                   request.employee?.personalInfo
                                                     ?.employeeName || "Unknown";
@@ -5269,7 +5437,7 @@ const AudioStreamerChatBot = ({
                                                   "Unknown";
                                                 const description =
                                                   request.description ||
-                                                  "No description";
+                                                  "No description provided";
                                                 const photoPath =
                                                   request.employee?.personalInfo
                                                     ?.photoDocument?.path;
@@ -5277,134 +5445,108 @@ const AudioStreamerChatBot = ({
                                                 return (
                                                   <div
                                                     key={request.uuid || reqIdx}
-                                                    className="bg-white border border-gray-300 rounded-lg p-4 shadow-md"
+                                                    className="bg-white border-2 border-gray-200 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden"
                                                   >
-                                                    <div className="flex items-start gap-4 mb-4">
-                                                      {photoPath && (
-                                                        <img
-                                                          src={photoPath}
-                                                          alt={employeeName}
-                                                          className="w-16 h-16 rounded-full object-cover border-2 border-gray-200"
-                                                        />
-                                                      )}
-                                                      <div className="flex-1">
-                                                        <h4 className="text-lg font-semibold text-gray-900 mb-1">
-                                                          {employeeName}
-                                                        </h4>
-                                                        <p className="text-sm text-gray-600 mb-2">
-                                                          ID: {employeeId}
-                                                        </p>
-                                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                                          <div>
-                                                            <span className="font-medium text-gray-700">
-                                                              Leave Type:
-                                                            </span>{" "}
-                                                            <span className="text-gray-900">
-                                                              {leaveType}
-                                                            </span>
+                                                    {/* Card Header */}
+                                                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+                                                      <div className="flex items-center gap-4">
+                                                        {photoPath ? (
+                                                          <img
+                                                            src={photoPath}
+                                                            alt={employeeName}
+                                                            className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"
+                                                            onError={(e) => {
+                                                              (
+                                                                e.target as HTMLImageElement
+                                                              ).style.display =
+                                                                "none";
+                                                            }}
+                                                          />
+                                                        ) : (
+                                                          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-2xl font-bold shadow-md">
+                                                            {employeeName
+                                                              .charAt(0)
+                                                              .toUpperCase()}
                                                           </div>
-                                                          <div>
-                                                            <span className="font-medium text-gray-700">
-                                                              Duration:
-                                                            </span>{" "}
-                                                            <span className="text-gray-900">
-                                                              {startDate ===
-                                                              endDate
-                                                                ? startDate
-                                                                : `${startDate} - ${endDate}`}
+                                                        )}
+                                                        <div className="flex-1">
+                                                          <h4 className="text-xl font-bold text-gray-900 mb-1">
+                                                            {employeeName}
+                                                          </h4>
+                                                          <p className="text-sm text-gray-600 flex items-center gap-2">
+                                                            <span className="font-medium">
+                                                              Employee ID:
                                                             </span>
-                                                          </div>
-                                                          <div className="col-span-2">
-                                                            <span className="font-medium text-gray-700">
-                                                              Reason:
-                                                            </span>{" "}
-                                                            <span className="text-gray-900">
-                                                              {description}
+                                                            <span className="bg-gray-200 px-2 py-0.5 rounded-md font-mono text-xs">
+                                                              {employeeId ||
+                                                                "N/A"}
                                                             </span>
-                                                          </div>
+                                                          </p>
                                                         </div>
                                                       </div>
                                                     </div>
-                                                    <div className="flex gap-3 pt-4 border-t border-gray-200">
-                                                      <button
-                                                        onClick={async () => {
-                                                          try {
-                                                            const authToken =
-                                                              localStorage.getItem(
-                                                                "token"
-                                                              );
-                                                            const {
-                                                              academic_session,
-                                                              branch_token,
-                                                            } = getErpContext();
-                                                            await leaveApprovalAPI.approve(
-                                                              {
-                                                                leave_request_uuid:
-                                                                  request.uuid,
-                                                                bearer_token:
-                                                                  authToken ||
-                                                                  undefined,
-                                                                academic_session,
-                                                                branch_token,
-                                                              }
-                                                            );
-                                                            setLeaveApprovalRequests(
-                                                              (prev) =>
-                                                                prev.filter(
-                                                                  (r) =>
-                                                                    r.uuid !==
-                                                                    request.uuid
-                                                                )
-                                                            );
-                                                            setChatHistory(
-                                                              (prev) => [
-                                                                ...prev,
-                                                                {
-                                                                  type: "bot",
-                                                                  text: `✅ Leave request for ${employeeName} has been approved successfully!`,
-                                                                },
-                                                              ]
-                                                            );
-                                                          } catch (err: any) {
-                                                            setChatHistory(
-                                                              (prev) => [
-                                                                ...prev,
-                                                                {
-                                                                  type: "bot",
-                                                                  text: `❌ Error approving leave request: ${
-                                                                    err.message ||
-                                                                    "Unknown error"
-                                                                  }`,
-                                                                },
-                                                              ]
-                                                            );
-                                                          }
-                                                        }}
-                                                        className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md font-medium hover:bg-green-600 transition-colors cursor-pointer"
-                                                      >
-                                                        ✓ Approve
-                                                      </button>
-                                                      <div className="flex-1 flex gap-2">
-                                                        <input
-                                                          type="text"
-                                                          placeholder="Rejection reason (optional)"
-                                                          value={
-                                                            rejectReason[
-                                                              request.uuid
-                                                            ] || ""
-                                                          }
-                                                          onChange={(e) =>
-                                                            setRejectReason(
-                                                              (prev) => ({
-                                                                ...prev,
-                                                                [request.uuid]:
-                                                                  e.target
-                                                                    .value,
-                                                              })
-                                                            )
-                                                          }
-                                                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-                                                        />
+
+                                                    {/* Card Body */}
+                                                    <div className="p-6">
+                                                      {/* Leave Details Grid */}
+                                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                                                        {/* Leave Type */}
+                                                        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                                                          <div className="flex items-center gap-2 mb-2">
+                                                            <span className="text-blue-600 text-lg">
+                                                              📝
+                                                            </span>
+                                                            <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                                                              Leave Type
+                                                            </span>
+                                                          </div>
+                                                          <p className="text-base font-semibold text-gray-900">
+                                                            {leaveType}
+                                                          </p>
+                                                        </div>
+
+                                                        {/* Duration */}
+                                                        <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                                                          <div className="flex items-center gap-2 mb-2">
+                                                            <span className="text-purple-600 text-lg">
+                                                              📅
+                                                            </span>
+                                                            <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+                                                              Duration
+                                                            </span>
+                                                          </div>
+                                                          <p className="text-base font-semibold text-gray-900">
+                                                            {isSingleDay
+                                                              ? startDateStr
+                                                              : `${startDateStr} - ${endDateStr}`}
+                                                          </p>
+                                                          <p className="text-xs text-gray-600 mt-1">
+                                                            {daysDiff}{" "}
+                                                            {daysDiff === 1
+                                                              ? "day"
+                                                              : "days"}
+                                                          </p>
+                                                        </div>
+                                                      </div>
+
+                                                      {/* Reason Section */}
+                                                      <div className="bg-amber-50 rounded-lg p-4 border border-amber-200 mb-5">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                          <span className="text-amber-600 text-lg">
+                                                            💬
+                                                          </span>
+                                                          <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                                                            Reason
+                                                          </span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-800 leading-relaxed">
+                                                          {description}
+                                                        </p>
+                                                      </div>
+
+                                                      {/* Action Buttons */}
+                                                      <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t-2 border-gray-200">
+                                                        {/* Approve Button */}
                                                         <button
                                                           onClick={async () => {
                                                             try {
@@ -5412,21 +5554,15 @@ const AudioStreamerChatBot = ({
                                                                 localStorage.getItem(
                                                                   "token"
                                                                 );
-                                                              const reason =
-                                                                rejectReason[
-                                                                  request.uuid
-                                                                ] ||
-                                                                "No reason provided";
                                                               const {
                                                                 academic_session,
                                                                 branch_token,
-                                                              } = getErpContext();
-                                                              await leaveApprovalAPI.reject(
+                                                              } =
+                                                                getErpContext();
+                                                              await leaveApprovalAPI.approve(
                                                                 {
                                                                   leave_request_uuid:
                                                                     request.uuid,
-                                                                  reject_reason:
-                                                                    reason,
                                                                   bearer_token:
                                                                     authToken ||
                                                                     undefined,
@@ -5442,22 +5578,12 @@ const AudioStreamerChatBot = ({
                                                                       request.uuid
                                                                   )
                                                               );
-                                                              setRejectReason(
-                                                                (prev) => {
-                                                                  const newReasons =
-                                                                    { ...prev };
-                                                                  delete newReasons[
-                                                                    request.uuid
-                                                                  ];
-                                                                  return newReasons;
-                                                                }
-                                                              );
                                                               setChatHistory(
                                                                 (prev) => [
                                                                   ...prev,
                                                                   {
                                                                     type: "bot",
-                                                                    text: `❌ Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                                    text: `✅ Leave request for **${employeeName}** has been approved successfully!`,
                                                                   },
                                                                 ]
                                                               );
@@ -5467,7 +5593,7 @@ const AudioStreamerChatBot = ({
                                                                   ...prev,
                                                                   {
                                                                     type: "bot",
-                                                                    text: `❌ Error rejecting leave request: ${
+                                                                    text: `❌ Error approving leave request: ${
                                                                       err.message ||
                                                                       "Unknown error"
                                                                     }`,
@@ -5476,10 +5602,119 @@ const AudioStreamerChatBot = ({
                                                               );
                                                             }
                                                           }}
-                                                          className="px-4 py-2 bg-red-500 text-white rounded-md font-medium hover:bg-red-600 transition-colors cursor-pointer"
+                                                          className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
                                                         >
-                                                          ✗ Reject
+                                                          <span className="text-xl">
+                                                            ✓
+                                                          </span>
+                                                          <span>Approve</span>
                                                         </button>
+
+                                                        {/* Reject Section */}
+                                                        <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                                                          <input
+                                                            type="text"
+                                                            placeholder="Rejection reason (optional)"
+                                                            value={
+                                                              rejectReason[
+                                                                request.uuid
+                                                              ] || ""
+                                                            }
+                                                            onChange={(e) =>
+                                                              setRejectReason(
+                                                                (prev) => ({
+                                                                  ...prev,
+                                                                  [request.uuid]:
+                                                                    e.target
+                                                                      .value,
+                                                                })
+                                                              )
+                                                            }
+                                                            className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200 transition-all"
+                                                          />
+                                                          <button
+                                                            onClick={async () => {
+                                                              try {
+                                                                const authToken =
+                                                                  localStorage.getItem(
+                                                                    "token"
+                                                                  );
+                                                                const reason =
+                                                                  rejectReason[
+                                                                    request.uuid
+                                                                  ] ||
+                                                                  "No reason provided";
+                                                                const {
+                                                                  academic_session,
+                                                                  branch_token,
+                                                                } =
+                                                                  getErpContext();
+                                                                await leaveApprovalAPI.reject(
+                                                                  {
+                                                                    leave_request_uuid:
+                                                                      request.uuid,
+                                                                    reject_reason:
+                                                                      reason,
+                                                                    bearer_token:
+                                                                      authToken ||
+                                                                      undefined,
+                                                                    academic_session,
+                                                                    branch_token,
+                                                                  }
+                                                                );
+                                                                setLeaveApprovalRequests(
+                                                                  (prev) =>
+                                                                    prev.filter(
+                                                                      (r) =>
+                                                                        r.uuid !==
+                                                                        request.uuid
+                                                                    )
+                                                                );
+                                                                setRejectReason(
+                                                                  (prev) => {
+                                                                    const newReasons =
+                                                                      {
+                                                                        ...prev,
+                                                                      };
+                                                                    delete newReasons[
+                                                                      request
+                                                                        .uuid
+                                                                    ];
+                                                                    return newReasons;
+                                                                  }
+                                                                );
+                                                                setChatHistory(
+                                                                  (prev) => [
+                                                                    ...prev,
+                                                                    {
+                                                                      type: "bot",
+                                                                      text: `❌ Leave request for **${employeeName}** has been rejected. Reason: ${reason}`,
+                                                                    },
+                                                                  ]
+                                                                );
+                                                              } catch (err: any) {
+                                                                setChatHistory(
+                                                                  (prev) => [
+                                                                    ...prev,
+                                                                    {
+                                                                      type: "bot",
+                                                                      text: `❌ Error rejecting leave request: ${
+                                                                        err.message ||
+                                                                        "Unknown error"
+                                                                      }`,
+                                                                    },
+                                                                  ]
+                                                                );
+                                                              }
+                                                            }}
+                                                            className="px-6 py-3 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-lg font-semibold hover:from-red-600 hover:to-rose-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 whitespace-nowrap"
+                                                          >
+                                                            <span className="text-xl">
+                                                              ✗
+                                                            </span>
+                                                            <span>Reject</span>
+                                                          </button>
+                                                        </div>
                                                       </div>
                                                     </div>
                                                   </div>
@@ -5488,14 +5723,17 @@ const AudioStreamerChatBot = ({
                                             )}
                                           </div>
                                         ) : (
-                                          <div className="mt-4 p-6 bg-green-50 border-2 border-green-200 rounded-lg text-center">
-                                            <div className="text-4xl mb-3">
+                                          <div className="mt-4 p-8 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl text-center shadow-lg">
+                                            <div className="text-6xl mb-4 animate-bounce">
                                               ✅
                                             </div>
-                                            <p className="text-green-900 font-semibold text-lg">
-                                              No pending leave requests found!
+                                            <h3 className="text-green-900 font-bold text-xl mb-2">
+                                              All Clear! 🎉
+                                            </h3>
+                                            <p className="text-green-700 font-medium text-base">
+                                              No pending leave requests found
                                             </p>
-                                            <p className="text-green-700 text-sm mt-2">
+                                            <p className="text-green-600 text-sm mt-2">
                                               All leave requests have been
                                               processed or there are no pending
                                               requests at this time.
@@ -6098,7 +6336,6 @@ const AudioStreamerChatBot = ({
           </div>
           {/* Input Area with Upload Buttons */}
           <div className="chatbot-input-area">
-           
             {/* <motion.button
               className="w-10 h-10 sm:w-12 sm:h-12 min-w-10 min-h-10 sm:min-w-12 sm:min-h-12 text-xl sm:text-2xl flex items-center justify-center rounded-full transition-all shadow-[0_2px_8px_rgba(212,165,116,0.25)] bg-gradient-to-br from-[#D4A574] to-[#C9A882] hover:scale-110 hover:shadow-[0_4px_16px_rgba(212,165,116,0.35)]"
               whileHover={{ scale: 1.1, rotate: 5 }}
