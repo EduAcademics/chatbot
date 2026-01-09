@@ -47,6 +47,7 @@ interface QueryHandlerResponse {
 interface ChatRequest {
   session_id: string;
   query: string;
+  user_id?: string;
 }
 
 interface ChatResponse {

@@ -699,14 +699,8 @@ const AudioStreamerChatBot = ({
         setAttendanceStep("class_info");
         setPendingClassInfo(null);
 
-        // Add welcome message for auto-detected attendance flow
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "✅ Attendance flow detected! I'll help you mark attendance. Please provide class information (class name, section, and date). For example: 'Class 3 A on 2025-12-06' or 'Class 6 section B today'.",
-          },
-        ]);
+        // Don't show welcome message here - let the backend response handle it
+        // The backend will either auto-fetch class info or ask for it
       }
 
       // Check if this is a new flow initialization (user just switched flows)
@@ -834,12 +828,8 @@ const AudioStreamerChatBot = ({
         try {
           const data = await aiAPI.chat({
             session_id: sessionId || userId,
-            query: `Extract class information from: "${userMessage}". Please identify and extract:
-              1. Class name/number (e.g., 6, 10, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K, LKG, UKG, etc.)
-              2. Section (e.g., A, B, C, Section A, etc.) 
-              3. Date (any format: 2025-01-15, 15/01/2025, Jan 15 2025, 15th January 2025, 5 August 2025, etc.)
-              
-              Return the information in a structured format with class_info object containing class_, section, and date fields. If any information is missing, ask for clarification.`,
+            query: userMessage, // Simplified - backend will auto-fetch class info for class teachers
+            user_id: userId, // Pass user_id for auto-fetching class teacher info
           });
 
           if (data.status === "success" && data.data) {
@@ -847,14 +837,67 @@ const AudioStreamerChatBot = ({
             const classInfo = data.data.class_info;
             const answer = data.data.answer || "";
 
-            // Enhanced validation for class information
-            if (
+            // Check if backend auto-fetched class info and provided ready message
+            // Check for "Ready to mark attendance" message first (even if classInfo might not be in response yet)
+            if (answer.includes("Ready to mark attendance") || answer.includes("ready to mark attendance")) {
+              // Backend auto-fetched class info and is ready for student details
+              if (classInfo && classInfo.class_ && classInfo.section && classInfo.date) {
+                setPendingClassInfo(classInfo);
+                setAttendanceStep("student_details");
+                // Remove the initial "Attendance flow detected" message and show backend's ready message
+                setChatHistory((prev) => {
+                  const filtered = prev.filter(
+                    (msg) => !msg.text || !msg.text.includes("Attendance flow detected")
+                  );
+                  return [
+                    ...filtered,
+                    {
+                      type: "bot",
+                      text: answer, // Use the backend's ready message
+                    },
+                  ];
+                });
+              } else {
+                // Backend returned ready message but classInfo not in response - extract from answer
+                const classMatch = answer.match(/for\s+(\w+)\s+(\w+)\s+on\s+(\d{4}-\d{2}-\d{2})/i);
+                if (classMatch && classMatch[1] && classMatch[2] && classMatch[3]) {
+                  const extractedClassInfo = {
+                    class_: classMatch[1],
+                    section: classMatch[2],
+                    date: classMatch[3],
+                  };
+                  setPendingClassInfo(extractedClassInfo);
+                  setAttendanceStep("student_details");
+                  setChatHistory((prev) => {
+                    const filtered = prev.filter(
+                      (msg) => !msg.text || !msg.text.includes("Attendance flow detected")
+                    );
+                    return [
+                      ...filtered,
+                      {
+                        type: "bot",
+                        text: answer,
+                      },
+                    ];
+                  });
+                } else {
+                  // Fallback: just show the answer
+                  setChatHistory((prev) => [
+                    ...prev,
+                    {
+                      type: "bot",
+                      text: answer,
+                    },
+                  ]);
+                }
+              }
+            } else if (
               classInfo &&
               classInfo.class_ &&
               classInfo.section &&
               classInfo.date
             ) {
-              // Class info successfully extracted
+              // Class info successfully extracted (manual entry)
               setPendingClassInfo(classInfo);
               setAttendanceStep("student_details");
               setChatHistory((prev) => [
@@ -990,11 +1033,8 @@ const AudioStreamerChatBot = ({
         try {
           const data = await aiAPI.chat({
             session_id: sessionId || userId,
-            query: `Process and verify attendance for ${
-              pendingClassInfo
-                ? `Class ${pendingClassInfo.class_} ${pendingClassInfo.section} on ${pendingClassInfo.date}`
-                : "the class"
-            }: ${userMessage}. Please extract student names and attendance status, and verify the information for accuracy.`,
+            query: userMessage, // User provides student attendance details
+            user_id: userId, // Pass user_id for context
           });
 
           if (data.status === "success" && data.data) {
@@ -1065,9 +1105,18 @@ const AudioStreamerChatBot = ({
                   dataLength: parsedAttendanceData.length,
                 }
               );
+              // Set global state FIRST before creating buttons
               setAttendanceData(parsedAttendanceData);
               setClassInfo(parsedClassInfo);
               setAttendanceStep("completed");
+
+              // Calculate the message index that will be used (after this message is added)
+              const messageIndexForButtons = chatHistory.length;
+
+              // Capture the parsed data at the time of button creation to pass as fallback
+              // This ensures the button closure has the most current data
+              const capturedAttendanceData = parsedAttendanceData ? [...parsedAttendanceData] : [];
+              const capturedClassInfo = parsedClassInfo ? { ...parsedClassInfo } : null;
 
               // Add the specific buttons as requested (initial state: read-only mode)
               (newMessage as any).buttons = [
@@ -1079,23 +1128,23 @@ const AudioStreamerChatBot = ({
                     );
                     console.log(
                       "Setting attendance data:",
-                      parsedAttendanceData
+                      capturedAttendanceData
                     );
-                    console.log("Setting class info:", parsedClassInfo);
+                    console.log("Setting class info:", capturedClassInfo);
                     console.log(
                       "Setting editing message index to:",
-                      chatHistory.length
+                      messageIndexForButtons
                     );
 
                     // Set the global state for editing
                     console.log("Loading data into global state for editing:", {
-                      parsedAttendanceData,
-                      parsedClassInfo,
-                      messageIndex: chatHistory.length,
+                      capturedAttendanceData,
+                      capturedClassInfo,
+                      messageIndex: messageIndexForButtons,
                     });
-                    setAttendanceData(parsedAttendanceData);
-                    setClassInfo(parsedClassInfo);
-                    setEditingMessageIndex(chatHistory.length);
+                    setAttendanceData(capturedAttendanceData);
+                    setClassInfo(capturedClassInfo);
+                    setEditingMessageIndex(messageIndexForButtons);
 
                     // Verify the data was set
                     setTimeout(() => {
@@ -1139,15 +1188,25 @@ const AudioStreamerChatBot = ({
                       "🎯 Approve button clicked for text-based attendance"
                     );
                     console.log(
-                      "🎯 Current chatHistory.length:",
-                      chatHistory.length
+                      "🎯 Message index for this message:",
+                      messageIndexForButtons
                     );
+                    console.log("🎯 Captured data:", {
+                      capturedAttendanceData: capturedAttendanceData.length,
+                      capturedClassInfo: capturedClassInfo,
+                    });
                     console.log("🎯 Current global state:", {
                       attendanceData: attendanceData,
                       classInfo: classInfo,
                       editingMessageIndex: editingMessageIndex,
                     });
-                    handleTextAttendanceApproval(chatHistory.length);
+                    // Pass the captured data as fallback parameters
+                    // This ensures it works correctly even if chatHistory hasn't updated yet
+                    handleTextAttendanceApproval(
+                      messageIndexForButtons,
+                      capturedAttendanceData,
+                      capturedClassInfo
+                    );
                   },
                 },
                 {
@@ -1957,8 +2016,17 @@ const AudioStreamerChatBot = ({
   };
 
   // Handle OCR approval - save to MongoDB
-  const handleOCRApproval = async (messageIndex?: number) => {
-    return handleUnifiedAttendanceApproval(messageIndex, "image");
+  const handleOCRApproval = async (
+    messageIndex?: number,
+    fallbackAttendanceData?: any[],
+    fallbackClassInfo?: any
+  ) => {
+    return handleUnifiedAttendanceApproval(
+      messageIndex,
+      "image",
+      fallbackAttendanceData,
+      fallbackClassInfo
+    );
   };
 
   // Handle OCR rejection - clear data and show upload option
@@ -2008,9 +2076,15 @@ const AudioStreamerChatBot = ({
   };
 
   // Unified attendance data manager
-  const getAttendanceDataForApproval = (messageIndex?: number) => {
+  const getAttendanceDataForApproval = (
+    messageIndex?: number,
+    fallbackAttendanceData?: any[],
+    fallbackClassInfo?: any
+  ) => {
     console.log("=== getAttendanceDataForApproval DEBUG ===");
     console.log("messageIndex:", messageIndex);
+    console.log("fallbackAttendanceData:", fallbackAttendanceData);
+    console.log("fallbackClassInfo:", fallbackClassInfo);
     console.log("chatHistory.length:", chatHistory.length);
     console.log("Global attendanceData:", attendanceData);
     console.log("Global attendanceData.length:", attendanceData.length);
@@ -2030,6 +2104,34 @@ const AudioStreamerChatBot = ({
       });
     });
 
+    // Priority 0: If messageIndex is provided, check that specific message FIRST (highest priority for saved/edited data)
+    if (messageIndex !== undefined && messageIndex >= 0 && messageIndex < chatHistory.length) {
+      const targetMessage = chatHistory[messageIndex];
+      console.log(`🔍 Priority 0: Checking provided message index ${messageIndex} first (highest priority for saved/edited data):`, {
+        type: targetMessage?.type,
+        hasAttendanceSummary: !!targetMessage?.attendance_summary,
+        attendanceSummaryLength: targetMessage?.attendance_summary?.length || 0,
+        hasClassInfo: !!targetMessage?.class_info,
+      });
+      
+      if (
+        targetMessage?.type === "bot" &&
+        targetMessage?.attendance_summary &&
+        targetMessage.attendance_summary.length > 0
+      ) {
+        console.log(
+          `✅ Priority 0: Found attendance data in provided message index ${messageIndex} (saved/edited data):`,
+          targetMessage.attendance_summary.length,
+          "records"
+        );
+        return {
+          attendanceData: targetMessage.attendance_summary,
+          classInfo: targetMessage.class_info || classInfo,
+          source: `message_${messageIndex}_saved`,
+        };
+      }
+    }
+
     // Priority 1: If we're currently editing, use the global state (edited data)
     if (editingMessageIndex !== null && attendanceData.length > 0) {
       console.log("✅ Priority 1: Using edited data from global state");
@@ -2040,11 +2142,16 @@ const AudioStreamerChatBot = ({
       };
     }
 
-    // Priority 2: Try to find the most recent message with attendance data
+    // Priority 2: Search chat history from most recent to oldest for messages with attendance_summary
     console.log(
-      "🔍 Priority 2: Searching for attendance data in chat history..."
+      "🔍 Priority 2: Searching for attendance data in chat history (from most recent)..."
     );
     for (let i = chatHistory.length - 1; i >= 0; i--) {
+      // Skip the message at messageIndex if it was already checked in Priority 0
+      if (messageIndex !== undefined && i === messageIndex) {
+        continue;
+      }
+      
       const msg = chatHistory[i];
       console.log(`Checking message ${i}:`, {
         type: msg.type,
@@ -2061,8 +2168,9 @@ const AudioStreamerChatBot = ({
         msg.attendance_summary.length > 0
       ) {
         console.log(
-          `✅ Found attendance data in message ${i}:`,
-          msg.attendance_summary
+          `✅ Priority 2: Found attendance data in message ${i}:`,
+          msg.attendance_summary.length,
+          "records"
         );
         return {
           attendanceData: msg.attendance_summary,
@@ -2072,9 +2180,14 @@ const AudioStreamerChatBot = ({
       }
     }
 
-    // Priority 2.5: Try to find any message with buttons (attendance message)
-    console.log("🔍 Priority 2.5: Searching for messages with buttons...");
+    // Priority 3: Try to find any message with buttons (attendance message)
+    console.log("🔍 Priority 3: Searching for messages with buttons...");
     for (let i = chatHistory.length - 1; i >= 0; i--) {
+      // Skip the message at messageIndex if it was already checked in Priority 0
+      if (messageIndex !== undefined && i === messageIndex) {
+        continue;
+      }
+      
       const msg = chatHistory[i];
       if (
         msg.type === "bot" &&
@@ -2088,8 +2201,9 @@ const AudioStreamerChatBot = ({
         // Try to get data from this message or use global state
         if (msg.attendance_summary && msg.attendance_summary.length > 0) {
           console.log(
-            `✅ Using attendance data from button message ${i}:`,
-            msg.attendance_summary
+            `✅ Priority 3: Using attendance data from button message ${i}:`,
+            msg.attendance_summary.length,
+            "records"
           );
           return {
             attendanceData: msg.attendance_summary,
@@ -2098,8 +2212,9 @@ const AudioStreamerChatBot = ({
           };
         } else if (attendanceData.length > 0) {
           console.log(
-            `✅ Using global state for button message ${i}:`,
-            attendanceData
+            `✅ Priority 3: Using global state for button message ${i}:`,
+            attendanceData.length,
+            "records"
           );
           return {
             attendanceData: attendanceData,
@@ -2110,46 +2225,34 @@ const AudioStreamerChatBot = ({
       }
     }
 
-    // Priority 3: Use provided message index if valid
-    if (messageIndex !== undefined && messageIndex < chatHistory.length) {
-      const currentMessage = chatHistory[messageIndex];
-      console.log(
-        `🔍 Priority 3: Checking provided message index ${messageIndex}:`,
-        {
-          hasAttendanceSummary: !!currentMessage?.attendance_summary,
-          attendanceSummaryLength:
-            currentMessage?.attendance_summary?.length || 0,
-          hasClassInfo: !!currentMessage?.class_info,
-        }
-      );
-
-      if (
-        currentMessage?.attendance_summary &&
-        currentMessage.attendance_summary.length > 0
-      ) {
-        console.log(
-          `✅ Using provided message index ${messageIndex}:`,
-          currentMessage.attendance_summary
-        );
-        return {
-          attendanceData: currentMessage.attendance_summary,
-          classInfo: currentMessage.class_info || classInfo,
-          source: `provided_message_${messageIndex}`,
-        };
-      }
-    }
-
-    // Priority 4: Use global state as fallback
+    // Priority 4: Use global state as fallback (if not editing)
     if (attendanceData.length > 0) {
       console.log("✅ Priority 4: Using global state as fallback");
       return {
         attendanceData: attendanceData,
-        classInfo: classInfo,
+        classInfo: classInfo || fallbackClassInfo,
         source: "global_state_fallback",
       };
     }
 
-    // Priority 5: Last resort - try to get data from session storage
+    // Priority 5: Use fallbackAttendanceData and fallbackClassInfo if provided (captured from button closure)
+    if (
+      fallbackAttendanceData &&
+      fallbackAttendanceData.length > 0
+    ) {
+      console.log(
+        "✅ Priority 5: Using fallback attendance data (captured from button closure):",
+        fallbackAttendanceData.length,
+        "records"
+      );
+      return {
+        attendanceData: fallbackAttendanceData,
+        classInfo: fallbackClassInfo || classInfo,
+        source: "fallback_captured_data",
+      };
+    }
+
+    // Priority 6: Last resort - try to get data from session storage
     try {
       const sessionAttendanceData = sessionStorage.getItem(
         "pendingAttendanceData"
@@ -2162,8 +2265,8 @@ const AudioStreamerChatBot = ({
           ? JSON.parse(sessionClassInfo)
           : null;
 
-        console.log("✅ Priority 5: Using session storage data:", {
-          attendanceData: parsedAttendanceData,
+        console.log("✅ Priority 6: Using session storage data:", {
+          attendanceData: parsedAttendanceData.length,
           classInfo: parsedClassInfo,
         });
 
@@ -2184,7 +2287,9 @@ const AudioStreamerChatBot = ({
   // Unified attendance approval handler
   const handleUnifiedAttendanceApproval = async (
     messageIndex?: number,
-    attendanceType: "text" | "image" | "voice" = "text"
+    attendanceType: "text" | "image" | "voice" = "text",
+    fallbackAttendanceData?: any[],
+    fallbackClassInfo?: any
   ) => {
     console.log(
       `🚀 ${attendanceType.toUpperCase()} Attendance Approval clicked for message:`,
@@ -2196,6 +2301,8 @@ const AudioStreamerChatBot = ({
       classInfo: classInfo,
       editingMessageIndex: editingMessageIndex,
       chatHistoryLength: chatHistory.length,
+      fallbackAttendanceData: fallbackAttendanceData,
+      fallbackClassInfo: fallbackClassInfo,
     });
 
     // Add loading state to prevent multiple clicks
@@ -2208,8 +2315,12 @@ const AudioStreamerChatBot = ({
     ]);
 
     try {
-      // Get attendance data using unified method
-      const dataToSave = getAttendanceDataForApproval(messageIndex);
+      // Get attendance data using unified method with fallback data
+      const dataToSave = getAttendanceDataForApproval(
+        messageIndex,
+        fallbackAttendanceData,
+        fallbackClassInfo
+      );
 
       console.log(`🚀 Data to save result:`, dataToSave);
 
@@ -2247,6 +2358,7 @@ const AudioStreamerChatBot = ({
           attendance_summary: dataToSave.attendanceData,
           class_info: dataToSave.classInfo,
         })}`, // Send the current attendance data
+        user_id: userId, // Pass user_id for context
       });
       if (data.status === "success") {
         // Remove the loading message and show success message
@@ -2307,8 +2419,17 @@ const AudioStreamerChatBot = ({
   };
 
   // Handle text-based attendance approval - save to MongoDB
-  const handleTextAttendanceApproval = async (messageIndex: number) => {
-    return handleUnifiedAttendanceApproval(messageIndex, "text");
+  const handleTextAttendanceApproval = async (
+    messageIndex: number,
+    fallbackAttendanceData?: any[],
+    fallbackClassInfo?: any
+  ) => {
+    return handleUnifiedAttendanceApproval(
+      messageIndex,
+      "text",
+      fallbackAttendanceData,
+      fallbackClassInfo
+    );
   };
 
   // Handle text-based attendance rejection - clear data and show options
@@ -2358,8 +2479,17 @@ const AudioStreamerChatBot = ({
   };
 
   // Handle voice-based attendance approval - save to MongoDB
-  const handleVoiceAttendanceApproval = async (messageIndex: number) => {
-    return handleUnifiedAttendanceApproval(messageIndex, "voice");
+  const handleVoiceAttendanceApproval = async (
+    messageIndex: number,
+    fallbackAttendanceData?: any[],
+    fallbackClassInfo?: any
+  ) => {
+    return handleUnifiedAttendanceApproval(
+      messageIndex,
+      "voice",
+      fallbackAttendanceData,
+      fallbackClassInfo
+    );
   };
 
   // Handle voice-based attendance rejection - clear data and show options
@@ -2475,6 +2605,10 @@ const AudioStreamerChatBot = ({
           return updatedHistory;
         });
 
+        // Update global state with the edited data so it's available for approval
+        setAttendanceData([...currentAttendanceData]);
+        setClassInfo(currentClassInfo);
+
         // Store in session storage for persistence
         sessionStorage.setItem(
           "pendingAttendanceData",
@@ -2485,7 +2619,8 @@ const AudioStreamerChatBot = ({
           JSON.stringify(currentClassInfo)
         );
 
-        // Exit edit mode
+        // Exit edit mode AFTER updating global state
+        // This ensures that when user clicks Approve, Priority 1.5 will use the updated global state
         setEditingMessageIndex(null);
 
         // Clear the isBeingEdited flag from the message
@@ -2504,6 +2639,13 @@ const AudioStreamerChatBot = ({
           return updatedHistory;
         });
 
+        // Capture the edited data at the time of save to pass to approval button
+        // This ensures the button closure has the most current edited data
+        const capturedSavedAttendanceData = [...currentAttendanceData];
+        const capturedSavedClassInfo = currentClassInfo
+          ? { ...currentClassInfo }
+          : null;
+
         // Show success message with updated buttons (no Save button since we're now in read-only mode)
         setChatHistory((prev) => [
           ...prev,
@@ -2514,61 +2656,55 @@ const AudioStreamerChatBot = ({
               {
                 label: "Edit Attendance",
                 action: () => {
-                  // Load the updated data from the message back into global state for editing
-                  const message = chatHistory[messageIndex];
-                  if (message && message.attendance_summary) {
-                    setAttendanceData(message.attendance_summary);
-                    setClassInfo(message.class_info);
-                    setEditingMessageIndex(messageIndex);
+                  // Use the captured data or load from the message
+                  setChatHistory((prev) => {
+                    const updatedHistory = [...prev];
+                    const message = updatedHistory[messageIndex];
+                    if (message && message.type === "bot" && message.attendance_summary) {
+                      // Load the updated data from the message back into global state for editing
+                      setAttendanceData(message.attendance_summary);
+                      setClassInfo(message.class_info);
+                      setEditingMessageIndex(messageIndex);
 
-                    // Mark message as being edited
-                    setChatHistory((prev) => {
-                      const updatedHistory = [...prev];
-                      if (
-                        updatedHistory[messageIndex] &&
-                        updatedHistory[messageIndex].type === "bot"
-                      ) {
-                        (updatedHistory[messageIndex] as any).isBeingEdited =
-                          true;
+                      // Mark message as being edited
+                      if (updatedHistory[messageIndex]) {
+                        (updatedHistory[messageIndex] as any).isBeingEdited = true;
                       }
                       return updatedHistory;
-                    });
+                    }
+                    return prev;
+                  });
 
-                    // Add edit mode message
-                    setChatHistory((prev) => [
-                      ...prev,
-                      {
-                        type: "bot",
-                        text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Make your changes and click Save when done.",
-                      },
-                    ]);
-                  }
+                  // Add edit mode message
+                  setChatHistory((prev) => [
+                    ...prev,
+                    {
+                      type: "bot",
+                      text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Make your changes and click Save when done.",
+                    },
+                  ]);
                 },
               },
               {
                 label: "Approve",
                 action: () => {
-                  // Use unified approval handler - it will automatically detect the attendance type
-                  const dataToSave = getAttendanceDataForApproval(messageIndex);
-                  if (dataToSave) {
-                    // Determine attendance type based on the source
-                    let attendanceType: "text" | "image" | "voice" = "text";
-                    if (
-                      dataToSave.source.includes("image") ||
-                      dataToSave.source.includes("ocr")
-                    ) {
-                      attendanceType = "image";
-                    } else if (dataToSave.source.includes("voice")) {
-                      attendanceType = "voice";
-                    }
-                    handleUnifiedAttendanceApproval(
-                      messageIndex,
-                      attendanceType
-                    );
-                  } else {
-                    // Fallback to text-based approval
-                    handleTextAttendanceApproval(messageIndex);
-                  }
+                  console.log("✅ Approve button clicked after save - using captured data:", {
+                    capturedSavedAttendanceData: capturedSavedAttendanceData.length,
+                    capturedSavedClassInfo: capturedSavedClassInfo,
+                    messageIndex: messageIndex,
+                  });
+                  
+                  // Determine attendance type based on the source (default to text)
+                  let attendanceType: "text" | "image" | "voice" = "text";
+                  
+                  // Pass the captured edited data as fallback parameters
+                  // This ensures the edited data is used even if chatHistory hasn't updated yet
+                  handleUnifiedAttendanceApproval(
+                    messageIndex,
+                    attendanceType,
+                    capturedSavedAttendanceData,
+                    capturedSavedClassInfo
+                  );
                 },
               },
               {
