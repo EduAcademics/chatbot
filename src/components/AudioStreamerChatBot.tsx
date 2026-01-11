@@ -67,6 +67,9 @@ const AudioStreamerChatBot = ({
   // Flag to remember that the current Leave flow was initiated
   // via the microphone. This persists so we can play TTS for leave responses.
   const leaveVoiceInitiatedRef = useRef<boolean>(false);
+  // Flag to remember that the current Attendance flow was initiated
+  // via the microphone. This persists so we can play TTS for attendance responses.
+  const attendanceVoiceInitiatedRef = useRef<boolean>(false);
 
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -542,6 +545,9 @@ const AudioStreamerChatBot = ({
       if (activeFlow === "course_progress") {
         courseProgressVoiceInitiatedRef.current = false;
       }
+      if (activeFlow === "attendance" || activeFlow === "voice_attendance") {
+        attendanceVoiceInitiatedRef.current = false;
+      }
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
@@ -758,6 +764,20 @@ const AudioStreamerChatBot = ({
         setAttendanceStep("class_info");
         setPendingClassInfo(null);
 
+        // If this Attendance request was initiated via microphone,
+        // mark that the attendance flow was voice-initiated so the
+        // subsequent responses can also trigger TTS.
+        try {
+          if (
+            isVoiceTriggeredRequestRef.current === true &&
+            (targetFlow === "attendance" || targetFlow === "voice_attendance")
+          ) {
+            attendanceVoiceInitiatedRef.current = true;
+          }
+        } catch (ttsErr) {
+          console.error("TTS initialization failed:", ttsErr);
+        }
+
         // Don't show welcome message here - let the backend response handle it
         // The backend will either auto-fetch class info or ask for it
       }
@@ -934,6 +954,19 @@ const AudioStreamerChatBot = ({
                     },
                   ];
                 });
+
+                // TTS for class info confirmation if voice-initiated
+                try {
+                  if (
+                    attendanceVoiceInitiatedRef.current === true &&
+                    targetFlow === "attendance"
+                  ) {
+                    const speech = generateAttendanceTTSSummary(answer, undefined, classInfo);
+                    void handlePlayTTS(-1, speech);
+                  }
+                } catch (ttsErr) {
+                  console.error("TTS playback failed:", ttsErr);
+                }
               } else {
                 // Backend returned ready message but classInfo not in response - extract from answer
                 const classMatch = answer.match(/for\s+(\w+)\s+(\w+)\s+on\s+(\d{4}-\d{2}-\d{2})/i);
@@ -977,13 +1010,27 @@ const AudioStreamerChatBot = ({
               // Class info successfully extracted (manual entry)
               setPendingClassInfo(classInfo);
               setAttendanceStep("student_details");
+              const classInfoMessage = `✅ Class information confirmed: Class ${classInfo.class_} ${classInfo.section} on ${classInfo.date}. Now please provide student details for attendance. You can type the student names and their attendance status, or upload an image with the attendance list.`;
               setChatHistory((prev) => [
                 ...prev,
                 {
                   type: "bot",
-                  text: `✅ Class information confirmed: Class ${classInfo.class_} ${classInfo.section} on ${classInfo.date}. Now please provide student details for attendance. You can type the student names and their attendance status, or upload an image with the attendance list.`,
+                  text: classInfoMessage,
                 },
               ]);
+
+              // TTS for class info confirmation if voice-initiated
+              try {
+                if (
+                  attendanceVoiceInitiatedRef.current === true &&
+                  targetFlow === "attendance"
+                ) {
+                  const speech = generateAttendanceTTSSummary(classInfoMessage, undefined, classInfo);
+                  void handlePlayTTS(-1, speech);
+                }
+              } catch (ttsErr) {
+                console.error("TTS playback failed:", ttsErr);
+              }
             } else {
               // Enhanced parsing from the answer text if structured data is not available
               // Try multiple patterns to extract class information
@@ -1074,25 +1121,51 @@ const AudioStreamerChatBot = ({
                 ]);
               } else {
                 // Ask for clarification with more specific examples including nursery
+                const clarificationMessage = `I need more specific class information. Please provide:\n• Class/Standard/Grade (e.g., 6, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K)\n• Section (e.g., A, B, C, Section A)\n• Date (e.g., 2025-01-15, 15/01/2025, Jan 15 2025)\n\nExamples: "Class 6 A on 2025-01-15", "Nursery B on 2025-08-14", or "Grade 10 Section B for 15th January 2025"`;
                 setChatHistory((prev) => [
                   ...prev,
                   {
                     type: "bot",
-                    text: `I need more specific class information. Please provide:\n• Class/Standard/Grade (e.g., 6, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K)\n• Section (e.g., A, B, C, Section A)\n• Date (e.g., 2025-01-15, 15/01/2025, Jan 15 2025)\n\nExamples: "Class 6 A on 2025-01-15", "Nursery B on 2025-08-14", or "Grade 10 Section B for 15th January 2025"`,
+                    text: clarificationMessage,
                   },
                 ]);
+
+                // TTS for clarification request if voice-initiated
+                try {
+                  if (
+                    attendanceVoiceInitiatedRef.current === true &&
+                    targetFlow === "attendance"
+                  ) {
+                    const speech = generateAttendanceTTSSummary(clarificationMessage);
+                    void handlePlayTTS(-1, speech);
+                  }
+                } catch (ttsErr) {
+                  console.error("TTS playback failed:", ttsErr);
+                }
               }
             }
           } else {
+            const errorMessage = data.data?.answer || "Please provide class information clearly.";
             setChatHistory((prev) => [
               ...prev,
               {
                 type: "bot",
-                text:
-                  data.data?.answer ||
-                  "Please provide class information clearly.",
+                text: errorMessage,
               },
             ]);
+
+            // TTS for error messages if voice-initiated
+            try {
+              if (
+                attendanceVoiceInitiatedRef.current === true &&
+                targetFlow === "attendance"
+              ) {
+                const speech = generateAttendanceTTSSummary(errorMessage);
+                void handlePlayTTS(-1, speech);
+              }
+            } catch (ttsErr) {
+              console.error("TTS playback failed:", ttsErr);
+            }
           }
         } catch (err) {
           setChatHistory((prev) => [
@@ -1294,16 +1367,43 @@ const AudioStreamerChatBot = ({
             }
 
             setChatHistory((prev) => [...prev, newMessage]);
+
+            // TTS for attendance summary if voice-initiated
+            try {
+              if (
+                attendanceVoiceInitiatedRef.current === true &&
+                targetFlow === "attendance" &&
+                parsedAttendanceData &&
+                parsedAttendanceData.length > 0
+              ) {
+                const speech = generateAttendanceTTSSummary(answer, parsedAttendanceData, parsedClassInfo);
+                void handlePlayTTS(-1, speech);
+              }
+            } catch (ttsErr) {
+              console.error("TTS playback failed:", ttsErr);
+            }
           } else {
+            const errorMessage = data.data?.answer || "Please provide student details clearly.";
             setChatHistory((prev) => [
               ...prev,
               {
                 type: "bot",
-                text:
-                  data.data?.answer ||
-                  "Please provide student details clearly.",
+                text: errorMessage,
               },
             ]);
+
+            // TTS for error messages if voice-initiated
+            try {
+              if (
+                attendanceVoiceInitiatedRef.current === true &&
+                targetFlow === "attendance"
+              ) {
+                const speech = generateAttendanceTTSSummary(errorMessage);
+                void handlePlayTTS(-1, speech);
+              }
+            } catch (ttsErr) {
+              console.error("TTS playback failed:", ttsErr);
+            }
           }
         } catch (err) {
           setChatHistory((prev) => [
@@ -2021,6 +2121,90 @@ const AudioStreamerChatBot = ({
     return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
   };
 
+  // Helper function to generate concise TTS summary for attendance messages
+  const generateAttendanceTTSSummary = (answer: string, attendanceData?: any[], classInfo?: any): string => {
+    const lowerAnswer = answer.toLowerCase();
+    
+    // Class information confirmation
+    if (
+      lowerAnswer.includes("class information confirmed") ||
+      lowerAnswer.includes("ready to mark attendance") ||
+      (lowerAnswer.includes("class") && lowerAnswer.includes("section") && lowerAnswer.includes("date"))
+    ) {
+      if (classInfo && classInfo.class_ && classInfo.section && classInfo.date) {
+        return `Class information confirmed for Class ${classInfo.class_} ${classInfo.section} on ${classInfo.date}. Now please provide student details for attendance`;
+      }
+      return "Class information confirmed. Now please provide student details for attendance";
+    }
+    
+    // Asking for class information
+    if (
+      lowerAnswer.includes("please provide") && 
+      (lowerAnswer.includes("class") || lowerAnswer.includes("section") || lowerAnswer.includes("date"))
+    ) {
+      return "Please provide class information including class name, section, and date";
+    }
+    
+    // Attendance summary/validation ready
+    if (
+      lowerAnswer.includes("check attendance") ||
+      lowerAnswer.includes("attendance summary") ||
+      (lowerAnswer.includes("student name") && lowerAnswer.includes("attendance status"))
+    ) {
+      if (attendanceData && attendanceData.length > 0) {
+        const presentCount = attendanceData.filter((s: any) => 
+          s.attendance_status?.toLowerCase().includes("present") || 
+          s.attendance_status?.toLowerCase() === "p"
+        ).length;
+        const totalCount = attendanceData.length;
+        return `Attendance summary ready. Total ${totalCount} students, ${presentCount} present. Please review and approve or reject`;
+      }
+      return "Attendance summary ready. Please review and approve or reject";
+    }
+    
+    // Asking for student details
+    if (
+      lowerAnswer.includes("please provide student") ||
+      lowerAnswer.includes("provide student details") ||
+      (lowerAnswer.includes("student") && lowerAnswer.includes("attendance"))
+    ) {
+      return "Please provide student names and their attendance status";
+    }
+    
+    // Success messages
+    if (lowerAnswer.includes("successfully") && (lowerAnswer.includes("saved") || lowerAnswer.includes("marked"))) {
+      return "Attendance marked successfully";
+    }
+    
+    // Approval/rejection prompts
+    if (lowerAnswer.includes("do you approve") || lowerAnswer.includes("approve or reject")) {
+      return "Please review the attendance summary and approve or reject";
+    }
+    
+    // Error messages
+    if (lowerAnswer.includes("error") || lowerAnswer.includes("failed")) {
+      return "An error occurred while processing attendance. Please try again";
+    }
+    
+    // Default: return first sentence or first 150 characters, cleaned
+    const cleaned = answer
+      .replace(/\*\*/g, "")
+      .replace(/\*/g, "")
+      .replace(/📝|✅|❌|⚠️|•|🎯/g, "")
+      .replace(/\n/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    
+    // Try to get first sentence
+    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
+    if (firstSentence.length > 0 && firstSentence.length < 200) {
+      return firstSentence;
+    }
+    
+    // Fallback to first 150 characters
+    return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
+  };
+
   // TTS playback function
   const handlePlayTTS = async (idx: number, text: string) => {
     setTtsLoading(idx);
@@ -2615,33 +2799,47 @@ const AudioStreamerChatBot = ({
           const filtered = prev.filter(
             (msg) => !(msg.text && msg.text.includes("⏳ Processing"))
           );
+          const successMessage = `✅ ${
+            attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
+          } attendance saved successfully! ${
+            data.data?.message || "Data has been saved to MongoDB."
+          }`;
           return [
             ...filtered,
             {
               type: "bot",
-              text: `✅ ${
-                attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
-              } attendance saved successfully! ${
-                data.data?.message || "Data has been saved to MongoDB."
-              }`,
+              text: successMessage,
               answer: data.data?.answer || data.data?.message,
             },
           ];
         });
+
+        // TTS for success message if voice-initiated
+        try {
+          if (attendanceVoiceInitiatedRef.current === true) {
+            const speech = generateAttendanceTTSSummary("Attendance marked successfully");
+            void handlePlayTTS(-1, speech);
+            // Clear the ref after successful completion
+            attendanceVoiceInitiatedRef.current = false;
+          }
+        } catch (ttsErr) {
+          console.error("TTS playback failed:", ttsErr);
+        }
 
         // Clear the editing state
         setEditingMessageIndex(null);
         setAttendanceData([]);
         setClassInfo(null);
 
-        // Return to default query flow after completion
+        // Return to LLM routing after completion
         setTimeout(() => {
-          setActiveFlow("query");
+          setActiveFlow("none");
+          setAutoRouting(true);
           setChatHistory((prev) => [
             ...prev,
             {
               type: "bot",
-              text: "Attendance saved! You're now back to the default query flow. Feel free to ask me anything else.",
+              text: "Attendance saved! LLM routing enabled. Using AI-powered flow detection.",
             },
           ]);
         }, 1000);
@@ -2650,6 +2848,9 @@ const AudioStreamerChatBot = ({
       }
     } catch (err) {
       console.error(`Error saving ${attendanceType} attendance:`, err);
+      const errorMessage = `❌ Failed to save ${attendanceType} attendance: ${
+        (err as Error).message
+      }`;
       setChatHistory((prev) => {
         const filtered = prev.filter(
           (msg) => !(msg.text && msg.text.includes("⏳ Processing"))
@@ -2658,12 +2859,20 @@ const AudioStreamerChatBot = ({
           ...filtered,
           {
             type: "bot",
-            text: `❌ Failed to save ${attendanceType} attendance: ${
-              (err as Error).message
-            }`,
+            text: errorMessage,
           },
         ];
       });
+
+      // TTS for error message if voice-initiated
+      try {
+        if (attendanceVoiceInitiatedRef.current === true) {
+          const speech = generateAttendanceTTSSummary(errorMessage);
+          void handlePlayTTS(-1, speech);
+        }
+      } catch (ttsErr) {
+        console.error("TTS playback failed:", ttsErr);
+      }
     }
   };
 
