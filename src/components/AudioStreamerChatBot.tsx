@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
 import {
@@ -64,6 +64,9 @@ const AudioStreamerChatBot = ({
   // via the microphone. This persists across the selection click so we can
   // play the second-step TTS when the user clicks a class-section.
   const courseProgressVoiceInitiatedRef = useRef<boolean>(false);
+  // Flag to remember that the current Leave flow was initiated
+  // via the microphone. This persists so we can play TTS for leave responses.
+  const leaveVoiceInitiatedRef = useRef<boolean>(false);
 
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -532,6 +535,13 @@ const AudioStreamerChatBot = ({
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
       console.log("🚪 Exit command detected, exiting flow:", activeFlow);
+      // Clear voice-initiated flags when exiting flows
+      if (activeFlow === "leave") {
+        leaveVoiceInitiatedRef.current = false;
+      }
+      if (activeFlow === "course_progress") {
+        courseProgressVoiceInitiatedRef.current = false;
+      }
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
@@ -784,9 +794,27 @@ const AudioStreamerChatBot = ({
           ...prev,
           {
             type: "bot",
-            text: "📝 **Leave Application Flow Activated!** I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
+            text: "📝 I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
           },
         ]);
+
+        // If this Leave request was initiated via microphone,
+        // play a concise informational TTS line and mark
+        // that the leave flow was voice-initiated so the
+        // subsequent responses can also trigger TTS.
+        try {
+          if (
+            isVoiceTriggeredRequestRef.current === true &&
+            // Double-check flow
+            targetFlow === "leave"
+          ) {
+            leaveVoiceInitiatedRef.current = true;
+            const speech = "I'll help you apply for leave. Please provide details like: Start date and end date, Leave type such as sick, casual, earned, etc., and Reason for leave.";
+            void handlePlayTTS(-1, speech);
+          }
+        } catch (ttsErr) {
+          console.error("TTS playback failed:", ttsErr);
+        }
 
         // Stop here - don't process the initialization message, wait for user's next input
         setIsProcessing(false);
@@ -1462,6 +1490,24 @@ const AudioStreamerChatBot = ({
             console.log("Leave application data:", leaveData);
           }
 
+          // TTS: voice-only, strictly gated. Do NOT speak when input was typed
+          // or for any other flow. This uses the leaveVoiceInitiatedRef that is set
+          // only when the microphone-based submission initializes the leave flow.
+          try {
+            if (
+              leaveVoiceInitiatedRef.current === true &&
+              targetFlow === "leave"
+            ) {
+              // Generate concise summary for TTS instead of full message
+              const speech = generateLeaveTTSSummary(answer);
+
+              // Use the component's TTS helper to play speech. Pass a non-disruptive index.
+              void handlePlayTTS(-1, speech);
+            }
+          } catch (ttsErr) {
+            console.error("TTS playback failed:", ttsErr);
+          }
+
           // If submission failed (error message), stay in the flow to allow retry
           if (
             answer.includes("❌") ||
@@ -1478,31 +1524,65 @@ const AudioStreamerChatBot = ({
           // If submission succeeded (success message), exit the flow
           if (answer.includes("✅") && answer.includes("successfully")) {
             console.log("✅ Leave submitted successfully, exiting flow");
+            // Clear the voice-initiated flag when leaving the flow
+            leaveVoiceInitiatedRef.current = false;
             setTimeout(() => {
               setActiveFlow("none");
             }, 1000);
           }
         } else {
+          const errorMessage =
+            data.message ||
+            "Sorry, there was an error processing your leave request.";
           setChatHistory((prev) => [
             ...prev,
             {
               type: "bot",
-              text:
-                data.message ||
-                "Sorry, there was an error processing your leave request.",
+              text: errorMessage,
             },
           ]);
+
+          // TTS for error messages if voice-initiated
+          try {
+            if (
+              leaveVoiceInitiatedRef.current === true &&
+              targetFlow === "leave"
+            ) {
+              // Generate concise summary for TTS instead of full message
+              const speech = generateLeaveTTSSummary(errorMessage);
+              void handlePlayTTS(-1, speech);
+            }
+          } catch (ttsErr) {
+            console.error("TTS playback failed:", ttsErr);
+          }
+
           // Keep the leave flow active for retry
           setActiveFlow("leave");
         }
       } catch (err) {
+        const errorMessage = "Sorry, there was an error processing your leave request.";
         setChatHistory((prev) => [
           ...prev,
           {
             type: "bot",
-            text: "Sorry, there was an error processing your leave request.",
+            text: errorMessage,
           },
         ]);
+
+        // TTS for error messages if voice-initiated
+        try {
+          if (
+            leaveVoiceInitiatedRef.current === true &&
+            targetFlow === "leave"
+          ) {
+            // Generate concise summary for TTS instead of full message
+            const speech = generateLeaveTTSSummary(errorMessage);
+            void handlePlayTTS(-1, speech);
+          }
+        } catch (ttsErr) {
+          console.error("TTS playback failed:", ttsErr);
+        }
+
         // Keep the leave flow active for retry
         setActiveFlow("leave");
       } finally {
@@ -1863,6 +1943,83 @@ const AudioStreamerChatBot = ({
       );
     }
   );
+
+  // Helper function to generate concise TTS summary for leave messages
+  const generateLeaveTTSSummary = (answer: string): string => {
+    const lowerAnswer = answer.toLowerCase();
+    
+    // Transport incharge alternative selection
+    if (
+      lowerAnswer.includes("transport vehicle incharge") ||
+      lowerAnswer.includes("alternative incharge")
+    ) {
+      if (lowerAnswer.includes("available employees") || lowerAnswer.includes("you can select")) {
+        return "You are assigned as a transport vehicle incharge so please select alternative person who can handle your duty in your absence from below";
+      }
+      if (lowerAnswer.includes("no suggested alternative") || lowerAnswer.includes("no alternative employees")) {
+        return "You are assigned as a transport vehicle incharge but no alternative employees are available. Please contact your administrator";
+      }
+      return "You are assigned as a transport vehicle incharge so please select alternative person who can handle your duty in your absence";
+    }
+    
+    // Asking for leave information
+    if (
+      lowerAnswer.includes("please provide") ||
+      lowerAnswer.includes("missing information") ||
+      lowerAnswer.includes("need") && (lowerAnswer.includes("date") || lowerAnswer.includes("leave type"))
+    ) {
+      if (lowerAnswer.includes("start date") || lowerAnswer.includes("end date")) {
+        return "Please provide the start date and end date for your leave";
+      }
+      if (lowerAnswer.includes("leave type")) {
+        return "Please specify the type of leave you want to apply for";
+      }
+      if (lowerAnswer.includes("reason") || lowerAnswer.includes("description")) {
+        return "Please provide a reason or description for your leave";
+      }
+      return "Please provide the required leave information";
+    }
+    
+    // Leave validation or summary
+    if (
+      lowerAnswer.includes("leave summary") ||
+      lowerAnswer.includes("review") ||
+      lowerAnswer.includes("confirm")
+    ) {
+      return "Please review your leave details and confirm if everything is correct";
+    }
+    
+    // Success messages
+    if (lowerAnswer.includes("successfully") && lowerAnswer.includes("submitted")) {
+      return "Leave application submitted successfully. Your request has been sent for approval";
+    }
+    
+    // Error messages
+    if (lowerAnswer.includes("error") || lowerAnswer.includes("failed")) {
+      if (lowerAnswer.includes("alternative incharge") || lowerAnswer.includes("transport")) {
+        return "Please provide alternative transport incharge before submitting";
+      }
+      return "An error occurred. Please check your leave details and try again";
+    }
+    
+    // Default: return first sentence or first 100 characters, cleaned
+    const cleaned = answer
+      .replace(/\*\*/g, "")
+      .replace(/\*/g, "")
+      .replace(/📝|✅|❌|⚠️|•/g, "")
+      .replace(/\n/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    
+    // Try to get first sentence
+    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
+    if (firstSentence.length > 0 && firstSentence.length < 200) {
+      return firstSentence;
+    }
+    
+    // Fallback to first 150 characters
+    return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
+  };
 
   // TTS playback function
   const handlePlayTTS = async (idx: number, text: string) => {
