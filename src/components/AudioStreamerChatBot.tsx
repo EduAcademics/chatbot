@@ -26,6 +26,9 @@ import {
   getAIHeaders,
 } from "../services/api";
 import { API_BASE_URL } from "../config/api";
+import { VoiceModeManager } from "../utils/voiceModeManager";
+import { TTSHelper } from "../utils/ttsHelper";
+import { getVoiceMessageForResponse } from "../utils/voiceMessages";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType =
@@ -68,7 +71,20 @@ const AudioStreamerChatBot = ({
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hoveredMenuItem, setHoveredMenuItem] = useState<string | null>(null);
+  const [isVoiceModeActive, setIsVoiceModeActive] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceManager = useRef(VoiceModeManager.getInstance());
+  const ttsHelper = useRef(TTSHelper.getInstance());
+
+  // Cleanup voice mode helper
+  const cleanupVoiceMode = () => {
+    if (isVoiceModeActive) {
+      console.log("🎤 Cleaning up voice mode");
+      voiceManager.current.deactivateVoiceMode();
+      setIsVoiceModeActive(false);
+      ttsHelper.current.stop();
+    }
+  };
 
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -511,7 +527,14 @@ const AudioStreamerChatBot = ({
 
   const handleSubmit = async () => {
     if (!inputText.trim()) return;
-    const userMessage = inputText.trim();
+    // Normalize input: remove trailing punctuation for commands/numbers
+    let userMessage = inputText.trim();
+    // Remove trailing period/comma for single number or approve/reject
+    userMessage = userMessage.replace(/^(\d+)\s*[.,]?$/i, "$1");
+    userMessage = userMessage.replace(
+      /^(approve|reject)[.,]?$/i,
+      (m, p1) => p1
+    );
 
     console.log("🚀 handleSubmit START:", {
       userMessage,
@@ -521,11 +544,31 @@ const AudioStreamerChatBot = ({
     });
 
     setChatHistory((prev) => [...prev, { type: "user", text: userMessage }]);
+    // Stop mic streaming after user message is sent
+    if (
+      voiceManager.current.isRecording &&
+      typeof stopStreaming === "function"
+    ) {
+      stopStreaming();
+      console.log("🎤 Mic auto-turned off after message");
+    }
     setInputText("");
     setIsProcessing(true);
 
     // CHECK FOR EXIT KEYWORDS - Exit current flow immediately
-    const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
+    // Do not treat 'done' as an exit command within the assignment flow (attachments use 'skip')
+    const exitKeywordsBase = [
+      "exit",
+      "cancel",
+      "restart",
+      "quit",
+      "stop",
+      "done",
+    ];
+    const exitKeywords =
+      activeFlow === "assignment"
+        ? exitKeywordsBase.filter((k) => k !== "done")
+        : exitKeywordsBase;
     const isExitCommand = exitKeywords.some(
       (keyword) => userMessage.toLowerCase().trim() === keyword
     );
@@ -535,11 +578,15 @@ const AudioStreamerChatBot = ({
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
+      const exitText =
+        activeFlow === "assignment"
+          ? `Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`
+          : `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`;
       setChatHistory((prev) => [
         ...prev,
         {
           type: "bot",
-          text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
+          text: exitText,
         },
       ]);
       setIsProcessing(false);
@@ -780,23 +827,18 @@ const AudioStreamerChatBot = ({
 
       // Initialize leave flow
       if (targetFlow === "leave" && isNewFlowInitialization) {
-        console.log("📍 Initializing leave flow state");
-
-        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in leave flow
         setActiveFlow("leave");
-
-        // Add welcome message matching manual mode
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "📝 **Leave Application Flow Activated!** I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
-          },
-        ]);
-
-        // Stop here - don't process the initialization message, wait for user's next input
-        setIsProcessing(false);
-        return;
+        // Check if this was triggered by voice input
+        const isVoiceTriggered = isVoiceTriggeredRequestRef.current;
+        if (isVoiceTriggered) {
+          // Activate voice mode
+          voiceManager.current.activateVoiceMode();
+          setIsVoiceModeActive(true);
+          console.log("🎤 Voice mode activated for Leave Application");
+        }
+        // Don't return - let the flow continue to make the API call
+        // The API will return the initial prompt
+        console.log("📍 Leave flow initialized, continuing to API call...");
       }
     } else {
       console.log("📍 Using current activeFlow:", activeFlow);
@@ -808,7 +850,7 @@ const AudioStreamerChatBot = ({
         ...prev,
         {
           type: "bot",
-          text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.",
+          text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A'.",
         },
       ]);
       setIsProcessing(false);
@@ -1385,56 +1427,125 @@ const AudioStreamerChatBot = ({
           branch_token,
         });
 
+        let answer = "";
         if (data.status === "success" && data.data) {
-          const answer = data.data.answer || "";
-          const leaveData = data.data.leave_data;
+          answer = data.data.answer || "";
+        }
 
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: answer,
-              activeTab: "answer" as const,
-            },
-          ]);
+        // Fallback prompt if no answer from backend
+        if (!answer) {
+          answer =
+            "📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason.";
+        }
 
-          // If leave data is present, log it (you can add UI to display it)
-          if (leaveData) {
-            console.log("Leave application data:", leaveData);
-          }
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            answer: answer,
+            activeTab: "answer" as const,
+          },
+        ]);
 
-          // If submission failed (error message), stay in the flow to allow retry
-          if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
-          ) {
-            console.log(
-              "⚠️ Leave submission error detected, staying in flow for retry"
-            );
-            // Keep the activeFlow as "leave" so the next message stays in leave flow
-            setActiveFlow("leave");
-          }
+        // Voice mode: Speak the response if voice mode is active
+        console.log("🔊 Voice mode check:", {
+          voiceManagerActive: voiceManager.current.isVoiceActive(),
+          activeFlow: targetFlow,
+          answer: answer?.substring(0, 50),
+        });
 
-          // If submission succeeded (success message), exit the flow
-          if (answer.includes("✅") && answer.includes("successfully")) {
-            console.log("✅ Leave submitted successfully, exiting flow");
-            setTimeout(() => {
-              setActiveFlow("none");
-            }, 1000);
+        if (voiceManager.current.isVoiceActive()) {
+          console.log("🔊 INSIDE voice mode block - will speak");
+          console.log(
+            "🔊 Checking if should speak. Answer:",
+            answer?.substring(0, 100)
+          );
+          const voiceMessage = getVoiceMessageForResponse(answer || "");
+          console.log("🔊 Voice message to speak:", voiceMessage);
+          if (voiceMessage) {
+            console.log("🔊 Starting TTS...");
+            setTimeout(async () => {
+              try {
+                // Use backend TTS API (same as Course Progress flow)
+                const reader = await aiAPI.textToSpeech({ text: voiceMessage });
+                if (!reader) throw new Error("No TTS stream");
+
+                const audioChunks: Uint8Array[] = [];
+                let done = false;
+                while (!done) {
+                  const { value, done: streamDone } = await reader.read();
+                  if (value) audioChunks.push(value);
+                  done = streamDone;
+                }
+
+                const audioBlob = new Blob(audioChunks as BlobPart[], {
+                  type: "audio/wav",
+                });
+                const url = URL.createObjectURL(audioBlob);
+                const audio = new Audio(url);
+
+                // Play audio
+                audio.play();
+                console.log("🔊 Playing backend TTS audio...");
+
+                // On audio end, handle mic auto-enable
+                audio.onended = () => {
+                  URL.revokeObjectURL(url);
+                  console.log("🔊 Audio playback complete");
+
+                  const isSuccess =
+                    (answer || "").includes("✅") &&
+                    (answer || "").includes("successfully");
+                  if (isSuccess) {
+                    voiceManager.current.deactivateVoiceMode();
+                    setIsVoiceModeActive(false);
+                    console.log(
+                      "🎤 Voice mode deactivated - leave submitted successfully"
+                    );
+                  } else {
+                    voiceManager.current.setShouldAutoMic(true);
+                    console.log(
+                      "🎤 TTS complete, mic should auto-enable for next input"
+                    );
+                  }
+                };
+              } catch (err) {
+                console.error("TTS error:", err);
+                // On error, still enable mic
+                voiceManager.current.setShouldAutoMic(true);
+              }
+            }, 500);
+          } else {
+            console.log("🔊 No voice message matched for this response");
           }
         } else {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text:
-                data.message ||
-                "Sorry, there was an error processing your leave request.",
-            },
-          ]);
-          // Keep the leave flow active for retry
+          console.log("🔊 Voice mode NOT active, skipping TTS");
+        }
+
+        // If leave data is present, log it (you can add UI to display it)
+        if (data.data && data.data.leave_data) {
+          console.log("Leave application data:", data.data.leave_data);
+        }
+
+        // If submission failed (error message), stay in the flow to allow retry
+        if (
+          answer.includes("❌") ||
+          answer.includes("error") ||
+          answer.includes("failed")
+        ) {
+          console.log(
+            "⚠️ Leave submission error detected, staying in flow for retry"
+          );
+          // Keep the activeFlow as "leave" so the next message stays in leave flow
           setActiveFlow("leave");
+        }
+
+        // If submission succeeded (success message), exit the flow
+        if (answer.includes("✅") && answer.includes("successfully")) {
+          console.log("✅ Leave submitted successfully, exiting flow");
+          setTimeout(() => {
+            setActiveFlow("none");
+          }, 1000);
         }
       } catch (err) {
         setChatHistory((prev) => [
@@ -1444,6 +1555,21 @@ const AudioStreamerChatBot = ({
             text: "Sorry, there was an error processing your leave request.",
           },
         ]);
+        // Voice mode: Speak error message if voice mode is active
+        if (isVoiceModeActive && voiceManager.current.isVoiceActive()) {
+          setTimeout(async () => {
+            await ttsHelper.current.speak(
+              "An error occurred. Please try again.",
+              () => {
+                // Keep voice mode active but enable mic for retry
+                voiceManager.current.setShouldAutoMic(true);
+                console.log(
+                  "🎤 Error spoken, mic should auto-enable for retry"
+                );
+              }
+            );
+          }, 500);
+        }
         // Keep the leave flow active for retry
         setActiveFlow("leave");
       } finally {
@@ -1484,24 +1610,24 @@ const AudioStreamerChatBot = ({
           }
 
           // If submission failed (error message), exit the flow
+          const ansLower = answer ? answer.toLowerCase() : "";
           if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
+            ansLower.includes("error") ||
+            ansLower.includes("failed") ||
+            ansLower.includes("could not")
           ) {
-            console.log(
-              "⚠️ Assignment submission error detected, exiting flow"
-            );
+            console.log("Assignment submission error detected, exiting flow");
             setActiveFlow("none");
           }
 
           // If submission succeeded (success message), exit the flow
           if (
-            answer.includes("✅") &&
-            answer.includes("successfully") &&
-            answer.includes("created")
+            (ansLower.includes("created") ||
+              ansLower.includes("created successfully") ||
+              ansLower.includes("assignment created")) &&
+            ansLower.includes("success")
           ) {
-            console.log("✅ Assignment created successfully, exiting flow");
+            console.log("Assignment created successfully, exiting flow");
             setTimeout(() => {
               setActiveFlow("none");
             }, 1000);
@@ -3044,6 +3170,51 @@ const AudioStreamerChatBot = ({
     }
   `;
 
+  // Auto-enable mic after TTS completes in voice mode
+  useEffect(() => {
+    // Auto-enable mic after TTS completes in voice mode (polling approach)
+    const checkAndEnableMic = async () => {
+      if (
+        voiceManager.current.isVoiceActive() &&
+        voiceManager.current.shouldAutoMic() &&
+        !isRecording
+      ) {
+        try {
+          console.log("🎤 Auto-enabling mic after TTS...");
+          // Reset the auto-mic flag first
+          voiceManager.current.setShouldAutoMic(false);
+          // Small delay to ensure audio has fully stopped
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          // Check again if still in voice mode and not recording
+          if (voiceManager.current.isVoiceActive() && !isRecording) {
+            console.log("🎤 Starting mic...");
+            await startStreaming();
+            console.log("✅ Mic auto-enabled successfully");
+          }
+        } catch (error) {
+          console.error("❌ Failed to auto-enable mic:", error);
+          voiceManager.current.setShouldAutoMic(false);
+        }
+      }
+    };
+
+    // Check immediately
+    void checkAndEnableMic();
+
+    // Also set up a polling mechanism as backup (check every 500ms)
+    const interval = setInterval(() => {
+      if (
+        voiceManager.current.isVoiceActive() &&
+        voiceManager.current.shouldAutoMic() &&
+        !isRecording
+      ) {
+        void checkAndEnableMic();
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [isRecording]); // Only depend on isRecording
+
   return (
     <>
       {/* Class Info Modal */}
@@ -3055,6 +3226,11 @@ const AudioStreamerChatBot = ({
 
       <style>
         {`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+
         * {
           box-sizing: border-box;
         }
@@ -4154,7 +4330,7 @@ const AudioStreamerChatBot = ({
                                 ...prev,
                                 {
                                   type: "bot",
-                                  text: "Leave application flow activated (Manual override)! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'.",
+                                  text: "",
                                 },
                               ]);
                             }}
@@ -4286,7 +4462,7 @@ const AudioStreamerChatBot = ({
                                 ...prev,
                                 {
                                   type: "bot",
-                                  text: "📚 **Assignment Creation Flow Activated!** I'll guide you through creating an assignment step by step. Just answer my questions naturally!",
+                                  text: "Let's create an assignment.",
                                 },
                               ]);
                             }}
@@ -6026,7 +6202,7 @@ const AudioStreamerChatBot = ({
                                     <>
                                       {/* Render answer as Markdown with GFM (tables) - Memoized to prevent refresh */}
                                       <MemoizedAnswer
-                                        answer={msg.answer || ""}
+                                        answer={msg.answer || msg.text || ""}
                                         messageIdx={idx}
                                       />
                                     </>
@@ -6437,13 +6613,14 @@ const AudioStreamerChatBot = ({
                     try {
                       const result = await uploadAssignmentFile(file);
                       if (result.status === "success") {
+                        // Show a single filename confirmation (no instructional text)
                         setChatHistory((prev) => [
                           ...prev,
                           {
                             type: "bot",
-                            text: `✅ File uploaded successfully: ${
+                            text: `File uploaded successfully: ${
                               result.data?.filename || file.name
-                            }\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
+                            }`,
                           },
                         ]);
                         // Send the file UUID to the assignment chat to add it to attachments
@@ -6483,14 +6660,30 @@ const AudioStreamerChatBot = ({
                                 const answer =
                                   data.data.answer ||
                                   "File added to assignment.";
-                                setChatHistory((prev) => [
-                                  ...prev,
-                                  {
-                                    type: "bot",
-                                    answer: answer,
-                                    activeTab: "answer" as const,
-                                  },
-                                ]);
+                                // Avoid duplicating the upload confirmation: if the backend's answer
+                                // repeats a file-upload acknowledgement, skip appending it because
+                                // the frontend already showed the filename confirmation above.
+                                const lower = String(answer).toLowerCase();
+                                const isUploadAck =
+                                  lower.includes("file uploaded") ||
+                                  lower.includes("file added") ||
+                                  lower.includes("attached");
+                                if (!isUploadAck) {
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      answer: answer,
+                                      activeTab: "answer" as const,
+                                    },
+                                  ]);
+                                } else {
+                                  // Do not append duplicate acknowledgement; log instead
+                                  console.log(
+                                    "Suppressed duplicate backend upload acknowledgement:",
+                                    answer
+                                  );
+                                }
                               }
                             } catch (err) {
                               console.error(
@@ -6504,7 +6697,7 @@ const AudioStreamerChatBot = ({
                             ...prev,
                             {
                               type: "bot",
-                              text: "⚠️ File uploaded but could not be attached. Please try uploading again.",
+                              text: "File uploaded but could not be attached. Please try uploading again.",
                             },
                           ]);
                         }
