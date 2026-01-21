@@ -603,7 +603,9 @@ export const leaveApprovalAPI = {
 // Course Progress API
 const ERP_API_BASE_URL = 'https://api.eduacademics.com';
 
-interface ClassSectionOption {
+// Note: ClassSectionOption is currently unused but kept for future reference
+/*
+interface _ClassSectionOption {
   _id: string;
   classId: string;
   sectionId: string;
@@ -618,6 +620,7 @@ interface ClassSectionOption {
     _id: string;
   };
 }
+*/
 
 interface FetchClassSectionsRequest {
   page?: number;

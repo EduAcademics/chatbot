@@ -1,6 +1,6 @@
 import React from "react";
 import { aiAPI } from "../services/api";
-import { ChatMessage } from "./types";
+import type { ChatMessage } from "./types";
 
 export const handlePlayTTS = async (
   idx: number,

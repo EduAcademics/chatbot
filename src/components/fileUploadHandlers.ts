@@ -1,5 +1,5 @@
 import { aiAPI } from "../services/api";
-import { FlowType, ClassInfo } from "./types";
+import type { FlowType, ClassInfo } from "./types";
 
 export const uploadRegularFile = async (file: File, sessionId: string) => {
   return await aiAPI.uploadFile({

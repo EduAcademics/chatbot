@@ -20,10 +20,12 @@ import "./markdown-tables.css";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ClassInfoModal from "./ClassInfoModal";
+import InterviewBot from "./InterviewBot";
 import { aiAPI, userAPI, leaveApprovalAPI, courseProgressAPI } from "../services/api";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "full_voice_attendance" | "leave" | "leave_approval" | "assignment" | "course_progress"; // <-- add full_voice_attendance flow
+type BotType = "default" | "interview";
 const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
@@ -80,6 +82,7 @@ const AudioStreamerChatBot = ({
     null
   );
   const [activeFlow, setActiveFlow] = useState<FlowType>("none"); // <-- add
+  const [selectedBot, setSelectedBot] = useState<BotType>("default"); // Bot selector state
   const [sessionId, setSessionId] = useState<string | null>(null); // <-- add
   const [attendanceData, setAttendanceData] = useState<any[]>([]); // <-- add for editable attendance
   const [attendanceStep, setAttendanceStep] = useState<
@@ -3369,19 +3372,30 @@ const AudioStreamerChatBot = ({
         ${additionalStyles}
         `}
       </style>
+      {selectedBot === "default" && (
       <div className="chatbot-root">
         <div className="chatbot-container">
           {/* Header Section - Improved Design */}
           <div className="chatbot-header-section">
             <h1 className="chatbot-header-title">
-              <img 
-                src="/sofisto-img.png" 
-                alt="Sofisto Robot" 
+              <img
+                src="/sofisto-img.png"
+                alt="Sofisto Robot"
                 className="robot-icon"
               />
               Chat with Sofisto
             </h1>
-            <div className="three-dot-menu-container" ref={menuRef}>
+              <div className="bot-selector-container">
+                <select
+                  value={selectedBot}
+                  onChange={(e) => setSelectedBot(e.target.value as BotType)}
+                  className="bot-selector"
+                >
+                  <option value="default">Default Bot</option>
+                  <option value="interview">Interview Bot</option>
+                </select>
+              </div>
+              <div className="three-dot-menu-container" ref={menuRef}>
               <motion.button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
                 className="three-dot-menu-btn"
@@ -5487,6 +5501,15 @@ const AudioStreamerChatBot = ({
           </div>
         </div>
       </div >
+      )}
+      {selectedBot === "interview" && (
+        <InterviewBot
+          userId={userId}
+          roles={roles}
+          email={email}
+          onSwitchToDefault={() => setSelectedBot("default")}
+        />
+      )}
     </>
   );
 };
