@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import AudioStreamerChatBot from "./components/AudioStreamerChatBot";
 import UserInfoBox from "./components/UserInfoBox";
 import { userAPI } from "./services/api";
+import { syncAuthFromURL} from "./utils/authStorage";
 
 // import AttendanceTest from "./pages/AttendanceTest";
 
@@ -27,6 +28,13 @@ function App() {
 
   useEffect(() => {
     const initializeAuth = async () => {
+       syncAuthFromURL();
+      // const syncedFromURL = syncAuthFromURL();
+      // if (syncedFromURL) {
+      //   cleanAuthFromURL();
+      // }
+
+
       const params = new URLSearchParams(window.location.search);
       const tokenFromQuery = params.get("token");
       const emailFromQuery = params.get("email");

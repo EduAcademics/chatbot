@@ -47,6 +47,7 @@ interface QueryHandlerResponse {
 interface ChatRequest {
   session_id: string;
   query: string;
+  user_id?: string;
 }
 
 interface ChatResponse {
@@ -259,14 +260,28 @@ const getDefaultHeaders = (includeAuth: boolean = false): HeadersInit => {
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
-  
+
   if (includeAuth) {
     const token = getAuthToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
   }
-  
+
+  return headers;
+};
+
+
+ export const getAIHeaders = (): HeadersInit => {
+  const headers = getDefaultHeaders(true) as Record<string, string>;
+
+  const academicSession =
+    localStorage.getItem('academic_session') || '2025-26';
+  const branchToken = localStorage.getItem('branch_token') || 'indp';
+
+  headers['x-academic-session'] = academicSession;
+  headers['x-branch-token'] = branchToken;
+
   return headers;
 };
 
@@ -308,12 +323,7 @@ export const aiAPI = {
   queryHandler: async (request: QueryHandlerRequest): Promise<QueryHandlerResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/query-handler`, {
       method: 'POST',
-      headers: {
-        'x-academic-session': '2025-26',
-        'x-branch-token': 'indp',
-        Authorization: 'Bearer <your-token>',
-        'Content-Type': 'application/json',
-      },
+      headers: getAIHeaders(),
       body: JSON.stringify(request),
     });
 
