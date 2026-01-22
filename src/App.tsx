@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiLogOut } from "react-icons/fi";
+import "./App.css";
 import Login from "./pages/Login";
 import AudioStreamerChatBot from "./components/AudioStreamerChatBot";
 import UserInfoBox from "./components/UserInfoBox";
