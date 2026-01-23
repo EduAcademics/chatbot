@@ -26,6 +26,7 @@ import {
   getAIHeaders,
 } from "../services/api";
 import { API_BASE_URL } from "../config/api";
+import { WebRTCAudioService } from "../services/webrtcAudio";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType =
@@ -38,7 +39,6 @@ type FlowType =
   | "leave_approval"
   | "assignment"
   | "course_progress"; // <-- add full_voice_attendance flow
-const wsBase = import.meta.env.VITE_WS_BASE_URL;
 const AudioStreamerChatBot = ({
   userId,
   roles,
@@ -48,11 +48,9 @@ const AudioStreamerChatBot = ({
   roles: string;
   email: string;
 }) => {
-  const socketRef = useRef<WebSocket | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
+  const webrtcServiceRef = useRef<WebRTCAudioService | null>(null);
+  const lastInterimTextRef = useRef<string>(""); // Track last interim text to replace it with final
+  const finalTextRef = useRef<string>(""); // Track accumulated final text (completed sentences)
 
   // Local lifecycle-scoped flag to mark a single request as voice-triggered.
   // This is intentionally a request-scoped ref (not global/shared) and will
@@ -244,112 +242,92 @@ const AudioStreamerChatBot = ({
     fetchUserSession();
   }, [userId]);
 
-  const convertFloat32ToInt16 = (buffer: Float32Array) => {
-    const int16Buffer = new Int16Array(buffer.length);
-    for (let i = 0; i < buffer.length; i++) {
-      const s = Math.max(-1, Math.min(1, buffer[i]));
-      int16Buffer[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-    }
-    return int16Buffer;
-  };
-
   const startStreaming = async () => {
-    // Request microphone only when starting recording
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio:
-        selectedDeviceId === "default"
-          ? true
-          : { deviceId: { exact: selectedDeviceId } },
-    });
-    micStreamRef.current = stream;
+    try {
+      // Reset text tracking for new recording session
+      lastInterimTextRef.current = "";
+      finalTextRef.current = "";
+      
+      // Create WebRTC service instance
+      const webrtcService = new WebRTCAudioService();
+      webrtcServiceRef.current = webrtcService;
 
-    const audioContext = new AudioContext({ sampleRate: 16000 });
-    audioContextRef.current = audioContext;
+      // Connect with callbacks
+      await webrtcService.connect(selectedLanguage, {
+        onTranscript: (text: string, isFinal: boolean) => {
+          const trimmed = text.trim();
+          if (!trimmed) return;
 
-    const source = audioContext.createMediaStreamSource(stream);
-    sourceRef.current = source;
-
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    processorRef.current = processor;
-
-    const socket = new WebSocket(`${wsBase}/ws/speech_to_text`);
-    socketRef.current = socket;
-
-    socket.onopen = () => {
-      socket.send(selectedLanguage);
-
-      processor.onaudioprocess = (e) => {
-        const floatSamples = e.inputBuffer.getChannelData(0);
-        const int16Samples = convertFloat32ToInt16(floatSamples);
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(int16Samples.buffer);
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      setIsRecording(true);
-    };
-
-    socket.onmessage = (event: MessageEvent) => {
-      const newText = event.data;
-      setInputText((prev) => {
-        const updated = prev + " " + newText;
-
-        // For full voice attendance flow, implement 3-second auto-submit
-        if (activeFlow === "full_voice_attendance") {
-          const currentTime = Date.now();
-          setLastVoiceInputTime(currentTime);
-
-          // Clear existing timer
-          if (fullVoiceAutoSubmitTimer) {
-            clearTimeout(fullVoiceAutoSubmitTimer);
+          if (isFinal) {
+            // Final result: add to accumulated final text and clear interim
+            finalTextRef.current = finalTextRef.current
+              ? finalTextRef.current + " " + trimmed
+              : trimmed;
+            lastInterimTextRef.current = "";
+            
+            // Update input with final text only (no interim)
+            setInputText(finalTextRef.current);
+          } else {
+            // Interim result: show final text + current interim
+            lastInterimTextRef.current = trimmed;
+            const displayText = finalTextRef.current
+              ? finalTextRef.current + " " + trimmed
+              : trimmed;
+            
+            // Update input in real-time with interim
+            setInputText(displayText);
           }
 
-          // Set new 3-second timer for auto-submit
-          const timer = setTimeout(() => {
-            const finalInput = updated.trim();
-            if (finalInput && !isProcessing) {
-              // Auto submit the voice input
-              setInputText(finalInput);
-              handleSubmit();
+          // For full voice attendance flow, implement 3-second auto-submit
+          if (activeFlow === "full_voice_attendance") {
+            const currentTime = Date.now();
+            setLastVoiceInputTime(currentTime);
+
+            // Clear existing timer
+            if (fullVoiceAutoSubmitTimer) {
+              clearTimeout(fullVoiceAutoSubmitTimer);
             }
-          }, 3000);
-          setFullVoiceAutoSubmitTimer(timer);
-        }
 
-        return updated;
+            // Set new 3-second timer for auto-submit
+            const currentText = isFinal ? finalTextRef.current : (finalTextRef.current + " " + trimmed);
+            const timer = setTimeout(() => {
+              const finalInput = currentText.trim();
+              if (finalInput && !isProcessing) {
+                // Auto submit the voice input
+                setInputText(finalInput);
+                handleSubmit();
+              }
+            }, 3000);
+            setFullVoiceAutoSubmitTimer(timer);
+          }
+        },
+        onError: (error: Error) => {
+          console.error("WebRTC error:", error);
+          setIsRecording(false);
+        },
+        onConnected: () => {
+          setIsRecording(true);
+        },
+        onDisconnected: () => {
+          setIsRecording(false);
+          console.log("WebRTC disconnected");
+        },
       });
-    };
-
-    socket.onerror = (err) => console.error("WebSocket error:", err);
-    socket.onclose = () => {
+    } catch (error) {
+      console.error("Failed to start WebRTC streaming:", error);
       setIsRecording(false);
-      console.log("WebSocket closed");
-    };
+    }
   };
 
   const stopStreaming = async () => {
-    processorRef.current?.disconnect();
-    processorRef.current = null;
-
-    sourceRef.current?.disconnect();
-    sourceRef.current = null;
-
-    audioContextRef.current?.close();
-    audioContextRef.current = null;
-
-    // Stop and release microphone stream
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
+    if (webrtcServiceRef.current) {
+      await webrtcServiceRef.current.disconnect();
+      webrtcServiceRef.current = null;
     }
 
-    if (socketRef.current) {
-      socketRef.current.close();
-      socketRef.current = null;
-    }
-
+    // Clear text tracking when stopping
+    lastInterimTextRef.current = "";
+    finalTextRef.current = "";
     setIsRecording(false);
     // Mark this request as voice-triggered for the duration of the
     // subsequent `handleSubmit()` call. This flag is intentionally
@@ -551,13 +529,18 @@ const AudioStreamerChatBot = ({
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
+      const exitMessage = `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`;
       setChatHistory((prev) => [
         ...prev,
-        {
-          type: "bot",
-          text: `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`,
-        },
+        { type: "bot", text: exitMessage },
       ]);
+      try {
+        if (isVoiceTriggeredRequestRef.current === true) {
+          void handlePlayTTS(-1, generateQueryTTSSummary(exitMessage));
+        }
+      } catch (ttsErr) {
+        console.error("Exit TTS playback failed:", ttsErr);
+      }
       setIsProcessing(false);
       setDetectedFlow(null);
       return;
@@ -846,13 +829,19 @@ const AudioStreamerChatBot = ({
 
     // If still no flow selected after classification, prompt user
     if (!userOptionSelected && targetFlow === "none") {
+      const promptText =
+        "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.";
       setChatHistory((prev) => [
         ...prev,
-        {
-          type: "bot",
-          text: "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.",
-        },
+        { type: "bot", text: promptText },
       ]);
+      try {
+        if (isVoiceTriggeredRequestRef.current === true) {
+          void handlePlayTTS(-1, generateQueryTTSSummary(promptText));
+        }
+      } catch (ttsErr) {
+        console.error("TTS playback failed:", ttsErr);
+      }
       setIsProcessing(false);
       return;
     }
@@ -885,7 +874,10 @@ const AudioStreamerChatBot = ({
           user_roles: roles,
           query: userMessage,
         });
+        let answerForTts = "";
         if (data.status === "success" && data.data) {
+          const answer = data.data?.answer ?? "";
+          answerForTts = answer;
           setChatHistory((prev) => [
             ...prev,
             {
@@ -897,24 +889,43 @@ const AudioStreamerChatBot = ({
             },
           ]);
         } else if (data.status === "error" && data.message) {
+          answerForTts = data.message;
           setChatHistory((prev) => [
             ...prev,
             { type: "bot", text: data.message },
           ]);
         } else {
+          answerForTts = "No response from AI.";
           setChatHistory((prev) => [
             ...prev,
             { type: "bot", text: "No response from AI." },
           ]);
         }
+        // TTS when user spoke (voice-triggered) so output is also in voice
+        try {
+          if (isVoiceTriggeredRequestRef.current === true) {
+            const speech = generateQueryTTSSummary(answerForTts);
+            void handlePlayTTS(-1, speech);
+          }
+        } catch (ttsErr) {
+          console.error("Query TTS playback failed:", ttsErr);
+        }
       } catch (err) {
+        const errorMessage = "Sorry, there was an error processing your query.";
         setChatHistory((prev) => [
           ...prev,
           {
             type: "bot",
-            text: "Sorry, there was an error processing your query.",
+            text: errorMessage,
           },
         ]);
+        try {
+          if (isVoiceTriggeredRequestRef.current === true) {
+            void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage));
+          }
+        } catch (ttsErr) {
+          console.error("Query TTS playback failed:", ttsErr);
+        }
       } finally {
         setIsProcessing(false);
       }
@@ -1717,6 +1728,14 @@ const AudioStreamerChatBot = ({
             },
           ]);
 
+          if (isVoiceTriggeredRequestRef.current === true) {
+            try {
+              void handlePlayTTS(-1, generateQueryTTSSummary(answer));
+            } catch (ttsErr) {
+              console.error("Assignment TTS playback failed:", ttsErr);
+            }
+          }
+
           // If assignment data is present, log it (you can add UI to display it)
           if (assignmentData) {
             console.log("Assignment data:", assignmentData);
@@ -1746,24 +1765,35 @@ const AudioStreamerChatBot = ({
             }, 1000);
           }
         } else {
+          const errMsg =
+            data.message ||
+            "Sorry, there was an error processing your assignment request.";
           setChatHistory((prev) => [
             ...prev,
-            {
-              type: "bot",
-              text:
-                data.message ||
-                "Sorry, there was an error processing your assignment request.",
-            },
+            { type: "bot", text: errMsg },
           ]);
+          if (isVoiceTriggeredRequestRef.current === true) {
+            try {
+              void handlePlayTTS(-1, generateQueryTTSSummary(errMsg));
+            } catch (ttsErr) {
+              console.error("Assignment TTS playback failed:", ttsErr);
+            }
+          }
         }
       } catch (err) {
+        const errorMessage =
+          "Sorry, there was an error processing your assignment request.";
         setChatHistory((prev) => [
           ...prev,
-          {
-            type: "bot",
-            text: "Sorry, there was an error processing your assignment request.",
-          },
+          { type: "bot", text: errorMessage },
         ]);
+        if (isVoiceTriggeredRequestRef.current === true) {
+          try {
+            void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage));
+          } catch (ttsErr) {
+            console.error("Assignment TTS playback failed:", ttsErr);
+          }
+        }
       } finally {
         setIsProcessing(false);
       }
@@ -2203,6 +2233,22 @@ const AudioStreamerChatBot = ({
     
     // Fallback to first 150 characters
     return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
+  };
+
+  // Helper for query-flow TTS: strip markdown and truncate for voice playback
+  const generateQueryTTSSummary = (answer: string): string => {
+    if (!answer || !answer.trim()) return "No response.";
+    const cleaned = answer
+      .replace(/\*\*/g, "")
+      .replace(/\*/g, "")
+      .replace(/`[^`]*`/g, "")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/📝|✅|❌|⚠️|•|🎯|📋|🔍|#/g, "")
+      .replace(/\n/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const max = 300;
+    return cleaned.length <= max ? cleaned : cleaned.substring(0, max).trim() + "...";
   };
 
   // TTS playback function
