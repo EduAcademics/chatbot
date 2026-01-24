@@ -76,16 +76,6 @@ const AudioStreamerChatBot = ({
   const voiceManager = useRef(VoiceModeManager.getInstance());
   const ttsHelper = useRef(TTSHelper.getInstance());
 
-  // Cleanup voice mode helper
-  const cleanupVoiceMode = () => {
-    if (isVoiceModeActive) {
-      console.log("🎤 Cleaning up voice mode");
-      voiceManager.current.deactivateVoiceMode();
-      setIsVoiceModeActive(false);
-      ttsHelper.current.stop();
-    }
-  };
-
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [inputText, setInputText] = useState("");
@@ -123,7 +113,7 @@ const AudioStreamerChatBot = ({
     [idx: number]: string;
   }>({});
   const [showCorrectionBox, setShowCorrectionBox] = useState<number | null>(
-    null
+    null,
   );
   const [activeFlow, setActiveFlow] = useState<FlowType>("none"); // <-- add
   const [sessionId, setSessionId] = useState<string | null>(null); // <-- add
@@ -141,14 +131,14 @@ const AudioStreamerChatBot = ({
 
   const [classInfo, setClassInfo] = useState<any>(null); // <-- add for class info
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(
-    null
+    null,
   ); // Track which message is being edited
   const [showClassInfoModal, setShowClassInfoModal] = useState(false); // <-- add for class info modal
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null); // <-- add for pending image
   const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
   const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
   const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>(
-    {}
+    {},
   ); // <-- add for reject reasons
   const [classSections, setClassSections] = useState<any[]>([]); // <-- add for course progress class sections
   const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
@@ -164,7 +154,7 @@ const AudioStreamerChatBot = ({
 
   const [autoRouting, setAutoRouting] = useState<boolean>(true);
   const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
-    "llm"
+    "llm",
   );
   const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
   const [_classificationConfidence, setClassificationConfidence] =
@@ -339,7 +329,7 @@ const AudioStreamerChatBot = ({
     };
   };
 
-  const stopStreaming = async () => {
+  const stopStreaming = async (submitAfterStop: boolean = true) => {
     processorRef.current?.disconnect();
     processorRef.current = null;
 
@@ -361,16 +351,19 @@ const AudioStreamerChatBot = ({
     }
 
     setIsRecording(false);
-    // Mark this request as voice-triggered for the duration of the
-    // subsequent `handleSubmit()` call. This flag is intentionally
-    // request-scoped and will be cleared immediately after submission
-    // completes to avoid any leakage to other flows.
-    isVoiceTriggeredRequestRef.current = true;
-    try {
-      await handleSubmit();
-    } finally {
-      // Reset immediately after the request finishes (success or error)
-      isVoiceTriggeredRequestRef.current = false;
+
+    if (submitAfterStop) {
+      // Mark this request as voice-triggered for the duration of the
+      // subsequent `handleSubmit()` call. This flag is intentionally
+      // request-scoped and will be cleared immediately after submission
+      // completes to avoid any leakage to other flows.
+      isVoiceTriggeredRequestRef.current = true;
+      try {
+        await handleSubmit();
+      } finally {
+        // Reset immediately after the request finishes (success or error)
+        isVoiceTriggeredRequestRef.current = false;
+      }
     }
   };
 
@@ -401,13 +394,13 @@ const AudioStreamerChatBot = ({
     try {
       const result = await aiAPI.uploadAssignmentFile(
         file,
-        sessionId || userId
+        sessionId || userId,
       );
       if (result.status === "success" && result.data?.file_uuid) {
         // Send message to assignment chat with file UUID
         // The backend will handle adding this to attachments
         console.log(
-          `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`
+          `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`,
         );
         return result;
       }
@@ -421,7 +414,7 @@ const AudioStreamerChatBot = ({
   // Upload attendance image through OCR processing
   const uploadAttendanceImage = async (
     file: File,
-    classInfo: { class_: string; section: string; date: string }
+    classInfo: { class_: string; section: string; date: string },
   ) => {
     try {
       const result = await aiAPI.processAttendanceImage({
@@ -485,7 +478,7 @@ const AudioStreamerChatBot = ({
    * Classify user query to determine appropriate flow
    */
   const classifyQuery = async (
-    message: string
+    message: string,
   ): Promise<{
     flow: string;
     confidence: number;
@@ -533,7 +526,7 @@ const AudioStreamerChatBot = ({
     userMessage = userMessage.replace(/^(\d+)\s*[.,]?$/i, "$1");
     userMessage = userMessage.replace(
       /^(approve|reject)[.,]?$/i,
-      (m, p1) => p1
+      (_match, p1) => p1,
     );
 
     console.log("🚀 handleSubmit START:", {
@@ -545,11 +538,8 @@ const AudioStreamerChatBot = ({
 
     setChatHistory((prev) => [...prev, { type: "user", text: userMessage }]);
     // Stop mic streaming after user message is sent
-    if (
-      voiceManager.current.isRecording &&
-      typeof stopStreaming === "function"
-    ) {
-      stopStreaming();
+    if (!isVoiceTriggeredRequestRef.current && isRecording) {
+      void stopStreaming(false);
       console.log("🎤 Mic auto-turned off after message");
     }
     setInputText("");
@@ -569,12 +559,25 @@ const AudioStreamerChatBot = ({
       activeFlow === "assignment"
         ? exitKeywordsBase.filter((k) => k !== "done")
         : exitKeywordsBase;
+    const normalizedForCommand = userMessage
+      .toLowerCase()
+      .trim()
+      .replace(/[.!?;,:'"\u0964\u0965]+$/g, "");
     const isExitCommand = exitKeywords.some(
-      (keyword) => userMessage.toLowerCase().trim() === keyword
+      (keyword) => normalizedForCommand === keyword,
     );
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
       console.log("🚪 Exit command detected, exiting flow:", activeFlow);
+
+      // Hard reset any voice-trigger state so TTS can't remain sticky
+      isVoiceTriggeredRequestRef.current = false;
+      voiceManager.current.deactivateVoiceMode();
+      voiceManager.current.setShouldAutoMic(false);
+      setIsVoiceModeActive(false);
+      ttsHelper.current.stop();
+      console.log("🎤 Voice mode deactivated on exit command");
+
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
@@ -631,7 +634,7 @@ const AudioStreamerChatBot = ({
       "display",
     ];
     const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
-      userMessage.toLowerCase().includes(keyword)
+      userMessage.toLowerCase().includes(keyword),
     );
 
     // Stay in active flow if user is responding (not starting new request)
@@ -697,14 +700,14 @@ const AudioStreamerChatBot = ({
         "sunday",
       ];
       const isSimpleResponse = simpleResponses.includes(
-        userMessage.toLowerCase().trim()
+        userMessage.toLowerCase().trim(),
       );
 
       if (isSimpleResponse && activeFlow !== "none" && activeFlow !== "query") {
         // Keep current flow for simple confirmation words
         console.log(
           "📍 Simple response detected, keeping current flow:",
-          activeFlow
+          activeFlow,
         );
         targetFlow = activeFlow;
       } else if (
@@ -716,7 +719,7 @@ const AudioStreamerChatBot = ({
         // Short message in an active flow (likely a response to a question) - stay in current flow
         console.log(
           "📍 Short response in active flow, staying in:",
-          activeFlow
+          activeFlow,
         );
         targetFlow = activeFlow;
       } else {
@@ -736,13 +739,13 @@ const AudioStreamerChatBot = ({
             tokens.includes("leave") || tokens.includes("leaves");
           const approvalTokens = ["approval", "approve", "approvals"];
           const hasApprovalToken = approvalTokens.some((t) =>
-            tokens.includes(t)
+            tokens.includes(t),
           );
 
           if (hasLeaveToken && hasApprovalToken) {
             console.log(
               "📍 Lexical override: forcing leave_approval based on tokens",
-              { tokens }
+              { tokens },
             );
             // Mark classificationResult so downstream logic treats this as a
             // detected/new flow (same shape as classifier result). We set a
@@ -830,6 +833,8 @@ const AudioStreamerChatBot = ({
         setActiveFlow("leave");
         // Check if this was triggered by voice input
         const isVoiceTriggered = isVoiceTriggeredRequestRef.current;
+        // Consume the trigger immediately to prevent leakage into later typed requests
+        isVoiceTriggeredRequestRef.current = false;
         if (isVoiceTriggered) {
           // Activate voice mode
           voiceManager.current.activateVoiceMode();
@@ -961,7 +966,7 @@ const AudioStreamerChatBot = ({
               let classMatch = answer.match(/class[:\s]*(\w+)/i);
               let sectionMatch = answer.match(/section[:\s]*(\w+)/i);
               let dateMatch = answer.match(
-                /(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i
+                /(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i,
               );
 
               // If no matches from answer, try parsing from user message directly
@@ -971,7 +976,7 @@ const AudioStreamerChatBot = ({
                 // Enhanced class pattern matching - handle various formats
                 classMatch =
                   userMessage.match(
-                    /(?:class|grade|standard|nursery|kg|pre-k|prek|lkg|ukg)[:\s]*(\w+)/i
+                    /(?:class|grade|standard|nursery|kg|pre-k|prek|lkg|ukg)[:\s]*(\w+)/i,
                   ) ||
                   userMessage.match(/(\w+)\s+(?:class|grade|standard)/i) ||
                   userMessage.match(/(nursery|kg|pre-k|prek|lkg|ukg)/i) ||
@@ -992,13 +997,13 @@ const AudioStreamerChatBot = ({
                   userMessage.match(/(\d{4}-\d{2}-\d{2})/i) ||
                   userMessage.match(/(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
                   userMessage.match(
-                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i
+                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i,
                   ) ||
                   userMessage.match(
-                    /(\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})/i
+                    /(\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})/i,
                   ) ||
                   userMessage.match(
-                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i
+                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i,
                   );
               }
 
@@ -1101,7 +1106,7 @@ const AudioStreamerChatBot = ({
             ) {
               const lines = answer.split("\n");
               const tableStartIndex = lines.findIndex((line: string) =>
-                line.includes("| Student Name |")
+                line.includes("| Student Name |"),
               );
               if (tableStartIndex !== -1) {
                 const tableLines = lines.slice(tableStartIndex + 2);
@@ -1154,7 +1159,7 @@ const AudioStreamerChatBot = ({
                   parsedAttendanceData: parsedAttendanceData,
                   parsedClassInfo: parsedClassInfo,
                   dataLength: parsedAttendanceData.length,
-                }
+                },
               );
               setAttendanceData(parsedAttendanceData);
               setClassInfo(parsedClassInfo);
@@ -1166,16 +1171,16 @@ const AudioStreamerChatBot = ({
                   label: "Edit Attendance",
                   action: () => {
                     console.log(
-                      "Edit Attendance clicked for text-based attendance"
+                      "Edit Attendance clicked for text-based attendance",
                     );
                     console.log(
                       "Setting attendance data:",
-                      parsedAttendanceData
+                      parsedAttendanceData,
                     );
                     console.log("Setting class info:", parsedClassInfo);
                     console.log(
                       "Setting editing message index to:",
-                      chatHistory.length
+                      chatHistory.length,
                     );
 
                     // Set the global state for editing
@@ -1207,7 +1212,7 @@ const AudioStreamerChatBot = ({
                         (lastMessage as any).isBeingEdited = true;
                         console.log(
                           "Set isBeingEdited flag to true for message:",
-                          updatedHistory.length - 1
+                          updatedHistory.length - 1,
                         );
                       }
                       return updatedHistory;
@@ -1227,11 +1232,11 @@ const AudioStreamerChatBot = ({
                   label: "Approve",
                   action: () => {
                     console.log(
-                      "🎯 Approve button clicked for text-based attendance"
+                      "🎯 Approve button clicked for text-based attendance",
                     );
                     console.log(
                       "🎯 Current chatHistory.length:",
-                      chatHistory.length
+                      chatHistory.length,
                     );
                     console.log("🎯 Current global state:", {
                       attendanceData: attendanceData,
@@ -1458,7 +1463,7 @@ const AudioStreamerChatBot = ({
           console.log("🔊 INSIDE voice mode block - will speak");
           console.log(
             "🔊 Checking if should speak. Answer:",
-            answer?.substring(0, 100)
+            answer?.substring(0, 100),
           );
           const voiceMessage = getVoiceMessageForResponse(answer || "");
           console.log("🔊 Voice message to speak:", voiceMessage);
@@ -1495,17 +1500,18 @@ const AudioStreamerChatBot = ({
 
                   const isSuccess =
                     (answer || "").includes("✅") &&
-                    (answer || "").includes("successfully");
+                    ((answer || "").toLowerCase().includes("submitted") ||
+                      (answer || "").toLowerCase().includes("request id"));
                   if (isSuccess) {
                     voiceManager.current.deactivateVoiceMode();
                     setIsVoiceModeActive(false);
                     console.log(
-                      "🎤 Voice mode deactivated - leave submitted successfully"
+                      "🎤 Voice mode deactivated - leave submitted successfully",
                     );
                   } else {
                     voiceManager.current.setShouldAutoMic(true);
                     console.log(
-                      "🎤 TTS complete, mic should auto-enable for next input"
+                      "🎤 TTS complete, mic should auto-enable for next input",
                     );
                   }
                 };
@@ -1534,14 +1540,18 @@ const AudioStreamerChatBot = ({
           answer.includes("failed")
         ) {
           console.log(
-            "⚠️ Leave submission error detected, staying in flow for retry"
+            "⚠️ Leave submission error detected, staying in flow for retry",
           );
           // Keep the activeFlow as "leave" so the next message stays in leave flow
           setActiveFlow("leave");
         }
 
         // If submission succeeded (success message), exit the flow
-        if (answer.includes("✅") && answer.includes("successfully")) {
+        if (
+          answer.includes("✅") &&
+          (answer.toLowerCase().includes("submitted") ||
+            answer.toLowerCase().includes("request id"))
+        ) {
           console.log("✅ Leave submitted successfully, exiting flow");
           setTimeout(() => {
             setActiveFlow("none");
@@ -1564,9 +1574,9 @@ const AudioStreamerChatBot = ({
                 // Keep voice mode active but enable mic for retry
                 voiceManager.current.setShouldAutoMic(true);
                 console.log(
-                  "🎤 Error spoken, mic should auto-enable for retry"
+                  "🎤 Error spoken, mic should auto-enable for retry",
                 );
-              }
+              },
             );
           }, 500);
         }
@@ -1695,6 +1705,8 @@ const AudioStreamerChatBot = ({
                 // Double-check flow
                 targetFlow === "course_progress"
               ) {
+                // Consume the trigger so it can't leak into later typed requests
+                isVoiceTriggeredRequestRef.current = false;
                 courseProgressVoiceInitiatedRef.current = true;
                 const speech = `Found ${options.length} class-sections. Please select a class and section from the list above to view course progress.`;
                 void handlePlayTTS(-1, speech);
@@ -1841,6 +1853,8 @@ const AudioStreamerChatBot = ({
                 isVoiceTriggeredRequestRef.current === true &&
                 targetFlow === "leave_approval"
               ) {
+                // Consume the trigger so it can't leak into later typed requests
+                isVoiceTriggeredRequestRef.current = false;
                 const count = (response.data.leaveRequests || []).length || 0;
                 let speech = "";
                 if (count > 0) {
@@ -1928,7 +1942,7 @@ const AudioStreamerChatBot = ({
         prevProps.answer === nextProps.answer &&
         prevProps.messageIdx === nextProps.messageIdx
       );
-    }
+    },
   );
 
   // TTS playback function
@@ -1971,7 +1985,7 @@ const AudioStreamerChatBot = ({
   const handleSendFeedback = async (
     idx: number,
     type: "Approved" | "Rejected",
-    comment?: string
+    comment?: string,
   ) => {
     const feedbackCommentValue = comment ?? "";
     try {
@@ -1984,8 +1998,8 @@ const AudioStreamerChatBot = ({
         prev.map((msg, i) =>
           i === idx && msg.type === "bot"
             ? { ...msg, feedback: type, feedbackMessage: data.message }
-            : msg
-        )
+            : msg,
+        ),
       );
       setFeedbackComment((prev) => ({ ...prev, [idx]: "" }));
       setShowCorrectionBox(null);
@@ -1994,8 +2008,8 @@ const AudioStreamerChatBot = ({
         prev.map((msg, i) =>
           i === idx && msg.type === "bot"
             ? { ...msg, feedbackMessage: "Failed to send feedback." }
-            : msg
-        )
+            : msg,
+        ),
       );
     }
   };
@@ -2005,7 +2019,7 @@ const AudioStreamerChatBot = ({
   const handleAttendanceDataChange = (
     index: number,
     field: string,
-    value: string
+    value: string,
   ) => {
     const updatedData = [...attendanceData];
     updatedData[index] = { ...updatedData[index], [field]: value };
@@ -2052,7 +2066,7 @@ const AudioStreamerChatBot = ({
 
         // Remove the processing message
         setChatHistory((prev) =>
-          prev.filter((msg) => !(msg as any).isProcessing)
+          prev.filter((msg) => !(msg as any).isProcessing),
         );
 
         if (
@@ -2085,12 +2099,12 @@ const AudioStreamerChatBot = ({
                 console.log("Edit Attendance clicked for OCR-based attendance");
                 console.log(
                   "Setting attendance data:",
-                  result.data.attendance_summary
+                  result.data.attendance_summary,
                 );
                 console.log("Setting class info:", classInfo);
                 console.log(
                   "Setting editing message index to:",
-                  chatHistory.length
+                  chatHistory.length,
                 );
 
                 // Set the global state for editing
@@ -2107,7 +2121,7 @@ const AudioStreamerChatBot = ({
                     (lastMessage as any).isBeingEdited = true;
                     console.log(
                       "Set isBeingEdited flag to true for message:",
-                      updatedHistory.length - 1
+                      updatedHistory.length - 1,
                     );
                   }
                   return updatedHistory;
@@ -2150,7 +2164,7 @@ const AudioStreamerChatBot = ({
         setChatHistory((prev) => {
           // Remove processing message and add error message
           const filteredHistory = prev.filter(
-            (msg) => !(msg as any).isProcessing
+            (msg) => !(msg as any).isProcessing,
           );
           return [
             ...filteredHistory,
@@ -2200,7 +2214,7 @@ const AudioStreamerChatBot = ({
             action: () => {
               // Trigger file input click
               const fileInput = document.querySelector(
-                'input[type="file"]'
+                'input[type="file"]',
               ) as HTMLInputElement;
               if (fileInput) {
                 fileInput.click();
@@ -2260,7 +2274,7 @@ const AudioStreamerChatBot = ({
 
     // Priority 2: Try to find the most recent message with attendance data
     console.log(
-      "🔍 Priority 2: Searching for attendance data in chat history..."
+      "🔍 Priority 2: Searching for attendance data in chat history...",
     );
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       const msg = chatHistory[i];
@@ -2280,7 +2294,7 @@ const AudioStreamerChatBot = ({
       ) {
         console.log(
           `✅ Found attendance data in message ${i}:`,
-          msg.attendance_summary
+          msg.attendance_summary,
         );
         return {
           attendanceData: msg.attendance_summary,
@@ -2301,13 +2315,13 @@ const AudioStreamerChatBot = ({
       ) {
         console.log(
           `Found message with buttons at index ${i}:`,
-          (msg as any).buttons
+          (msg as any).buttons,
         );
         // Try to get data from this message or use global state
         if (msg.attendance_summary && msg.attendance_summary.length > 0) {
           console.log(
             `✅ Using attendance data from button message ${i}:`,
-            msg.attendance_summary
+            msg.attendance_summary,
           );
           return {
             attendanceData: msg.attendance_summary,
@@ -2317,7 +2331,7 @@ const AudioStreamerChatBot = ({
         } else if (attendanceData.length > 0) {
           console.log(
             `✅ Using global state for button message ${i}:`,
-            attendanceData
+            attendanceData,
           );
           return {
             attendanceData: attendanceData,
@@ -2338,7 +2352,7 @@ const AudioStreamerChatBot = ({
           attendanceSummaryLength:
             currentMessage?.attendance_summary?.length || 0,
           hasClassInfo: !!currentMessage?.class_info,
-        }
+        },
       );
 
       if (
@@ -2347,7 +2361,7 @@ const AudioStreamerChatBot = ({
       ) {
         console.log(
           `✅ Using provided message index ${messageIndex}:`,
-          currentMessage.attendance_summary
+          currentMessage.attendance_summary,
         );
         return {
           attendanceData: currentMessage.attendance_summary,
@@ -2370,7 +2384,7 @@ const AudioStreamerChatBot = ({
     // Priority 5: Last resort - try to get data from session storage
     try {
       const sessionAttendanceData = sessionStorage.getItem(
-        "pendingAttendanceData"
+        "pendingAttendanceData",
       );
       const sessionClassInfo = sessionStorage.getItem("pendingClassInfo");
 
@@ -2402,11 +2416,11 @@ const AudioStreamerChatBot = ({
   // Unified attendance approval handler
   const handleUnifiedAttendanceApproval = async (
     messageIndex?: number,
-    attendanceType: "text" | "image" | "voice" = "text"
+    attendanceType: "text" | "image" | "voice" = "text",
   ) => {
     console.log(
       `🚀 ${attendanceType.toUpperCase()} Attendance Approval clicked for message:`,
-      messageIndex
+      messageIndex,
     );
     console.log(`🚀 Current global state:`, {
       attendanceData: attendanceData,
@@ -2433,7 +2447,7 @@ const AudioStreamerChatBot = ({
 
       if (!dataToSave) {
         console.error(
-          `❌ No attendance data found for ${attendanceType} approval`
+          `❌ No attendance data found for ${attendanceType} approval`,
         );
         setChatHistory((prev) => [
           ...prev,
@@ -2455,7 +2469,7 @@ const AudioStreamerChatBot = ({
       });
 
       console.log(
-        `🎯 Date being sent to backend: '${dataToSave.classInfo?.date}'`
+        `🎯 Date being sent to backend: '${dataToSave.classInfo?.date}'`,
       );
 
       // Send approval message to backend with the current data
@@ -2470,7 +2484,7 @@ const AudioStreamerChatBot = ({
         // Remove the loading message and show success message
         setChatHistory((prev) => {
           const filtered = prev.filter(
-            (msg) => !(msg.text && msg.text.includes("⏳ Processing"))
+            (msg) => !(msg.text && msg.text.includes("⏳ Processing")),
           );
           return [
             ...filtered,
@@ -2509,7 +2523,7 @@ const AudioStreamerChatBot = ({
       console.error(`Error saving ${attendanceType} attendance:`, err);
       setChatHistory((prev) => {
         const filtered = prev.filter(
-          (msg) => !(msg.text && msg.text.includes("⏳ Processing"))
+          (msg) => !(msg.text && msg.text.includes("⏳ Processing")),
         );
         return [
           ...filtered,
@@ -2563,7 +2577,7 @@ const AudioStreamerChatBot = ({
             action: () => {
               // Trigger file input click
               const fileInput = document.querySelector(
-                'input[type="file"]'
+                'input[type="file"]',
               ) as HTMLInputElement;
               if (fileInput) {
                 fileInput.click();
@@ -2626,7 +2640,7 @@ const AudioStreamerChatBot = ({
             label: "Upload Image",
             action: () => {
               const fileInput = document.querySelector(
-                'input[type="file"]'
+                'input[type="file"]',
               ) as HTMLInputElement;
               if (fileInput) {
                 fileInput.click();
@@ -2651,7 +2665,7 @@ const AudioStreamerChatBot = ({
       console.log("Current message:", currentMessage);
       console.log(
         "Message attendance_summary:",
-        currentMessage?.attendance_summary
+        currentMessage?.attendance_summary,
       );
 
       // Use global state if we're editing, otherwise use message data
@@ -2681,7 +2695,7 @@ const AudioStreamerChatBot = ({
                 answer: `Attendance Summary Updated:\n\n| Student Name | Attendance Status |\n|--------------|------------------|\n${currentAttendanceData
                   .map(
                     (item) =>
-                      `| ${item.student_name} | ${item.attendance_status} |`
+                      `| ${item.student_name} | ${item.attendance_status} |`,
                   )
                   .join("\n")}\n\nClass: ${currentClassInfo?.class_} ${
                   currentClassInfo?.section
@@ -2696,11 +2710,11 @@ const AudioStreamerChatBot = ({
         // Store in session storage for persistence
         sessionStorage.setItem(
           "pendingAttendanceData",
-          JSON.stringify(currentAttendanceData)
+          JSON.stringify(currentAttendanceData),
         );
         sessionStorage.setItem(
           "pendingClassInfo",
-          JSON.stringify(currentClassInfo)
+          JSON.stringify(currentClassInfo),
         );
 
         // Exit edit mode
@@ -2716,7 +2730,7 @@ const AudioStreamerChatBot = ({
             (updatedHistory[messageIndex] as any).isBeingEdited = false;
             console.log(
               "Cleared isBeingEdited flag for message:",
-              messageIndex
+              messageIndex,
             );
           }
           return updatedHistory;
@@ -2781,7 +2795,7 @@ const AudioStreamerChatBot = ({
                     }
                     handleUnifiedAttendanceApproval(
                       messageIndex,
-                      attendanceType
+                      attendanceType,
                     );
                   } else {
                     // Fallback to text-based approval
@@ -4414,7 +4428,7 @@ const AudioStreamerChatBot = ({
                               } catch (err: any) {
                                 console.error(
                                   "Error fetching leave approval requests:",
-                                  err
+                                  err,
                                 );
                                 const errorMessage =
                                   err.message ||
@@ -4503,7 +4517,7 @@ const AudioStreamerChatBot = ({
                                   getErpContext();
                                 console.log(
                                   "Fetching class sections with token:",
-                                  authToken ? "present" : "missing"
+                                  authToken ? "present" : "missing",
                                 );
                                 const response =
                                   await courseProgressAPI.fetchClassSections({
@@ -4516,7 +4530,7 @@ const AudioStreamerChatBot = ({
 
                                 console.log(
                                   "Class sections API response:",
-                                  response
+                                  response,
                                 );
 
                                 if (
@@ -4527,7 +4541,7 @@ const AudioStreamerChatBot = ({
                                   const options = response.data.options || [];
                                   console.log(
                                     "Parsed class sections:",
-                                    options
+                                    options,
                                   );
                                   setClassSections(options);
                                   setChatHistory((prev) => [
@@ -4541,7 +4555,7 @@ const AudioStreamerChatBot = ({
                                 } else {
                                   console.warn(
                                     "Unexpected response structure:",
-                                    response
+                                    response,
                                   );
                                   setChatHistory((prev) => [
                                     ...prev,
@@ -4557,7 +4571,7 @@ const AudioStreamerChatBot = ({
                               } catch (err: any) {
                                 console.error(
                                   "Error fetching class sections:",
-                                  err
+                                  err,
                                 );
                                 setChatHistory((prev) => [
                                   ...prev,
@@ -5009,7 +5023,7 @@ const AudioStreamerChatBot = ({
                                                 sectionName: sectionName,
                                               };
                                               setSelectedClassSection(
-                                                newSelection
+                                                newSelection,
                                               );
 
                                               // Fetch course progress
@@ -5024,7 +5038,7 @@ const AudioStreamerChatBot = ({
                                                     sectionId,
                                                     className,
                                                     sectionName,
-                                                  }
+                                                  },
                                                 );
                                                 const {
                                                   academic_session,
@@ -5039,12 +5053,12 @@ const AudioStreamerChatBot = ({
                                                         authToken || undefined,
                                                       academic_session,
                                                       branch_token,
-                                                    }
+                                                    },
                                                   );
 
                                                 console.log(
                                                   "Course progress API response:",
-                                                  progressResponse
+                                                  progressResponse,
                                                 );
 
                                                 if (
@@ -5063,7 +5077,7 @@ const AudioStreamerChatBot = ({
                                                       .progress ||
                                                     progressResponse.data;
                                                   setCourseProgressData(
-                                                    progressData
+                                                    progressData,
                                                   );
 
                                                   // Format a nice summary message
@@ -5115,21 +5129,20 @@ const AudioStreamerChatBot = ({
                                                       }
                                                       void handlePlayTTS(
                                                         -1,
-                                                        speech
+                                                        speech,
                                                       );
-                                                      courseProgressVoiceInitiatedRef.current =
-                                                        false;
+                                                      courseProgressVoiceInitiatedRef.current = false;
                                                     }
                                                   } catch (ttsErr) {
                                                     console.error(
                                                       "TTS playback failed:",
-                                                      ttsErr
+                                                      ttsErr,
                                                     );
                                                   }
                                                 } else {
                                                   console.warn(
                                                     "Unexpected progress response:",
-                                                    progressResponse
+                                                    progressResponse,
                                                   );
                                                   setChatHistory((prev) => [
                                                     ...prev,
@@ -5144,7 +5157,7 @@ const AudioStreamerChatBot = ({
                                               } catch (err: any) {
                                                 console.error(
                                                   "Error fetching course progress:",
-                                                  err
+                                                  err,
                                                 );
                                                 setChatHistory((prev) => [
                                                   ...prev,
@@ -5178,7 +5191,7 @@ const AudioStreamerChatBot = ({
                                             </div>
                                           </div>
                                         );
-                                      }
+                                      },
                                     )}
                                   </div>
                                 </div>
@@ -5234,7 +5247,7 @@ const AudioStreamerChatBot = ({
 
                                     // Determine progress color
                                     const getProgressColor = (
-                                      progress: number
+                                      progress: number,
                                     ) => {
                                       if (progress >= 75) return "bg-green-500";
                                       if (progress >= 50)
@@ -5245,7 +5258,7 @@ const AudioStreamerChatBot = ({
                                     };
 
                                     const getProgressBgColor = (
-                                      progress: number
+                                      progress: number,
                                     ) => {
                                       if (progress >= 75) return "bg-green-100";
                                       if (progress >= 50)
@@ -5271,10 +5284,10 @@ const AudioStreamerChatBot = ({
                                                 avgProgress >= 75
                                                   ? "text-green-700 bg-green-100"
                                                   : avgProgress >= 50
-                                                  ? "text-yellow-700 bg-yellow-100"
-                                                  : avgProgress >= 25
-                                                  ? "text-orange-700 bg-orange-100"
-                                                  : "text-red-700 bg-red-100"
+                                                    ? "text-yellow-700 bg-yellow-100"
+                                                    : avgProgress >= 25
+                                                      ? "text-orange-700 bg-orange-100"
+                                                      : "text-red-700 bg-red-100"
                                               }`}
                                             >
                                               {avgProgress}%
@@ -5283,17 +5296,17 @@ const AudioStreamerChatBot = ({
                                           {/* Subject Progress Bar */}
                                           <div
                                             className={`w-full h-3 rounded-full overflow-hidden ${getProgressBgColor(
-                                              avgProgress
+                                              avgProgress,
                                             )}`}
                                           >
                                             <div
                                               className={`h-full ${getProgressColor(
-                                                avgProgress
+                                                avgProgress,
                                               )} transition-all duration-500 ease-out`}
                                               style={{
                                                 width: `${Math.min(
                                                   avgProgress,
-                                                  100
+                                                  100,
                                                 )}%`,
                                               }}
                                             />
@@ -5309,7 +5322,7 @@ const AudioStreamerChatBot = ({
                                             {chapters.map(
                                               (
                                                 chapter: any,
-                                                chapterIdx: number
+                                                chapterIdx: number,
                                               ) => {
                                                 const chapterName =
                                                   chapter.name ||
@@ -5333,12 +5346,12 @@ const AudioStreamerChatBot = ({
                                                           chapterProgress >= 75
                                                             ? "text-green-700 bg-green-100"
                                                             : chapterProgress >=
-                                                              50
-                                                            ? "text-yellow-700 bg-yellow-100"
-                                                            : chapterProgress >=
-                                                              25
-                                                            ? "text-orange-700 bg-orange-100"
-                                                            : "text-red-700 bg-red-100"
+                                                                50
+                                                              ? "text-yellow-700 bg-yellow-100"
+                                                              : chapterProgress >=
+                                                                  25
+                                                                ? "text-orange-700 bg-orange-100"
+                                                                : "text-red-700 bg-red-100"
                                                         }`}
                                                       >
                                                         {chapterProgress}%
@@ -5347,24 +5360,24 @@ const AudioStreamerChatBot = ({
                                                     {/* Chapter Progress Bar */}
                                                     <div
                                                       className={`w-full h-2 rounded-full overflow-hidden ${getProgressBgColor(
-                                                        chapterProgress
+                                                        chapterProgress,
                                                       )}`}
                                                     >
                                                       <div
                                                         className={`h-full ${getProgressColor(
-                                                          chapterProgress
+                                                          chapterProgress,
                                                         )} transition-all duration-500 ease-out`}
                                                         style={{
                                                           width: `${Math.min(
                                                             chapterProgress,
-                                                            100
+                                                            100,
                                                           )}%`,
                                                         }}
                                                       />
                                                     </div>
                                                   </div>
                                                 );
-                                              }
+                                              },
                                             )}
                                           </div>
                                         ) : (
@@ -5374,7 +5387,7 @@ const AudioStreamerChatBot = ({
                                         )}
                                       </div>
                                     );
-                                  }
+                                  },
                                 );
                               })()}
                             </div>
@@ -5434,10 +5447,10 @@ const AudioStreamerChatBot = ({
                                             {leaveApprovalRequests.map(
                                               (request, reqIdx) => {
                                                 const startDate = new Date(
-                                                  request.start_date
+                                                  request.start_date,
                                                 );
                                                 const endDate = new Date(
-                                                  request.end_date
+                                                  request.end_date,
                                                 );
                                                 const startDateStr =
                                                   startDate.toLocaleDateString(
@@ -5446,7 +5459,7 @@ const AudioStreamerChatBot = ({
                                                       month: "short",
                                                       day: "numeric",
                                                       year: "numeric",
-                                                    }
+                                                    },
                                                   );
                                                 const endDateStr =
                                                   endDate.toLocaleDateString(
@@ -5455,7 +5468,7 @@ const AudioStreamerChatBot = ({
                                                       month: "short",
                                                       day: "numeric",
                                                       year: "numeric",
-                                                    }
+                                                    },
                                                   );
                                                 const isSingleDay =
                                                   startDateStr === endDateStr;
@@ -5463,7 +5476,7 @@ const AudioStreamerChatBot = ({
                                                   Math.ceil(
                                                     (endDate.getTime() -
                                                       startDate.getTime()) /
-                                                      (1000 * 60 * 60 * 24)
+                                                      (1000 * 60 * 60 * 24),
                                                   ) + 1;
 
                                                 const employeeName =
@@ -5592,7 +5605,7 @@ const AudioStreamerChatBot = ({
                                                             try {
                                                               const authToken =
                                                                 localStorage.getItem(
-                                                                  "token"
+                                                                  "token",
                                                                 );
                                                               const {
                                                                 academic_session,
@@ -5608,15 +5621,15 @@ const AudioStreamerChatBot = ({
                                                                     undefined,
                                                                   academic_session,
                                                                   branch_token,
-                                                                }
+                                                                },
                                                               );
                                                               setLeaveApprovalRequests(
                                                                 (prev) =>
                                                                   prev.filter(
                                                                     (r) =>
                                                                       r.uuid !==
-                                                                      request.uuid
-                                                                  )
+                                                                      request.uuid,
+                                                                  ),
                                                               );
                                                               setChatHistory(
                                                                 (prev) => [
@@ -5625,7 +5638,7 @@ const AudioStreamerChatBot = ({
                                                                     type: "bot",
                                                                     text: `✅ Leave request for **${employeeName}** has been approved successfully!`,
                                                                   },
-                                                                ]
+                                                                ],
                                                               );
                                                             } catch (err: any) {
                                                               setChatHistory(
@@ -5638,7 +5651,7 @@ const AudioStreamerChatBot = ({
                                                                       "Unknown error"
                                                                     }`,
                                                                   },
-                                                                ]
+                                                                ],
                                                               );
                                                             }
                                                           }}
@@ -5667,7 +5680,7 @@ const AudioStreamerChatBot = ({
                                                                   [request.uuid]:
                                                                     e.target
                                                                       .value,
-                                                                })
+                                                                }),
                                                               )
                                                             }
                                                             className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200 transition-all"
@@ -5677,7 +5690,7 @@ const AudioStreamerChatBot = ({
                                                               try {
                                                                 const authToken =
                                                                   localStorage.getItem(
-                                                                    "token"
+                                                                    "token",
                                                                   );
                                                                 const reason =
                                                                   rejectReason[
@@ -5700,15 +5713,15 @@ const AudioStreamerChatBot = ({
                                                                       undefined,
                                                                     academic_session,
                                                                     branch_token,
-                                                                  }
+                                                                  },
                                                                 );
                                                                 setLeaveApprovalRequests(
                                                                   (prev) =>
                                                                     prev.filter(
                                                                       (r) =>
                                                                         r.uuid !==
-                                                                        request.uuid
-                                                                    )
+                                                                        request.uuid,
+                                                                    ),
                                                                 );
                                                                 setRejectReason(
                                                                   (prev) => {
@@ -5721,7 +5734,7 @@ const AudioStreamerChatBot = ({
                                                                         .uuid
                                                                     ];
                                                                     return newReasons;
-                                                                  }
+                                                                  },
                                                                 );
                                                                 setChatHistory(
                                                                   (prev) => [
@@ -5730,7 +5743,7 @@ const AudioStreamerChatBot = ({
                                                                       type: "bot",
                                                                       text: `❌ Leave request for **${employeeName}** has been rejected. Reason: ${reason}`,
                                                                     },
-                                                                  ]
+                                                                  ],
                                                                 );
                                                               } catch (err: any) {
                                                                 setChatHistory(
@@ -5743,7 +5756,7 @@ const AudioStreamerChatBot = ({
                                                                         "Unknown error"
                                                                       }`,
                                                                     },
-                                                                  ]
+                                                                  ],
                                                                 );
                                                               }
                                                             }}
@@ -5759,7 +5772,7 @@ const AudioStreamerChatBot = ({
                                                     </div>
                                                   </div>
                                                 );
-                                              }
+                                              },
                                             )}
                                           </div>
                                         ) : (
@@ -5795,7 +5808,7 @@ const AudioStreamerChatBot = ({
                                           msg.attendance_summary,
                                         messageType: msg.type,
                                         hasButtons: !!(msg as any).buttons,
-                                      }
+                                      },
                                     );
                                     return (
                                       msg.attendance_summary &&
@@ -5806,46 +5819,46 @@ const AudioStreamerChatBot = ({
                                       console.log(
                                         `Rendering table for message ${idx}, editingMessageIndex: ${editingMessageIndex}, isEditing: ${
                                           editingMessageIndex === idx
-                                        }`
+                                        }`,
                                       );
                                       console.log(
                                         `Message ${idx} attendance_summary length:`,
-                                        msg.attendance_summary?.length || 0
+                                        msg.attendance_summary?.length || 0,
                                       );
                                       console.log(
                                         `Global attendanceData length:`,
-                                        attendanceData.length
+                                        attendanceData.length,
                                       );
                                       console.log(`Message type:`, msg.type);
                                       console.log(
                                         `Message has attendance_summary:`,
-                                        !!msg.attendance_summary
+                                        !!msg.attendance_summary,
                                       );
 
                                       // Add a simple test to see if the edit mode is detected
                                       if (editingMessageIndex === idx) {
                                         console.log(
-                                          `✅ EDIT MODE DETECTED for message ${idx}!`
+                                          `✅ EDIT MODE DETECTED for message ${idx}!`,
                                         );
                                         console.log(
-                                          `✅ Table should be editable now!`
+                                          `✅ Table should be editable now!`,
                                         );
                                         console.log(
-                                          `✅ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`
+                                          `✅ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
                                         );
                                         console.log(
                                           `✅ Global attendanceData:`,
-                                          attendanceData
+                                          attendanceData,
                                         );
                                       } else {
                                         console.log(
-                                          `❌ NOT in edit mode for message ${idx}. Expected: ${editingMessageIndex}, Got: ${idx}`
+                                          `❌ NOT in edit mode for message ${idx}. Expected: ${editingMessageIndex}, Got: ${idx}`,
                                         );
                                         console.log(
-                                          `❌ Table will NOT be editable`
+                                          `❌ Table will NOT be editable`,
                                         );
                                         console.log(
-                                          `❌ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`
+                                          `❌ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
                                         );
                                       }
 
@@ -5885,7 +5898,7 @@ const AudioStreamerChatBot = ({
                                                   onClick={() => {
                                                     // Cancel editing - exit edit mode without saving
                                                     setEditingMessageIndex(
-                                                      null
+                                                      null,
                                                     );
                                                     setChatHistory((prev) => {
                                                       const updatedHistory = [
@@ -5951,7 +5964,7 @@ const AudioStreamerChatBot = ({
                                                     dataToUse.filter(
                                                       (item) =>
                                                         item.attendance_status ===
-                                                        "Present"
+                                                        "Present",
                                                     ).length
                                                   }
                                                 </div>
@@ -5961,7 +5974,7 @@ const AudioStreamerChatBot = ({
                                                     dataToUse.filter(
                                                       (item) =>
                                                         item.attendance_status ===
-                                                        "Absent"
+                                                        "Absent",
                                                     ).length
                                                   }
                                                 </div>
@@ -6009,7 +6022,7 @@ const AudioStreamerChatBot = ({
                                                     msgAttendanceSummary:
                                                       msg.attendance_summary,
                                                     usingGlobalState: isEditing,
-                                                  }
+                                                  },
                                                 );
 
                                                 // Show empty state if no data
@@ -6049,7 +6062,7 @@ const AudioStreamerChatBot = ({
                                                             `Student name field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, idx=${idx}, isBeingEdited=${
                                                               (msg as any)
                                                                 .isBeingEdited
-                                                            }`
+                                                            }`,
                                                           );
                                                           console.log(
                                                             `Student name field - isEditing check: ${editingMessageIndex} === ${idx} = ${
@@ -6058,7 +6071,7 @@ const AudioStreamerChatBot = ({
                                                             } OR isBeingEdited=${
                                                               (msg as any)
                                                                 .isBeingEdited
-                                                            }`
+                                                            }`,
                                                           );
                                                           return isEditing ? (
                                                             <input
@@ -6070,7 +6083,8 @@ const AudioStreamerChatBot = ({
                                                                 handleAttendanceDataChange(
                                                                   index,
                                                                   "student_name",
-                                                                  e.target.value
+                                                                  e.target
+                                                                    .value,
                                                                 )
                                                               }
                                                               className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -6095,7 +6109,7 @@ const AudioStreamerChatBot = ({
                                                             `Attendance status field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, isBeingEdited=${
                                                               (msg as any)
                                                                 .isBeingEdited
-                                                            }`
+                                                            }`,
                                                           );
                                                           return isEditing ? (
                                                             <select
@@ -6106,7 +6120,8 @@ const AudioStreamerChatBot = ({
                                                                 handleAttendanceDataChange(
                                                                   index,
                                                                   "attendance_status",
-                                                                  e.target.value
+                                                                  e.target
+                                                                    .value,
                                                                 )
                                                               }
                                                               className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -6125,9 +6140,9 @@ const AudioStreamerChatBot = ({
                                                                 "Present"
                                                                   ? "text-green-500"
                                                                   : item.attendance_status ===
-                                                                    "Absent"
-                                                                  ? "text-red-500"
-                                                                  : "text-gray-500"
+                                                                      "Absent"
+                                                                    ? "text-red-500"
+                                                                    : "text-gray-500"
                                                               }`}
                                                             >
                                                               {
@@ -6145,7 +6160,7 @@ const AudioStreamerChatBot = ({
                                                           <button
                                                             onClick={() =>
                                                               handleRemoveStudent(
-                                                                index
+                                                                index,
                                                               )
                                                             }
                                                             className="px-1 py-1 border-none bg-red-500 text-white rounded cursor-pointer flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
@@ -6156,7 +6171,7 @@ const AudioStreamerChatBot = ({
                                                         )}
                                                       </td>
                                                     </tr>
-                                                  )
+                                                  ),
                                                 );
                                               })()}
                                             </tbody>
@@ -6248,7 +6263,7 @@ const AudioStreamerChatBot = ({
                                           setShowCorrectionBox(
                                             showCorrectionBox === idx
                                               ? null
-                                              : idx
+                                              : idx,
                                           );
                                         }}
                                       >
@@ -6286,7 +6301,7 @@ const AudioStreamerChatBot = ({
                                                 handleSendFeedback(
                                                   idx,
                                                   "Rejected",
-                                                  feedbackComment[idx] || ""
+                                                  feedbackComment[idx] || "",
                                                 )
                                               }
                                               disabled={!feedbackComment[idx]}
@@ -6311,7 +6326,7 @@ const AudioStreamerChatBot = ({
                                         buttonsLength:
                                           (msg as any).buttons?.length || 0,
                                         buttons: (msg as any).buttons,
-                                      }
+                                      },
                                     );
                                     return (
                                       (msg as any).buttons &&
@@ -6328,7 +6343,7 @@ const AudioStreamerChatBot = ({
                                           >
                                             {btn.label}
                                           </button>
-                                        )
+                                        ),
                                       )}
                                     </div>
                                   )}
@@ -6438,7 +6453,7 @@ const AudioStreamerChatBot = ({
 
                               const result = await uploadAttendanceImage(
                                 file,
-                                pendingClassInfo
+                                pendingClassInfo,
                               );
 
                               // Clear processing state
@@ -6446,7 +6461,9 @@ const AudioStreamerChatBot = ({
 
                               // Remove the processing message
                               setChatHistory((prev) =>
-                                prev.filter((msg) => !(msg as any).isProcessing)
+                                prev.filter(
+                                  (msg) => !(msg as any).isProcessing,
+                                ),
                               );
 
                               if (
@@ -6470,7 +6487,7 @@ const AudioStreamerChatBot = ({
 
                                 // Set global state for editing
                                 setAttendanceData(
-                                  result.data.attendance_summary
+                                  result.data.attendance_summary,
                                 );
                                 setClassInfo(pendingClassInfo);
                                 setAttendanceStep("completed");
@@ -6481,28 +6498,28 @@ const AudioStreamerChatBot = ({
                                     label: "Edit Attendance",
                                     action: () => {
                                       console.log(
-                                        "Edit Attendance clicked for image-based attendance"
+                                        "Edit Attendance clicked for image-based attendance",
                                       );
                                       console.log(
                                         "Setting attendance data:",
-                                        result.data.attendance_summary
+                                        result.data.attendance_summary,
                                       );
                                       console.log(
                                         "Setting class info:",
-                                        pendingClassInfo
+                                        pendingClassInfo,
                                       );
                                       console.log(
                                         "Setting editing message index to:",
-                                        chatHistory.length
+                                        chatHistory.length,
                                       );
 
                                       // Set the global state for editing
                                       setAttendanceData(
-                                        result.data.attendance_summary
+                                        result.data.attendance_summary,
                                       );
                                       setClassInfo(pendingClassInfo);
                                       setEditingMessageIndex(
-                                        chatHistory.length
+                                        chatHistory.length,
                                       );
 
                                       // Force a re-render by updating the message to trigger edit mode
@@ -6521,7 +6538,7 @@ const AudioStreamerChatBot = ({
                                             true;
                                           console.log(
                                             "Set isBeingEdited flag to true for message:",
-                                            updatedHistory.length - 1
+                                            updatedHistory.length - 1,
                                           );
                                         }
                                         return updatedHistory;
@@ -6564,7 +6581,7 @@ const AudioStreamerChatBot = ({
                               setChatHistory((prev) => {
                                 // Remove processing message and add error message
                                 const filteredHistory = prev.filter(
-                                  (msg) => !(msg as any).isProcessing
+                                  (msg) => !(msg as any).isProcessing,
                                 );
                                 return [
                                   ...filteredHistory,
@@ -6632,7 +6649,7 @@ const AudioStreamerChatBot = ({
                           const fileMessage = `Add file ${fileUuid} to attachments`;
                           console.log(
                             "Sending file message to assignment chat:",
-                            fileMessage
+                            fileMessage,
                           );
 
                           // Trigger assignment chat with file info
@@ -6643,7 +6660,7 @@ const AudioStreamerChatBot = ({
                                 "Calling assignmentChat with message:",
                                 fileMessage,
                                 "session:",
-                                sessionId || userId
+                                sessionId || userId,
                               );
 
                               const data = await aiAPI.assignmentChat({
@@ -6681,14 +6698,14 @@ const AudioStreamerChatBot = ({
                                   // Do not append duplicate acknowledgement; log instead
                                   console.log(
                                     "Suppressed duplicate backend upload acknowledgement:",
-                                    answer
+                                    answer,
                                   );
                                 }
                               }
                             } catch (err) {
                               console.error(
                                 "Error adding file to assignment:",
-                                err
+                                err,
                               );
                             }
                           }, 500);
@@ -6740,8 +6757,8 @@ const AudioStreamerChatBot = ({
                   activeFlow === "attendance"
                     ? "Upload Excel or Image"
                     : activeFlow === "assignment"
-                    ? "Upload Assignment File (PDF, DOCX, Image)"
-                    : "Enable assignment or attendance flow to upload"
+                      ? "Upload Assignment File (PDF, DOCX, Image)"
+                      : "Enable assignment or attendance flow to upload"
                 }
                 onClick={(e) => {
                   if (
@@ -6801,7 +6818,7 @@ const AudioStreamerChatBot = ({
               disabled={isRecording}
             />
             <button
-              onClick={isRecording ? stopStreaming : startStreaming}
+              onClick={isRecording ? () => stopStreaming(true) : startStreaming}
               className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
                 isRecording ? " recording" : ""
               }`}
