@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
 import {
+  FiHeadphones,
   FiMic,
   FiMicOff,
   FiMoreVertical,
@@ -159,6 +160,10 @@ const AudioStreamerChatBot = ({
     useState<number>(0);
   const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] =
     useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
+  const [fullVoiceMode, setFullVoiceMode] = useState<boolean>(false); // Full Voice Mode (Hands-Free)
+  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
+  const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
+  const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Debounce turn-complete
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
 
   // Shared helper: get academic session and branch token dynamically
@@ -242,7 +247,34 @@ const AudioStreamerChatBot = ({
     fetchUserSession();
   }, [userId]);
 
-  const startStreaming = async () => {
+  // Helper function to interrupt any playing TTS
+  const interruptTTS = () => {
+    if (currentTTSAudioRef.current) {
+      const audio = currentTTSAudioRef.current;
+      // Always interrupt if audio exists - pause and reset
+      console.log("🛑 Interrupting TTS playback", { 
+        paused: audio.paused, 
+        currentTime: audio.currentTime, 
+        readyState: audio.readyState,
+        ended: audio.ended
+      });
+      audio.pause();
+      audio.currentTime = 0;
+      
+      // Clean up URL if stored on audio element
+      const url = (audio as any)._ttsUrl;
+      if (url) {
+        URL.revokeObjectURL(url);
+        (audio as any)._ttsUrl = null;
+      }
+      
+      // Clear the ref so we know TTS was interrupted
+      currentTTSAudioRef.current = null;
+      webrtcServiceRef.current?.interruptBotAudio();
+    }
+  };
+
+  const startStreaming = async (useFullVoice = false) => {
     try {
       // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
@@ -252,11 +284,16 @@ const AudioStreamerChatBot = ({
       const webrtcService = new WebRTCAudioService();
       webrtcServiceRef.current = webrtcService;
 
-      // Connect with callbacks
+      // Connect with callbacks; pass useFullVoice for Full Voice Mode
       await webrtcService.connect(selectedLanguage, {
         onTranscript: (text: string, isFinal: boolean) => {
           const trimmed = text.trim();
           if (!trimmed) return;
+
+          // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
+          if (useFullVoice) {
+            interruptTTS();
+          }
 
           if (isFinal) {
             // Final result: add to accumulated final text and clear interim
@@ -304,40 +341,70 @@ const AudioStreamerChatBot = ({
         onError: (error: Error) => {
           console.error("WebRTC error:", error);
           setIsRecording(false);
+          setIsVoiceActive(false);
         },
         onConnected: () => {
           setIsRecording(true);
         },
         onDisconnected: () => {
           setIsRecording(false);
+          setIsVoiceActive(false);
           console.log("WebRTC disconnected");
         },
-      });
+        onTurnComplete: () => {
+          if (!useFullVoice || !finalTextRef.current.trim() || isProcessing) return;
+          if (turnCompleteTimerRef.current) clearTimeout(turnCompleteTimerRef.current);
+          turnCompleteTimerRef.current = setTimeout(async () => {
+            turnCompleteTimerRef.current = null;
+            const finalInput = finalTextRef.current.trim();
+            if (!finalInput || isProcessing) return;
+            lastInterimTextRef.current = "";
+            finalTextRef.current = "";
+            setInputText(finalInput);
+            isVoiceTriggeredRequestRef.current = true;
+            try {
+              await handleSubmit(finalInput);
+            } finally {
+              isVoiceTriggeredRequestRef.current = false;
+            }
+          }, 800);
+        },
+        onVoiceActivity: (isActive: boolean) => {
+          setIsVoiceActive(isActive);
+          // Interrupt TTS when voice activity is detected
+          if (isActive && useFullVoice) {
+            interruptTTS();
+          }
+        },
+      }, useFullVoice);
     } catch (error) {
       console.error("Failed to start WebRTC streaming:", error);
       setIsRecording(false);
+      setIsVoiceActive(false);
     }
   };
 
-  const stopStreaming = async () => {
+  const stopStreaming = async (skipSubmit = false) => {
+    if (turnCompleteTimerRef.current) {
+      clearTimeout(turnCompleteTimerRef.current);
+      turnCompleteTimerRef.current = null;
+    }
     if (webrtcServiceRef.current) {
       await webrtcServiceRef.current.disconnect();
       webrtcServiceRef.current = null;
     }
 
-    // Clear text tracking when stopping
     lastInterimTextRef.current = "";
     finalTextRef.current = "";
     setIsRecording(false);
-    // Mark this request as voice-triggered for the duration of the
-    // subsequent `handleSubmit()` call. This flag is intentionally
-    // request-scoped and will be cleared immediately after submission
-    // completes to avoid any leakage to other flows.
+    setIsVoiceActive(false);
+
+    if (skipSubmit) return;
+
     isVoiceTriggeredRequestRef.current = true;
     try {
       await handleSubmit();
     } finally {
-      // Reset immediately after the request finishes (success or error)
       isVoiceTriggeredRequestRef.current = false;
     }
   };
@@ -493,9 +560,9 @@ const AudioStreamerChatBot = ({
     }
   };
 
-  const handleSubmit = async () => {
-    if (!inputText.trim()) return;
-    const userMessage = inputText.trim();
+  const handleSubmit = async (overrideMessage?: string) => {
+    const userMessage = (overrideMessage ?? inputText).trim();
+    if (!userMessage) return;
 
     console.log("🚀 handleSubmit START:", {
       userMessage,
@@ -2251,9 +2318,13 @@ const AudioStreamerChatBot = ({
     return cleaned.length <= max ? cleaned : cleaned.substring(0, max).trim() + "...";
   };
 
-  // TTS playback function
+  // TTS playback function - supports interruption in Full Voice Mode
   const handlePlayTTS = async (idx: number, text: string) => {
+    // Interrupt any currently playing TTS before starting new one
+    interruptTTS();
+    
     setTtsLoading(idx);
+    let audioUrl: string | null = null;
     try {
       const reader = await aiAPI.textToSpeech({ text });
       if (!reader) throw new Error("No stream");
@@ -2267,14 +2338,64 @@ const AudioStreamerChatBot = ({
       const audioBlob = new Blob(audioChunks as BlobPart[], {
         type: "audio/wav",
       });
-      const url = URL.createObjectURL(audioBlob);
-      const audio = new Audio(url);
-      audio.play();
-      audio.onended = () => URL.revokeObjectURL(url);
+      audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      
+      // Store URL on audio element for cleanup on interruption
+      (audio as any)._ttsUrl = audioUrl;
+      
+      // Store audio reference for interruption
+      currentTTSAudioRef.current = audio;
+      
+      // Handle cleanup when audio ends naturally
+      audio.onended = () => {
+        if (currentTTSAudioRef.current === audio) {
+          currentTTSAudioRef.current = null;
+        }
+        const url = (audio as any)._ttsUrl;
+        if (url) {
+          URL.revokeObjectURL(url);
+          (audio as any)._ttsUrl = null;
+        }
+        setTtsLoading(null);
+      };
+      
+      // Handle errors during playback
+      audio.onerror = (error) => {
+        console.error("TTS audio error:", error);
+        if (currentTTSAudioRef.current === audio) {
+          currentTTSAudioRef.current = null;
+        }
+        const url = (audio as any)._ttsUrl;
+        if (url) {
+          URL.revokeObjectURL(url);
+          (audio as any)._ttsUrl = null;
+        }
+        setTtsLoading(null);
+      };
+      
+      // Play audio and handle play promise rejection
+      try {
+        await audio.play();
+      } catch (playError) {
+        console.error("TTS playback error:", playError);
+        if (currentTTSAudioRef.current === audio) {
+          currentTTSAudioRef.current = null;
+        }
+        if (audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+        }
+        setTtsLoading(null);
+      }
     } catch (err) {
+      console.error("TTS generation error:", err);
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+      currentTTSAudioRef.current = null;
+      setTtsLoading(null);
       alert("Failed to play audio.");
     }
-    setTtsLoading(null);
   };
 
   // Helper for feedback color classes
@@ -7146,29 +7267,69 @@ const AudioStreamerChatBot = ({
 
             <input
               type="text"
-              placeholder="Ask me anything!"
+              placeholder={
+                fullVoiceMode
+                  ? "Speak naturally — I'll respond when you finish..."
+                  : "Ask me anything!"
+              }
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={(e) =>
                 e.key === "Enter" && !isRecording && handleSubmit()
               }
               className="chatbot-input text-base sm:text-lg px-3 py-2 sm:px-4 sm:py-3 min-h-[40px] sm:min-h-[48px]"
-              disabled={isRecording}
+              disabled={isRecording && fullVoiceMode}
             />
             <button
-              onClick={isRecording ? stopStreaming : startStreaming}
-              className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
-                isRecording ? " recording" : ""
+              onClick={() => {
+                if (fullVoiceMode) {
+                  setFullVoiceMode(false);
+                  stopStreaming(true);
+                } else {
+                  setFullVoiceMode(true);
+                  startStreaming(true);
+                }
+              }}
+              className={`chatbot-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center ${
+                fullVoiceMode ? " recording" : ""
               }`}
-              title={isRecording ? "Stop Recording" : "Start Recording"}
+              title={
+                fullVoiceMode
+                  ? "Exit Full Voice Mode (Hands-Free)"
+                  : "Full Voice Mode — Mic always on, auto turn detection"
+              }
             >
-              {isRecording ? <FiMicOff /> : <FiMic />}
+              <FiHeadphones />
             </button>
+            {!fullVoiceMode && (
+              <button
+                onClick={() => (isRecording ? stopStreaming() : startStreaming())}
+                className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
+                  isRecording ? " recording" : ""
+                }`}
+                title={isRecording ? "Stop Recording" : "Start Recording"}
+              >
+                {isRecording ? <FiMicOff /> : <FiMic />}
+              </button>
+            )}
+            {fullVoiceMode && isRecording && (
+              <div
+                className="flex items-center justify-center gap-1.5 px-2 text-sm text-emerald-600 font-medium"
+                title="Listening — speak naturally"
+              >
+                <span
+                  className={`inline-block w-2 h-2 rounded-full ${
+                    isVoiceActive ? "animate-pulse bg-red-500" : "bg-emerald-400"
+                  }`}
+                />
+                {isVoiceActive ? "Speaking…" : "Listening…"}
+              </div>
+            )}
             <button
-              onClick={handleSubmit}
+              onClick={() => handleSubmit()}
               className="chatbot-btn send"
               title="Send Message"
-              disabled={isRecording}
+              disabled={isRecording && fullVoiceMode}
             >
               <FiSend />
             </button>

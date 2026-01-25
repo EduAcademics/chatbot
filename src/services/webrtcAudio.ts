@@ -9,6 +9,8 @@ export interface WebRTCAudioCallbacks {
   onError: (error: Error) => void;
   onConnected: () => void;
   onDisconnected: () => void;
+  onTurnComplete?: () => void;
+  onVoiceActivity?: (isActive: boolean) => void;
 }
 
 export class WebRTCAudioService {
@@ -19,7 +21,8 @@ export class WebRTCAudioService {
 
   async connect(
     selectedLanguage: string,
-    callbacks: WebRTCAudioCallbacks
+    callbacks: WebRTCAudioCallbacks,
+    fullVoiceMode = false
   ): Promise<void> {
     try {
       this.callbacks = callbacks;
@@ -42,11 +45,11 @@ export class WebRTCAudioService {
             callbacks.onDisconnected();
           },
           onUserTranscript: (data) => {
-            // Process both interim and final transcripts for lower latency
-            // Interim results appear faster, final results are more accurate
             if (data.text && data.text.trim()) {
-              // Pass the final flag so the handler can distinguish interim vs final
               callbacks.onTranscript(data.text, data.final || false);
+              if (fullVoiceMode && data.final && callbacks.onTurnComplete) {
+                setTimeout(() => callbacks.onTurnComplete!(), 100);
+              }
             }
           },
           onError: (error) => {
@@ -55,17 +58,16 @@ export class WebRTCAudioService {
         },
       });
 
-      // Setup audio track handling
       this.setupAudioTracks();
 
-      // Connect to bot
       const connectParams: any = {
         endpoint: BOT_START_URL,
         requestData: {
           createDailyRoom: false,
           enableDefaultIceServers: true,
           transport: 'webrtc',
-          language: selectedLanguage, // Pass language preference
+          language: selectedLanguage,
+          full_voice_mode: fullVoiceMode,
         },
       };
 
@@ -86,15 +88,39 @@ export class WebRTCAudioService {
   private setupAudioTracks(): void {
     if (!this.client) return;
 
+    let botAudioElement: HTMLAudioElement | null = null;
+
     this.client.on(RTVIEvent.TrackStarted, (track, participant) => {
       if (!participant?.local && track.kind === 'audio') {
-        // Bot audio track - create audio element to play it
-        const audio = document.createElement('audio');
-        audio.autoplay = true;
-        audio.srcObject = new MediaStream([track]);
-        document.body.appendChild(audio);
+        botAudioElement = document.createElement('audio');
+        botAudioElement.autoplay = true;
+        botAudioElement.srcObject = new MediaStream([track]);
+        document.body.appendChild(botAudioElement);
+        (this.client as any)._botAudioElement = botAudioElement;
       }
     });
+
+    this.client.on(RTVIEvent.UserStartedSpeaking, () => {
+      this.callbacks?.onVoiceActivity?.(true);
+      if (botAudioElement && !botAudioElement.paused) {
+        botAudioElement.pause();
+        botAudioElement.currentTime = 0;
+      }
+    });
+
+    this.client.on(RTVIEvent.UserStoppedSpeaking, () => {
+      this.callbacks?.onVoiceActivity?.(false);
+    });
+  }
+
+  interruptBotAudio(): void {
+    if (this.client) {
+      const el = (this.client as any)._botAudioElement;
+      if (el && !el.paused) {
+        el.pause();
+        el.currentTime = 0;
+      }
+    }
   }
 
   async disconnect(): Promise<void> {
