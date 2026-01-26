@@ -358,9 +358,15 @@ const AudioStreamerChatBot = ({
       // request-scoped and will be cleared immediately after submission
       // completes to avoid any leakage to other flows.
       isVoiceTriggeredRequestRef.current = true;
+      console.log(
+        "🎤 stopRecording: Setting isVoiceTriggeredRequestRef to TRUE",
+      );
       try {
         await handleSubmit();
       } finally {
+        console.log(
+          "🎤 stopRecording: Resetting isVoiceTriggeredRequestRef to FALSE in finally",
+        );
         // Reset immediately after the request finishes (success or error)
         isVoiceTriggeredRequestRef.current = false;
       }
@@ -815,6 +821,14 @@ const AudioStreamerChatBot = ({
           activeFlow === "query" ||
           activeFlow !== targetFlow);
 
+      console.log("🔍 Flow init debug:", {
+        targetFlow,
+        activeFlow,
+        classificationResult: !!classificationResult,
+        isNewFlowInitialization,
+        isVoiceTriggeredRef: isVoiceTriggeredRequestRef.current,
+      });
+
       // Initialize assignment flow
       if (targetFlow === "assignment" && isNewFlowInitialization) {
         console.log("📍 Initializing assignment flow state");
@@ -822,6 +836,23 @@ const AudioStreamerChatBot = ({
 
         // IMPORTANT: Set activeFlow BEFORE processing the message
         setActiveFlow("assignment");
+
+        // Check if this was triggered by voice input
+        const isVoiceTriggered = isVoiceTriggeredRequestRef.current;
+        console.log("🎤 Voice trigger check:", {
+          isVoiceTriggered,
+          refValue: isVoiceTriggeredRequestRef.current,
+        });
+        // Consume the trigger immediately to prevent leakage into later typed requests
+        isVoiceTriggeredRequestRef.current = false;
+        if (isVoiceTriggered) {
+          // Activate voice mode
+          voiceManager.current.activateVoiceMode();
+          setIsVoiceModeActive(true);
+          console.log("🎤 Voice mode activated for Assignment Creation");
+        } else {
+          console.log("⚠️ Voice trigger was false, voice mode NOT activated");
+        }
 
         console.log("📍 Processing first assignment message");
         // Don't return here - let the user's message be processed by the API
@@ -1592,6 +1623,9 @@ const AudioStreamerChatBot = ({
         const authToken = localStorage.getItem("token");
         const { academic_session, branch_token } = getErpContext();
 
+        // Check if voice mode is active
+        const isVoiceActive = voiceManager.current.isVoiceActive();
+
         const data = await aiAPI.assignmentChat({
           session_id: sessionId || userId,
           user_id: userId, // Pass user_id (will be mapped to employee UUID)
@@ -1599,11 +1633,14 @@ const AudioStreamerChatBot = ({
           bearer_token: authToken || undefined, // Pass bearer token if available
           academic_session,
           branch_token,
+          voice_mode: isVoiceActive, // Enable TTS when voice mode is active
         });
 
         if (data.status === "success" && data.data) {
           const answer = data.data.answer || "";
+          const ttsText = data.data.tts_text || "";
           const assignmentData = data.data.assignment_data;
+          const audioBase64 = data.data.audio_base64;
 
           setChatHistory((prev) => [
             ...prev,
@@ -1619,15 +1656,104 @@ const AudioStreamerChatBot = ({
             console.log("Assignment data:", assignmentData);
           }
 
-          // If submission failed (error message), exit the flow
+          // Voice mode: Play TTS audio if available
+          if (isVoiceActive && audioBase64) {
+            console.log("🔊 Playing TTS audio for assignment flow...");
+            try {
+              // Decode base64 audio
+              const audioBytes = Uint8Array.from(atob(audioBase64), (c) =>
+                c.charCodeAt(0),
+              );
+              const audioBlob = new Blob([audioBytes], { type: "audio/wav" });
+              const url = URL.createObjectURL(audioBlob);
+              const audio = new Audio(url);
+
+              // Play audio
+              audio.play();
+              console.log("🔊 Playing backend TTS audio...");
+
+              // On audio end, handle mic auto-enable
+              audio.onended = () => {
+                URL.revokeObjectURL(url);
+                console.log("🔊 Audio playback complete");
+
+                const isSuccess =
+                  answer.toLowerCase().includes("created successfully") ||
+                  answer.toLowerCase().includes("is now live");
+                if (isSuccess) {
+                  voiceManager.current.deactivateVoiceMode();
+                  setIsVoiceModeActive(false);
+                  console.log(
+                    "🎤 Voice mode deactivated - assignment created successfully",
+                  );
+                } else {
+                  voiceManager.current.setShouldAutoMic(true);
+                  console.log(
+                    "🎤 TTS complete, mic should auto-enable for next input",
+                  );
+                }
+              };
+            } catch (err) {
+              console.error("TTS playback error:", err);
+              // On error, still enable mic
+              voiceManager.current.setShouldAutoMic(true);
+            }
+          } else if (isVoiceActive && ttsText) {
+            // Fallback: Use text-to-speech API if no audio_base64 but tts_text available
+            console.log("🔊 Using TTS API fallback for assignment flow...");
+            setTimeout(async () => {
+              try {
+                const reader = await aiAPI.textToSpeech({ text: ttsText });
+                if (!reader) throw new Error("No TTS stream");
+
+                const audioChunks: Uint8Array[] = [];
+                let done = false;
+                while (!done) {
+                  const { value, done: streamDone } = await reader.read();
+                  if (value) audioChunks.push(value);
+                  done = streamDone;
+                }
+
+                const audioBlob = new Blob(audioChunks as BlobPart[], {
+                  type: "audio/wav",
+                });
+                const url = URL.createObjectURL(audioBlob);
+                const audio = new Audio(url);
+
+                audio.play();
+                console.log("🔊 Playing TTS audio...");
+
+                audio.onended = () => {
+                  URL.revokeObjectURL(url);
+                  const isSuccess =
+                    answer.toLowerCase().includes("created successfully") ||
+                    answer.toLowerCase().includes("is now live");
+                  if (isSuccess) {
+                    voiceManager.current.deactivateVoiceMode();
+                    setIsVoiceModeActive(false);
+                  } else {
+                    voiceManager.current.setShouldAutoMic(true);
+                  }
+                };
+              } catch (err) {
+                console.error("TTS error:", err);
+                voiceManager.current.setShouldAutoMic(true);
+              }
+            }, 300);
+          }
+
+          // If submission failed (error message), stay in flow
           const ansLower = answer ? answer.toLowerCase() : "";
           if (
             ansLower.includes("error") ||
             ansLower.includes("failed") ||
             ansLower.includes("could not")
           ) {
-            console.log("Assignment submission error detected, exiting flow");
-            setActiveFlow("none");
+            console.log(
+              "Assignment submission error detected, staying in flow",
+            );
+            // Keep the flow active for retry
+            setActiveFlow("assignment");
           }
 
           // If submission succeeded (success message), exit the flow
@@ -1652,6 +1778,17 @@ const AudioStreamerChatBot = ({
                 "Sorry, there was an error processing your assignment request.",
             },
           ]);
+          // Voice mode: Speak error message
+          if (isVoiceActive) {
+            setTimeout(async () => {
+              await ttsHelper.current.speak(
+                "An error occurred. Please try again.",
+                () => {
+                  voiceManager.current.setShouldAutoMic(true);
+                },
+              );
+            }, 500);
+          }
         }
       } catch (err) {
         setChatHistory((prev) => [
@@ -1661,6 +1798,17 @@ const AudioStreamerChatBot = ({
             text: "Sorry, there was an error processing your assignment request.",
           },
         ]);
+        // Voice mode: Speak error message
+        if (voiceManager.current.isVoiceActive()) {
+          setTimeout(async () => {
+            await ttsHelper.current.speak(
+              "An error occurred. Please try again.",
+              () => {
+                voiceManager.current.setShouldAutoMic(true);
+              },
+            );
+          }, 500);
+        }
       } finally {
         setIsProcessing(false);
       }
