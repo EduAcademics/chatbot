@@ -28,6 +28,10 @@ import {
 } from "../services/api";
 import { API_BASE_URL } from "../config/api";
 import { WebRTCAudioService } from "../services/webrtcAudio";
+import {
+  handleAssignmentChat,
+  handleAssignmentFileUpload,
+} from "./flows/assignmentFlow";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType =
@@ -164,7 +168,8 @@ const AudioStreamerChatBot = ({
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
   const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Debounce turn-complete
-  const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voice input time
+  const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0);
+  const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voice input time
 
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
@@ -247,6 +252,10 @@ const AudioStreamerChatBot = ({
     fetchUserSession();
   }, [userId]);
 
+  useEffect(() => {
+    activeFlowRef.current = activeFlow;
+  }, [activeFlow]);
+
   // Helper function to interrupt any playing TTS
   const interruptTTS = () => {
     if (currentTTSAudioRef.current) {
@@ -315,24 +324,30 @@ const AudioStreamerChatBot = ({
             setInputText(displayText);
           }
 
-          // For full voice attendance flow, implement 3-second auto-submit
-          if (activeFlow === "full_voice_attendance") {
-            const currentTime = Date.now();
-            setLastVoiceInputTime(currentTime);
+          // Full-voice flows (attendance, assignment): 3-second auto-submit
+          const useFullVoiceTimer =
+            activeFlow === "full_voice_attendance" ||
+            (activeFlow === "assignment" && useFullVoice);
+          if (useFullVoiceTimer) {
+            setLastVoiceInputTime(Date.now());
 
-            // Clear existing timer
             if (fullVoiceAutoSubmitTimer) {
               clearTimeout(fullVoiceAutoSubmitTimer);
             }
 
-            // Set new 3-second timer for auto-submit
-            const currentText = isFinal ? finalTextRef.current : (finalTextRef.current + " " + trimmed);
-            const timer = setTimeout(() => {
+            const currentText = isFinal
+              ? finalTextRef.current
+              : (finalTextRef.current + " " + trimmed);
+            const timer = setTimeout(async () => {
               const finalInput = currentText.trim();
-              if (finalInput && !isProcessing) {
-                // Auto submit the voice input
-                setInputText(finalInput);
-                handleSubmit();
+              if (!finalInput || isProcessing) return;
+              setFullVoiceAutoSubmitTimer(null);
+              setInputText(finalInput);
+              isVoiceTriggeredRequestRef.current = true;
+              try {
+                await handleSubmit(finalInput);
+              } finally {
+                isVoiceTriggeredRequestRef.current = false;
               }
             }, 3000);
             setFullVoiceAutoSubmitTimer(timer);
@@ -353,6 +368,11 @@ const AudioStreamerChatBot = ({
         },
         onTurnComplete: () => {
           if (!useFullVoice || !finalTextRef.current.trim() || isProcessing) return;
+          // These flows use 3s timer only; skip turn-complete to avoid double submit
+          const useFullVoiceTimer =
+            activeFlow === "full_voice_attendance" ||
+            (activeFlow === "assignment" && useFullVoice);
+          if (useFullVoiceTimer) return;
           if (turnCompleteTimerRef.current) clearTimeout(turnCompleteTimerRef.current);
           turnCompleteTimerRef.current = setTimeout(async () => {
             turnCompleteTimerRef.current = null;
@@ -388,6 +408,10 @@ const AudioStreamerChatBot = ({
     if (turnCompleteTimerRef.current) {
       clearTimeout(turnCompleteTimerRef.current);
       turnCompleteTimerRef.current = null;
+    }
+    if (fullVoiceAutoSubmitTimer) {
+      clearTimeout(fullVoiceAutoSubmitTimer);
+      setFullVoiceAutoSubmitTimer(null);
     }
     if (webrtcServiceRef.current) {
       await webrtcServiceRef.current.disconnect();
@@ -429,28 +453,6 @@ const AudioStreamerChatBot = ({
       file,
       session_id: sessionId || userId,
     });
-  };
-
-  // Upload assignment file
-  const uploadAssignmentFile = async (file: File) => {
-    try {
-      const result = await aiAPI.uploadAssignmentFile(
-        file,
-        sessionId || userId
-      );
-      if (result.status === "success" && result.data?.file_uuid) {
-        // Send message to assignment chat with file UUID
-        // The backend will handle adding this to attachments
-        console.log(
-          `File uploaded: ${result.data.filename}. File ID: ${result.data.file_uuid}`
-        );
-        return result;
-      }
-      return result;
-    } catch (error) {
-      console.error("Assignment file upload error:", error);
-      throw error;
-    }
   };
 
   // Upload attendance image through OCR processing
@@ -583,7 +585,6 @@ const AudioStreamerChatBot = ({
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
       console.log("🚪 Exit command detected, exiting flow:", activeFlow);
-      // Clear voice-initiated flags when exiting flows
       if (activeFlow === "leave") {
         leaveVoiceInitiatedRef.current = false;
       }
@@ -593,6 +594,16 @@ const AudioStreamerChatBot = ({
       if (activeFlow === "attendance" || activeFlow === "voice_attendance") {
         attendanceVoiceInitiatedRef.current = false;
       }
+      if (
+        activeFlow === "full_voice_attendance" ||
+        activeFlow === "assignment"
+      ) {
+        if (fullVoiceAutoSubmitTimer) {
+          clearTimeout(fullVoiceAutoSubmitTimer);
+          setFullVoiceAutoSubmitTimer(null);
+        }
+      }
+      activeFlowRef.current = "none";
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
@@ -656,9 +667,11 @@ const AudioStreamerChatBot = ({
     // Stay in active flow if user is responding (not starting new request)
     // If already in leave/assignment and message doesn't look like a new request, stay in flow
     // Don't check userOptionSelected - if activeFlow is set, we're in that flow
-    const inLeaveFlow = activeFlow === "leave" && !looksLikeNewRequest;
-    const inAssignmentFlow =
-      activeFlow === "assignment" && !looksLikeNewRequest;
+    const inLeave = activeFlowRef.current === "leave" || activeFlow === "leave";
+    const inAssignment =
+      activeFlowRef.current === "assignment" || activeFlow === "assignment";
+    const inLeaveFlow = inLeave && !looksLikeNewRequest;
+    const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
 
     console.log("🔧 Auto-routing check:", {
       autoRouting,
@@ -682,7 +695,7 @@ const AudioStreamerChatBot = ({
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log("📍 Staying in current flow (multi-step process active)");
-      targetFlow = activeFlow;
+      targetFlow = activeFlowRef.current;
       // Don't show old detection when in multi-step flow
       setDetectedFlow(null);
     } else if (autoRouting) {
@@ -719,25 +732,24 @@ const AudioStreamerChatBot = ({
         userMessage.toLowerCase().trim()
       );
 
-      if (isSimpleResponse && activeFlow !== "none" && activeFlow !== "query") {
+      if (isSimpleResponse && activeFlowRef.current !== "none" && activeFlowRef.current !== "query") {
         // Keep current flow for simple confirmation words
         console.log(
           "📍 Simple response detected, keeping current flow:",
-          activeFlow
+          activeFlowRef.current
         );
-        targetFlow = activeFlow;
+        targetFlow = activeFlowRef.current;
       } else if (
-        activeFlow !== "none" &&
-        activeFlow !== "query" &&
+        (activeFlowRef.current !== "none" && activeFlowRef.current !== "query") &&
         userMessage.length < 50 &&
         !looksLikeNewRequest
       ) {
         // Short message in an active flow (likely a response to a question) - stay in current flow
         console.log(
           "📍 Short response in active flow, staying in:",
-          activeFlow
+          activeFlowRef.current
         );
-        targetFlow = activeFlow;
+        targetFlow = activeFlowRef.current;
       } else {
         // Run classification for every new query when auto-routing is enabled
         console.log("📍 Running classification...");
@@ -844,7 +856,8 @@ const AudioStreamerChatBot = ({
         console.log("📍 Initializing assignment flow state");
         console.log("📍 Setting activeFlow to 'assignment'");
 
-        // IMPORTANT: Set activeFlow BEFORE processing the message
+        // IMPORTANT: Set activeFlow (and ref) BEFORE processing the message
+        activeFlowRef.current = "assignment";
         setActiveFlow("assignment");
 
         console.log("📍 Processing first assignment message");
@@ -856,7 +869,8 @@ const AudioStreamerChatBot = ({
       if (targetFlow === "leave" && isNewFlowInitialization) {
         console.log("📍 Initializing leave flow state");
 
-        // IMPORTANT: Set activeFlow BEFORE returning so next message stays in leave flow
+        // IMPORTANT: Set activeFlow (and ref) BEFORE returning so next message stays in leave flow
+        activeFlowRef.current = "leave";
         setActiveFlow("leave");
 
         // Add welcome message matching manual mode
@@ -919,6 +933,7 @@ const AudioStreamerChatBot = ({
 
     // Update active flow for next message (unless manually overridden)
     if (autoRouting) {
+      activeFlowRef.current = targetFlow;
       setActiveFlow(targetFlow);
     }
 
@@ -1702,9 +1717,9 @@ const AudioStreamerChatBot = ({
           // If submission succeeded (success message), exit the flow
           if (answer.includes("✅") && answer.includes("successfully")) {
             console.log("✅ Leave submitted successfully, exiting flow");
-            // Clear the voice-initiated flag when leaving the flow
             leaveVoiceInitiatedRef.current = false;
             setTimeout(() => {
+              activeFlowRef.current = "none";
               setActiveFlow("none");
             }, 1000);
           }
@@ -1767,103 +1782,22 @@ const AudioStreamerChatBot = ({
         setIsProcessing(false);
       }
     } else if (targetFlow === "assignment") {
-      // Assignment creation flow
-      try {
-        // Get auth token from localStorage
-        const authToken = localStorage.getItem("token");
-        const { academic_session, branch_token } = getErpContext();
-
-        const data = await aiAPI.assignmentChat({
-          session_id: sessionId || userId,
-          user_id: userId, // Pass user_id (will be mapped to employee UUID)
-          query: userMessage,
-          bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session,
-          branch_token,
-        });
-
-        if (data.status === "success" && data.data) {
-          const answer = data.data.answer || "";
-          const assignmentData = data.data.assignment_data;
-
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: answer,
-              activeTab: "answer" as const,
-            },
-          ]);
-
-          if (isVoiceTriggeredRequestRef.current === true) {
-            try {
-              void handlePlayTTS(-1, generateQueryTTSSummary(answer));
-            } catch (ttsErr) {
-              console.error("Assignment TTS playback failed:", ttsErr);
-            }
-          }
-
-          // If assignment data is present, log it (you can add UI to display it)
-          if (assignmentData) {
-            console.log("Assignment data:", assignmentData);
-          }
-
-          // If submission failed (error message), exit the flow
-          if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
-          ) {
-            console.log(
-              "⚠️ Assignment submission error detected, exiting flow"
-            );
-            setActiveFlow("none");
-          }
-
-          // If submission succeeded (success message), exit the flow
-          if (
-            answer.includes("✅") &&
-            answer.includes("successfully") &&
-            answer.includes("created")
-          ) {
-            console.log("✅ Assignment created successfully, exiting flow");
-            setTimeout(() => {
-              setActiveFlow("none");
-            }, 1000);
-          }
-        } else {
-          const errMsg =
-            data.message ||
-            "Sorry, there was an error processing your assignment request.";
-          setChatHistory((prev) => [
-            ...prev,
-            { type: "bot", text: errMsg },
-          ]);
-          if (isVoiceTriggeredRequestRef.current === true) {
-            try {
-              void handlePlayTTS(-1, generateQueryTTSSummary(errMsg));
-            } catch (ttsErr) {
-              console.error("Assignment TTS playback failed:", ttsErr);
-            }
-          }
-        }
-      } catch (err) {
-        const errorMessage =
-          "Sorry, there was an error processing your assignment request.";
-        setChatHistory((prev) => [
-          ...prev,
-          { type: "bot", text: errorMessage },
-        ]);
-        if (isVoiceTriggeredRequestRef.current === true) {
-          try {
-            void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage));
-          } catch (ttsErr) {
-            console.error("Assignment TTS playback failed:", ttsErr);
-          }
-        }
-      } finally {
-        setIsProcessing(false);
-      }
+      await handleAssignmentChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) =>
+          setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => {
+          activeFlowRef.current = "none";
+          setActiveFlow("none");
+        },
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
     } else if (targetFlow === "course_progress") {
       // Course progress flow - selection is handled via UI clicks
       // This handles text-based queries or refreshes
@@ -3000,6 +2934,7 @@ const AudioStreamerChatBot = ({
 
         // Return to LLM routing after completion
         setTimeout(() => {
+          activeFlowRef.current = "none";
           setActiveFlow("none");
           setAutoRouting(true);
           setChatHistory((prev) => [
@@ -4553,6 +4488,7 @@ const AudioStreamerChatBot = ({
                       onClick={() => {
                         setRouterMode("manual");
                         setAutoRouting(false);
+                        activeFlowRef.current = "none";
                         setActiveFlow("none");
                         setUserOptionSelected(false);
                         setIsMenuOpen(false);
@@ -4581,6 +4517,7 @@ const AudioStreamerChatBot = ({
                       onClick={() => {
                         setRouterMode("auto");
                         setAutoRouting(true);
+                        activeFlowRef.current = "none";
                         setActiveFlow("none");
                         setUserOptionSelected(false);
                         setIsMenuOpen(false);
@@ -4609,6 +4546,7 @@ const AudioStreamerChatBot = ({
                       onClick={() => {
                         setRouterMode("llm");
                         setAutoRouting(true);
+                        activeFlowRef.current = "none";
                         setActiveFlow("none");
                         setUserOptionSelected(false);
                         setIsMenuOpen(false);
@@ -4815,7 +4753,8 @@ const AudioStreamerChatBot = ({
                           </div>
                           <div
                             onClick={() => {
-                              setAutoRouting(false); // Disable auto-routing
+                              setAutoRouting(false);
+                              activeFlowRef.current = "leave";
                               setActiveFlow("leave");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
@@ -4947,7 +4886,8 @@ const AudioStreamerChatBot = ({
                           </div>
                           <div
                             onClick={() => {
-                              setAutoRouting(false); // Disable auto-routing
+                              setAutoRouting(false);
+                              activeFlowRef.current = "assignment";
                               setActiveFlow("assignment");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
@@ -5090,6 +5030,7 @@ const AudioStreamerChatBot = ({
                           </div>
                           <div
                             onClick={() => {
+                              activeFlowRef.current = "none";
                               setActiveFlow("none");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
@@ -7102,91 +7043,14 @@ const AudioStreamerChatBot = ({
                       ]);
                     }
                   } else if (activeFlow === "assignment") {
-                    // Handle assignment file upload
-                    try {
-                      const result = await uploadAssignmentFile(file);
-                      if (result.status === "success") {
-                        setChatHistory((prev) => [
-                          ...prev,
-                          {
-                            type: "bot",
-                            text: `✅ File uploaded successfully: ${
-                              result.data?.filename || file.name
-                            }\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
-                          },
-                        ]);
-                        // Send the file UUID to the assignment chat to add it to attachments
-                        const fileUuid = result.data?.file_uuid;
-                        console.log("File upload result:", result);
-                        console.log("Extracted fileUuid:", fileUuid);
-
-                        if (fileUuid) {
-                          const fileMessage = `Add file ${fileUuid} to attachments`;
-                          console.log(
-                            "Sending file message to assignment chat:",
-                            fileMessage
-                          );
-
-                          // Trigger assignment chat with file info
-                          setTimeout(async () => {
-                            try {
-                              const authToken = localStorage.getItem("token");
-                              console.log(
-                                "Calling assignmentChat with message:",
-                                fileMessage,
-                                "session:",
-                                sessionId || userId
-                              );
-
-                              const data = await aiAPI.assignmentChat({
-                                session_id: sessionId || userId,
-                                user_id: userId,
-                                query: fileMessage,
-                                bearer_token: authToken || undefined,
-                                ...getErpContext(),
-                              });
-
-                              console.log("Assignment chat response:", data);
-
-                              if (data.status === "success" && data.data) {
-                                const answer =
-                                  data.data.answer ||
-                                  "File added to assignment.";
-                                setChatHistory((prev) => [
-                                  ...prev,
-                                  {
-                                    type: "bot",
-                                    answer: answer,
-                                    activeTab: "answer" as const,
-                                  },
-                                ]);
-                              }
-                            } catch (err) {
-                              console.error(
-                                "Error adding file to assignment:",
-                                err
-                              );
-                            }
-                          }, 500);
-                        } else {
-                          setChatHistory((prev) => [
-                            ...prev,
-                            {
-                              type: "bot",
-                              text: "⚠️ File uploaded but could not be attached. Please try uploading again.",
-                            },
-                          ]);
-                        }
-                      }
-                    } catch (err) {
-                      setChatHistory((prev) => [
-                        ...prev,
-                        {
-                          type: "bot",
-                          text: `File upload failed: ${(err as Error).message}`,
-                        },
-                      ]);
-                    }
+                    await handleAssignmentFileUpload({
+                      file,
+                      sessionId,
+                      userId,
+                      getErpContext,
+                      appendBotMessage: (msg) =>
+                        setChatHistory((prev) => [...prev, msg]),
+                    });
                   }
                   e.target.value = "";
                 }}

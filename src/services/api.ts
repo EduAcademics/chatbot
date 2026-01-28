@@ -159,6 +159,9 @@ interface AssignmentChatRequest {
   bearer_token?: string;  // Optional: Bearer token for ERP API
   academic_session?: string;  // Optional: Academic session
   branch_token?: string;  // Optional: Branch token
+  voice_mode?: boolean;  // Optional: enable TTS for voice / full-voice mode
+  tts?: boolean;  // Optional: alternative to voice_mode
+  tts_voice?: string;  // Optional: TTS voice to use
 }
 
 interface AssignmentChatResponse {
