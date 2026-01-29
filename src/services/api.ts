@@ -95,6 +95,7 @@ interface ProcessAttendanceImageResponse {
 interface ProcessVoiceClassInfoRequest {
   session_id: string;
   voice_text: string;
+  user_id?: string;
 }
 
 interface ProcessVoiceClassInfoResponse {
@@ -109,7 +110,8 @@ interface ProcessVoiceClassInfoResponse {
 interface ProcessVoiceAttendanceRequest {
   session_id: string;
   voice_text: string;
-  class_info: any;
+  class_info?: any;
+  user_id?: string;
 }
 
 interface ProcessVoiceAttendanceResponse {

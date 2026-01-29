@@ -32,6 +32,18 @@ import {
   handleAssignmentChat,
   handleAssignmentFileUpload,
 } from "./flows/assignmentFlow";
+import {
+  handleAttendanceChat,
+  handleAttendanceImageUpload,
+  INITIAL_ATTENDANCE_STATE,
+  generateAttendanceTTSSummary,
+} from "./flows/attendanceFlow";
+import type {
+  AttendanceState,
+  AttendanceFlowCallbacks,
+  ClassInfo,
+  AttendanceRecord,
+} from "./flows/attendanceFlow";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType =
@@ -43,7 +55,10 @@ type FlowType =
   | "leave"
   | "leave_approval"
   | "assignment"
-  | "course_progress"; // <-- add full_voice_attendance flow
+  | "course_progress"
+  // Legacy types - kept for backward compatibility but not used
+  | "_legacy_attendance_disabled"
+  | "_legacy_voice_attendance_disabled";
 const AudioStreamerChatBot = ({
   userId,
   roles,
@@ -120,19 +135,19 @@ const AudioStreamerChatBot = ({
   );
   const [activeFlow, setActiveFlow] = useState<FlowType>("none"); // <-- add
   const [sessionId, setSessionId] = useState<string | null>(null); // <-- add
-  const [attendanceData, setAttendanceData] = useState<any[]>([]); // <-- add for editable attendance
+  const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]); // <-- add for editable attendance
+  const attendanceDataRef = useRef<AttendanceRecord[]>([]); // Ref to access current attendanceData in closures
   const [attendanceStep, setAttendanceStep] = useState<
     "class_info" | "student_details" | "completed"
   >("class_info");
-  const [pendingClassInfo, setPendingClassInfo] = useState<{
-    class_: string;
-    section: string;
-    date: string;
-  } | null>(null); // <-- add for pending class info
+  const [pendingClassInfo, setPendingClassInfo] = useState<ClassInfo | null>(null); // <-- add for pending class info
+  // Unified attendance flow state
+  const [attendanceFlowState, setAttendanceFlowState] = useState<AttendanceState>(INITIAL_ATTENDANCE_STATE);
   const [, setIsProcessingImage] = useState(false); // <-- add for image processing state
   // Debug wrapper for setAttendanceData
 
-  const [classInfo, setClassInfo] = useState<any>(null); // <-- add for class info
+  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null); // <-- add for class info
+  const classInfoRef = useRef<ClassInfo | null>(null); // Ref to access current classInfo in closures
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(
     null
   ); // Track which message is being edited
@@ -255,6 +270,15 @@ const AudioStreamerChatBot = ({
   useEffect(() => {
     activeFlowRef.current = activeFlow;
   }, [activeFlow]);
+
+  // Keep refs in sync with state for closure access
+  useEffect(() => {
+    attendanceDataRef.current = attendanceData;
+  }, [attendanceData]);
+
+  useEffect(() => {
+    classInfoRef.current = classInfo;
+  }, [classInfo]);
 
   // Helper function to interrupt any playing TTS
   const interruptTTS = () => {
@@ -821,10 +845,12 @@ const AudioStreamerChatBot = ({
       setUserOptionSelected(true);
 
       // IMPORTANT: Initialize flow state when detected (same as manual mode)
-      if (targetFlow === "attendance" || targetFlow === "voice_attendance") {
-        console.log("📍 Initializing attendance flow state");
+      if (targetFlow === "attendance" || targetFlow === "voice_attendance" || targetFlow === "full_voice_attendance") {
+        console.log("📍 Initializing unified attendance flow state");
         setAttendanceStep("class_info");
         setPendingClassInfo(null);
+        // Initialize unified attendance flow state
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
 
         // If this Attendance request was initiated via microphone,
         // mark that the attendance flow was voice-initiated so the
@@ -832,7 +858,7 @@ const AudioStreamerChatBot = ({
         try {
           if (
             isVoiceTriggeredRequestRef.current === true &&
-            (targetFlow === "attendance" || targetFlow === "voice_attendance")
+            (targetFlow === "attendance" || targetFlow === "voice_attendance" || targetFlow === "full_voice_attendance")
           ) {
             attendanceVoiceInitiatedRef.current = true;
           }
@@ -1011,643 +1037,34 @@ const AudioStreamerChatBot = ({
       } finally {
         setIsProcessing(false);
       }
-    } else if (targetFlow === "attendance") {
-      // Step-by-step attendance flow
-      if (attendanceStep === "class_info") {
-        // First step: Collect class information
-        try {
-          const data = await aiAPI.chat({
-            session_id: sessionId || userId,
-            query: userMessage, // Simplified - backend will auto-fetch class info for class teachers
-            user_id: userId, // Pass user_id for auto-fetching class teacher info
-          });
-
-          if (data.status === "success" && data.data) {
-            // Try to extract class info from the response
-            const classInfo = data.data.class_info;
-            const answer = data.data.answer || "";
-
-            // Check if backend auto-fetched class info and provided ready message
-            // Check for "Ready to mark attendance" message first (even if classInfo might not be in response yet)
-            if (answer.includes("Ready to mark attendance") || answer.includes("ready to mark attendance")) {
-              // Backend auto-fetched class info and is ready for student details
-              if (classInfo && classInfo.class_ && classInfo.section && classInfo.date) {
-                setPendingClassInfo(classInfo);
-                setAttendanceStep("student_details");
-                // Remove the initial "Attendance flow detected" message and show backend's ready message
-                setChatHistory((prev) => {
-                  const filtered = prev.filter(
-                    (msg) => !msg.text || !msg.text.includes("Attendance flow detected")
-                  );
-                  return [
-                    ...filtered,
-                    {
-                      type: "bot",
-                      text: answer, // Use the backend's ready message
-                    },
-                  ];
-                });
-
-                // TTS for class info confirmation if voice-initiated
-                try {
-                  if (
-                    attendanceVoiceInitiatedRef.current === true &&
-                    targetFlow === "attendance"
-                  ) {
-                    const speech = generateAttendanceTTSSummary(answer, undefined, classInfo);
-                    void handlePlayTTS(-1, speech);
-                  }
-                } catch (ttsErr) {
-                  console.error("TTS playback failed:", ttsErr);
-                }
-              } else {
-                // Backend returned ready message but classInfo not in response - extract from answer
-                const classMatch = answer.match(/for\s+(\w+)\s+(\w+)\s+on\s+(\d{4}-\d{2}-\d{2})/i);
-                if (classMatch && classMatch[1] && classMatch[2] && classMatch[3]) {
-                  const extractedClassInfo = {
-                    class_: classMatch[1],
-                    section: classMatch[2],
-                    date: classMatch[3],
-                  };
-                  setPendingClassInfo(extractedClassInfo);
-                  setAttendanceStep("student_details");
-                  setChatHistory((prev) => {
-                    const filtered = prev.filter(
-                      (msg) => !msg.text || !msg.text.includes("Attendance flow detected")
-                    );
-                    return [
-                      ...filtered,
-                      {
-                        type: "bot",
-                        text: answer,
-                      },
-                    ];
-                  });
-                } else {
-                  // Fallback: just show the answer
-                  setChatHistory((prev) => [
-                    ...prev,
-                    {
-                      type: "bot",
-                      text: answer,
-                    },
-                  ]);
-                }
-              }
-            } else if (
-              classInfo &&
-              classInfo.class_ &&
-              classInfo.section &&
-              classInfo.date
-            ) {
-              // Class info successfully extracted (manual entry)
-              setPendingClassInfo(classInfo);
-              setAttendanceStep("student_details");
-              const classInfoMessage = `✅ Class information confirmed: Class ${classInfo.class_} ${classInfo.section} on ${classInfo.date}. Now please provide student details for attendance. You can type the student names and their attendance status, or upload an image with the attendance list.`;
-              setChatHistory((prev) => [
-                ...prev,
-                {
-                  type: "bot",
-                  text: classInfoMessage,
-                },
-              ]);
-
-              // TTS for class info confirmation if voice-initiated
-              try {
-                if (
-                  attendanceVoiceInitiatedRef.current === true &&
-                  targetFlow === "attendance"
-                ) {
-                  const speech = generateAttendanceTTSSummary(classInfoMessage, undefined, classInfo);
-                  void handlePlayTTS(-1, speech);
-                }
-              } catch (ttsErr) {
-                console.error("TTS playback failed:", ttsErr);
-              }
-            } else {
-              // Enhanced parsing from the answer text if structured data is not available
-              // Try multiple patterns to extract class information
-              let classMatch = answer.match(/class[:\s]*(\w+)/i);
-              let sectionMatch = answer.match(/section[:\s]*(\w+)/i);
-              let dateMatch = answer.match(
-                /(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i
-              );
-
-              // If no matches from answer, try parsing from user message directly
-              if (!classMatch || !sectionMatch || !dateMatch) {
-                // Try to parse from the original user message
-
-                // Enhanced class pattern matching - handle various formats
-                classMatch =
-                  userMessage.match(
-                    /(?:class|grade|standard|nursery|kg|pre-k|prek|lkg|ukg)[:\s]*(\w+)/i
-                  ) ||
-                  userMessage.match(/(\w+)\s+(?:class|grade|standard)/i) ||
-                  userMessage.match(/(nursery|kg|pre-k|prek|lkg|ukg)/i) ||
-                  userMessage.match(/class\s+(\w+)/i) ||
-                  userMessage.match(/mark\s+attendance\s+for\s+class\s+(\w+)/i);
-
-                // Enhanced section pattern matching - handle various formats
-                sectionMatch =
-                  userMessage.match(/(?:section|sec)[:\s]*(\w+)/i) ||
-                  userMessage.match(/(\w+)\s+(?:section|sec)/i) ||
-                  userMessage.match(/\b([a-z])\b/i) ||
-                  userMessage.match(/class\s+\w+\s+(\w+)/i) ||
-                  userMessage.match(/nursery\s+(\w+)/i) ||
-                  userMessage.match(/for\s+(\w+)/i);
-
-                // Enhanced date pattern matching - handle various formats
-                dateMatch =
-                  userMessage.match(/(\d{4}-\d{2}-\d{2})/i) ||
-                  userMessage.match(/(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
-                  userMessage.match(
-                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i
-                  ) ||
-                  userMessage.match(
-                    /(\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4})/i
-                  ) ||
-                  userMessage.match(
-                    /(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4})/i
-                  );
-              }
-
-              // Special handling for specific patterns like "Class NURSERY B for 5 August 2025"
-              if (!classMatch || !sectionMatch || !dateMatch) {
-                // Try specific patterns for common formats
-                const specificPatterns = [
-                  // "Class NURSERY B for 5 August 2025"
-                  /class\s+(\w+)\s+(\w+)\s+for\s+(\d{1,2}\s+\w+\s+\d{4})/i,
-                  // "Class Nursery Section B 2025-08-14"
-                  /class\s+(\w+)\s+section\s+(\w+)\s+(\d{4}-\d{2}-\d{2})/i,
-                  // "Mark attendance for Class NURSERY B for 5 August 2025"
-                  /mark\s+attendance\s+for\s+class\s+(\w+)\s+(\w+)\s+for\s+(\d{1,2}\s+\w+\s+\d{4})/i,
-                ];
-
-                for (const pattern of specificPatterns) {
-                  const match = userMessage.match(pattern);
-                  if (match && match[1] && match[2] && match[3]) {
-                    classMatch = match;
-                    sectionMatch = match;
-                    dateMatch = match;
-                    break;
-                  }
-                }
-              }
-
-              if (classMatch && sectionMatch && dateMatch) {
-                const extractedClassInfo = {
-                  class_: classMatch[1].toUpperCase(),
-                  section: sectionMatch[1].toUpperCase(),
-                  date: dateMatch[1],
-                };
-
-                console.log("🎯 Extracted class info:", extractedClassInfo);
-                console.log("🎯 Date match result:", dateMatch[1]);
-                setPendingClassInfo(extractedClassInfo);
-                setAttendanceStep("student_details");
-                setChatHistory((prev) => [
-                  ...prev,
-                  {
-                    type: "bot",
-                    text: `✅ Class information confirmed: Class ${extractedClassInfo.class_} ${extractedClassInfo.section} on ${extractedClassInfo.date}. Now please provide student details for attendance.`,
-                  },
-                ]);
-              } else {
-                // Ask for clarification with more specific examples including nursery
-                const clarificationMessage = `I need more specific class information. Please provide:\n• Class/Standard/Grade (e.g., 6, Class 6, Grade 6, Standard 6, Nursery, KG, Pre-K)\n• Section (e.g., A, B, C, Section A)\n• Date (e.g., 2025-01-15, 15/01/2025, Jan 15 2025)\n\nExamples: "Class 6 A on 2025-01-15", "Nursery B on 2025-08-14", or "Grade 10 Section B for 15th January 2025"`;
-                setChatHistory((prev) => [
-                  ...prev,
-                  {
-                    type: "bot",
-                    text: clarificationMessage,
-                  },
-                ]);
-
-                // TTS for clarification request if voice-initiated
-                try {
-                  if (
-                    attendanceVoiceInitiatedRef.current === true &&
-                    targetFlow === "attendance"
-                  ) {
-                    const speech = generateAttendanceTTSSummary(clarificationMessage);
-                    void handlePlayTTS(-1, speech);
-                  }
-                } catch (ttsErr) {
-                  console.error("TTS playback failed:", ttsErr);
-                }
-              }
-            }
-          } else {
-            const errorMessage = data.data?.answer || "Please provide class information clearly.";
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: errorMessage,
-              },
-            ]);
-
-            // TTS for error messages if voice-initiated
-            try {
-              if (
-                attendanceVoiceInitiatedRef.current === true &&
-                targetFlow === "attendance"
-              ) {
-                const speech = generateAttendanceTTSSummary(errorMessage);
-                void handlePlayTTS(-1, speech);
-              }
-            } catch (ttsErr) {
-              console.error("TTS playback failed:", ttsErr);
-            }
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your request. Please try again.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
+    } else if (
+      targetFlow === "attendance" ||
+      targetFlow === "voice_attendance" ||
+      targetFlow === "full_voice_attendance"
+    ) {
+      // ============= UNIFIED ATTENDANCE FLOW =============
+      // Handles text, voice, and image-based attendance in a single unified flow
+      try {
+        await handleAttendanceChat({
+          userMessage,
+          sessionId: sessionId || userId,
+          userId,
+          isVoiceTriggered: attendanceVoiceInitiatedRef.current === true,
+          callbacks: getAttendanceFlowCallbacks(),
+        });
+      } catch (err) {
+        console.error("Attendance flow error:", err);
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "Sorry, there was an error processing your attendance request. Please try again.",
+          },
+        ]);
+        if (attendanceVoiceInitiatedRef.current) {
+          void handlePlayTTS(-1, "Error processing attendance. Please try again.");
         }
-      } else if (attendanceStep === "student_details") {
-        // Second step: Collect student details
-        try {
-          const data = await aiAPI.chat({
-            session_id: sessionId || userId,
-            query: userMessage, // User provides student attendance details
-            user_id: userId, // Pass user_id for context
-          });
-
-          if (data.status === "success" && data.data) {
-            // Process the attendance data
-            let parsedAttendanceData = data.data.attendance_summary;
-            let parsedClassInfo = pendingClassInfo || data.data.class_info;
-
-            // Parse markdown table if present
-            const answer = data.data.answer || "";
-            if (
-              answer.includes("| Student Name |") &&
-              answer.includes("| Attendance Status |")
-            ) {
-              const lines = answer.split("\n");
-              const tableStartIndex = lines.findIndex((line: string) =>
-                line.includes("| Student Name |")
-              );
-              if (tableStartIndex !== -1) {
-                const tableLines = lines.slice(tableStartIndex + 2);
-                const extractedData = [];
-
-                for (const line of tableLines) {
-                  if (line.includes("|") && !line.includes("---")) {
-                    const cells = line
-                      .split("|")
-                      .map((cell: string) => cell.trim())
-                      .filter((cell: string) => cell);
-                    if (cells.length >= 2) {
-                      extractedData.push({
-                        student_name: cells[0],
-                        attendance_status: cells[1],
-                      });
-                    }
-                  }
-                }
-
-                if (extractedData.length > 0) {
-                  parsedAttendanceData = extractedData;
-                }
-              }
-            }
-
-            // Create the message with attendance data
-            const newMessage = {
-              type: "bot" as const,
-              answer: data.data?.answer,
-              references: data.data?.references,
-              mongodbquery: data.data?.mongodbquery,
-              activeTab: "answer" as const,
-              attendance_summary: parsedAttendanceData,
-              class_info: parsedClassInfo,
-              bulkattandance: data.data?.bulkattandance,
-              finish_collecting: data.data?.finish_collecting,
-            };
-
-            console.log("Creating new message with attendance data:", {
-              attendance_summary: parsedAttendanceData,
-              class_info: parsedClassInfo,
-              messageType: newMessage.type,
-            });
-
-            if (parsedAttendanceData && parsedAttendanceData.length > 0) {
-              console.log(
-                "🎯 Setting global state for text-based attendance:",
-                {
-                  parsedAttendanceData: parsedAttendanceData,
-                  parsedClassInfo: parsedClassInfo,
-                  dataLength: parsedAttendanceData.length,
-                }
-              );
-              // Set global state FIRST before creating buttons
-              setAttendanceData(parsedAttendanceData);
-              setClassInfo(parsedClassInfo);
-              setAttendanceStep("completed");
-
-              // Calculate the message index that will be used (after this message is added)
-              const messageIndexForButtons = chatHistory.length;
-
-              // Capture the parsed data at the time of button creation to pass as fallback
-              // This ensures the button closure has the most current data
-              const capturedAttendanceData = parsedAttendanceData ? [...parsedAttendanceData] : [];
-              const capturedClassInfo = parsedClassInfo ? { ...parsedClassInfo } : null;
-
-              // Add the specific buttons as requested (initial state: read-only mode)
-              (newMessage as any).buttons = [
-                {
-                  label: "Edit Attendance",
-                  action: () => {
-                    console.log(
-                      "Edit Attendance clicked for text-based attendance"
-                    );
-                    console.log(
-                      "Setting attendance data:",
-                      capturedAttendanceData
-                    );
-                    console.log("Setting class info:", capturedClassInfo);
-                    console.log(
-                      "Setting editing message index to:",
-                      messageIndexForButtons
-                    );
-
-                    // Set the global state for editing
-                    console.log("Loading data into global state for editing:", {
-                      capturedAttendanceData,
-                      capturedClassInfo,
-                      messageIndex: messageIndexForButtons,
-                    });
-                    setAttendanceData(capturedAttendanceData);
-                    setClassInfo(capturedClassInfo);
-                    setEditingMessageIndex(messageIndexForButtons);
-
-                    // Verify the data was set
-                    setTimeout(() => {
-                      console.log("Global state after setting:", {
-                        attendanceData: attendanceData,
-                        classInfo: classInfo,
-                        editingMessageIndex: editingMessageIndex,
-                      });
-                    }, 100);
-
-                    // Force a re-render by updating the message to trigger edit mode
-                    setChatHistory((prev) => {
-                      const updatedHistory = [...prev];
-                      const lastMessage =
-                        updatedHistory[updatedHistory.length - 1];
-                      if (lastMessage && lastMessage.type === "bot") {
-                        // Mark this message as being edited
-                        (lastMessage as any).isBeingEdited = true;
-                        console.log(
-                          "Set isBeingEdited flag to true for message:",
-                          updatedHistory.length - 1
-                        );
-                      }
-                      return updatedHistory;
-                    });
-
-                    // Add a message to indicate edit mode is active
-                    setChatHistory((prev) => [
-                      ...prev,
-                      {
-                        type: "bot",
-                        text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
-                      },
-                    ]);
-                  },
-                },
-                {
-                  label: "Approve",
-                  action: () => {
-                    console.log(
-                      "🎯 Approve button clicked for text-based attendance"
-                    );
-                    console.log(
-                      "🎯 Message index for this message:",
-                      messageIndexForButtons
-                    );
-                    console.log("🎯 Captured data:", {
-                      capturedAttendanceData: capturedAttendanceData.length,
-                      capturedClassInfo: capturedClassInfo,
-                    });
-                    console.log("🎯 Current global state:", {
-                      attendanceData: attendanceData,
-                      classInfo: classInfo,
-                      editingMessageIndex: editingMessageIndex,
-                    });
-                    // Pass the captured data as fallback parameters
-                    // This ensures it works correctly even if chatHistory hasn't updated yet
-                    handleTextAttendanceApproval(
-                      messageIndexForButtons,
-                      capturedAttendanceData,
-                      capturedClassInfo
-                    );
-                  },
-                },
-                {
-                  label: "Reject",
-                  action: () => handleTextAttendanceRejection(),
-                },
-              ];
-            }
-
-            setChatHistory((prev) => [...prev, newMessage]);
-
-            // TTS for attendance summary if voice-initiated
-            try {
-              if (
-                attendanceVoiceInitiatedRef.current === true &&
-                targetFlow === "attendance" &&
-                parsedAttendanceData &&
-                parsedAttendanceData.length > 0
-              ) {
-                const speech = generateAttendanceTTSSummary(answer, parsedAttendanceData, parsedClassInfo);
-                void handlePlayTTS(-1, speech);
-              }
-            } catch (ttsErr) {
-              console.error("TTS playback failed:", ttsErr);
-            }
-          } else {
-            const errorMessage = data.data?.answer || "Please provide student details clearly.";
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: errorMessage,
-              },
-            ]);
-
-            // TTS for error messages if voice-initiated
-            try {
-              if (
-                attendanceVoiceInitiatedRef.current === true &&
-                targetFlow === "attendance"
-              ) {
-                const speech = generateAttendanceTTSSummary(errorMessage);
-                void handlePlayTTS(-1, speech);
-              }
-            } catch (ttsErr) {
-              console.error("TTS playback failed:", ttsErr);
-            }
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your attendance request.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
-      }
-    } else if (targetFlow === "voice_attendance") {
-      // Voice-based attendance flow
-      if (attendanceStep === "class_info") {
-        // First step: Process voice input for class information
-        try {
-          const data = await aiAPI.processVoiceClassInfo({
-            session_id: sessionId || userId,
-            voice_text: userMessage,
-          });
-
-          if (data.status === "success" && data.data) {
-            const classInfo = data.data.class_info;
-            setPendingClassInfo(classInfo);
-            setAttendanceStep("student_details");
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: `✅ ${
-                  data.data?.message || "Class information confirmed"
-                } Now you can speak the student names and their attendance status. For example: "Aarav present, Diya absent" or "Mark all present except John".`,
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  data.message ||
-                  "Please provide class information clearly via voice.",
-              },
-            ]);
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your voice input. Please try again.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
-      } else if (attendanceStep === "student_details") {
-        // Second step: Process voice input for student attendance
-        try {
-          const data = await aiAPI.processVoiceAttendance({
-            session_id: sessionId || userId,
-            voice_text: userMessage,
-            class_info: pendingClassInfo,
-          });
-
-          if (data.status === "success" && data.data) {
-            // Process the voice attendance data
-            const parsedAttendanceData = data.data.attendance_summary;
-            const parsedClassInfo = pendingClassInfo || data.data.class_info;
-
-            // Create the message with attendance data
-            const newMessage = {
-              type: "bot" as const,
-              answer: data.data.answer,
-              activeTab: "answer" as const,
-              attendance_summary: parsedAttendanceData,
-              class_info: parsedClassInfo,
-              voice_processed: data.data.voice_processed,
-            };
-
-            if (parsedAttendanceData && parsedAttendanceData.length > 0) {
-              setAttendanceData(parsedAttendanceData);
-              setClassInfo(parsedClassInfo);
-              setAttendanceStep("completed");
-
-              // Add buttons for voice attendance
-              (newMessage as any).buttons = [
-                {
-                  label: "Edit Attendance",
-                  action: () => {
-                    setAttendanceData(parsedAttendanceData);
-                    setClassInfo(parsedClassInfo);
-                    setEditingMessageIndex(chatHistory.length);
-
-                    setChatHistory((prev) => {
-                      const updatedHistory = [...prev];
-                      const lastMessage =
-                        updatedHistory[updatedHistory.length - 1];
-                      if (lastMessage && lastMessage.type === "bot") {
-                        (lastMessage as any).isBeingEdited = true;
-                      }
-                      return updatedHistory;
-                    });
-
-                    setChatHistory((prev) => [
-                      ...prev,
-                      {
-                        type: "bot",
-                        text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
-                      },
-                    ]);
-                  },
-                },
-                {
-                  label: "Approve",
-                  action: () => {
-                    handleVoiceAttendanceApproval(chatHistory.length);
-                  },
-                },
-                {
-                  label: "Reject",
-                  action: () => handleVoiceAttendanceRejection(),
-                },
-              ];
-            }
-
-            setChatHistory((prev) => [...prev, newMessage]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  data.message ||
-                  "Please provide student attendance information clearly via voice.",
-              },
-            ]);
-          }
-        } catch (err) {
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Sorry, there was an error processing your voice attendance request.",
-            },
-          ]);
-        } finally {
-          setIsProcessing(false);
-        }
+        setIsProcessing(false);
       }
     } else if (targetFlow === "leave") {
       // Leave application flow
@@ -2152,90 +1569,6 @@ const AudioStreamerChatBot = ({
     return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
   };
 
-  // Helper function to generate concise TTS summary for attendance messages
-  const generateAttendanceTTSSummary = (answer: string, attendanceData?: any[], classInfo?: any): string => {
-    const lowerAnswer = answer.toLowerCase();
-    
-    // Class information confirmation
-    if (
-      lowerAnswer.includes("class information confirmed") ||
-      lowerAnswer.includes("ready to mark attendance") ||
-      (lowerAnswer.includes("class") && lowerAnswer.includes("section") && lowerAnswer.includes("date"))
-    ) {
-      if (classInfo && classInfo.class_ && classInfo.section && classInfo.date) {
-        return `Class information confirmed for Class ${classInfo.class_} ${classInfo.section} on ${classInfo.date}. Now please provide student details for attendance`;
-      }
-      return "Class information confirmed. Now please provide student details for attendance";
-    }
-    
-    // Asking for class information
-    if (
-      lowerAnswer.includes("please provide") && 
-      (lowerAnswer.includes("class") || lowerAnswer.includes("section") || lowerAnswer.includes("date"))
-    ) {
-      return "Please provide class information including class name, section, and date";
-    }
-    
-    // Attendance summary/validation ready
-    if (
-      lowerAnswer.includes("check attendance") ||
-      lowerAnswer.includes("attendance summary") ||
-      (lowerAnswer.includes("student name") && lowerAnswer.includes("attendance status"))
-    ) {
-      if (attendanceData && attendanceData.length > 0) {
-        const presentCount = attendanceData.filter((s: any) => 
-          s.attendance_status?.toLowerCase().includes("present") || 
-          s.attendance_status?.toLowerCase() === "p"
-        ).length;
-        const totalCount = attendanceData.length;
-        return `Attendance summary ready. Total ${totalCount} students, ${presentCount} present. Please review and approve or reject`;
-      }
-      return "Attendance summary ready. Please review and approve or reject";
-    }
-    
-    // Asking for student details
-    if (
-      lowerAnswer.includes("please provide student") ||
-      lowerAnswer.includes("provide student details") ||
-      (lowerAnswer.includes("student") && lowerAnswer.includes("attendance"))
-    ) {
-      return "Please provide student names and their attendance status";
-    }
-    
-    // Success messages
-    if (lowerAnswer.includes("successfully") && (lowerAnswer.includes("saved") || lowerAnswer.includes("marked"))) {
-      return "Attendance marked successfully";
-    }
-    
-    // Approval/rejection prompts
-    if (lowerAnswer.includes("do you approve") || lowerAnswer.includes("approve or reject")) {
-      return "Please review the attendance summary and approve or reject";
-    }
-    
-    // Error messages
-    if (lowerAnswer.includes("error") || lowerAnswer.includes("failed")) {
-      return "An error occurred while processing attendance. Please try again";
-    }
-    
-    // Default: return first sentence or first 150 characters, cleaned
-    const cleaned = answer
-      .replace(/\*\*/g, "")
-      .replace(/\*/g, "")
-      .replace(/📝|✅|❌|⚠️|•|🎯/g, "")
-      .replace(/\n/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    
-    // Try to get first sentence
-    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
-    if (firstSentence.length > 0 && firstSentence.length < 200) {
-      return firstSentence;
-    }
-    
-    // Fallback to first 150 characters
-    return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
-  };
-
   // Helper for query-flow TTS: strip markdown and truncate for voice playback
   const generateQueryTTSSummary = (answer: string): string => {
     if (!answer || !answer.trim()) return "No response.";
@@ -2377,6 +1710,48 @@ const AudioStreamerChatBot = ({
 
   // Removed unused inline editing functions - using main approval buttons instead
 
+  // ============= UNIFIED ATTENDANCE FLOW CALLBACKS =============
+  const getAttendanceFlowCallbacks = (): AttendanceFlowCallbacks => ({
+    appendBotMessage: (msg) => {
+      setChatHistory((prev) => [...prev, { ...msg, type: "bot" }]);
+    },
+    updateLastBotMessage: (msg) => {
+      setChatHistory((prev) => {
+        const lastIndex = prev.length - 1;
+        if (lastIndex >= 0 && prev[lastIndex].type === "bot") {
+          const updated = [...prev];
+          updated[lastIndex] = { ...updated[lastIndex], ...msg };
+          return updated;
+        }
+        return prev;
+      });
+    },
+    setAttendanceState: (partial) => {
+      setAttendanceFlowState((prev) => ({ ...prev, ...partial }));
+    },
+    getAttendanceState: () => attendanceFlowState,
+    setGlobalAttendanceData: (data) => setAttendanceData(data),
+    setGlobalClassInfo: (info) => setClassInfo(info),
+    getGlobalAttendanceData: () => attendanceDataRef.current, // Use ref for current value in closures
+    getGlobalClassInfo: () => classInfoRef.current, // Use ref for current value in closures
+    setEditingMessageIndex: (index) => setEditingMessageIndex(index),
+    getChatHistoryLength: () => chatHistory.length,
+    exitFlow: () => {
+      activeFlowRef.current = "none";
+      setActiveFlow("none");
+      setAttendanceStep("class_info");
+      setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+      setAttendanceData([]);
+      setClassInfo(null);
+      setPendingClassInfo(null);
+      setEditingMessageIndex(null);
+      attendanceVoiceInitiatedRef.current = false;
+      setAutoRouting(true);
+    },
+    setProcessing: setIsProcessing,
+    playTTS: (index, text) => void handlePlayTTS(index, text),
+  });
+
   const handleAttendanceDataChange = (
     index: number,
     field: string,
@@ -2388,7 +1763,7 @@ const AudioStreamerChatBot = ({
   };
 
   const handleAddStudent = () => {
-    const newStudent = { student_name: "", attendance_status: "Present" };
+    const newStudent: AttendanceRecord = { student_name: "", attendance_status: "Present" };
     setAttendanceData([...attendanceData, newStudent]);
   };
 
@@ -2397,149 +1772,27 @@ const AudioStreamerChatBot = ({
     setAttendanceData(updatedData);
   };
 
-  // Handle class info modal confirmation
+  // Handle class info modal confirmation — delegates to unified attendance flow
   const handleClassInfoConfirm = async (classInfo: {
     class_: string;
     section: string;
     date: string;
   }) => {
     if (pendingImageFile) {
-      try {
-        // Set the class info and move to student details step
-        setPendingClassInfo(classInfo);
-        setAttendanceStep("student_details");
-
-        // Show processing indicator
-        setIsProcessingImage(true);
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "🔄 Processing image... Please wait while I extract attendance information from your image.",
-            isProcessing: true,
-          },
-        ]);
-
-        const result = await uploadAttendanceImage(pendingImageFile, classInfo);
-
-        // Clear processing state
-        setIsProcessingImage(false);
-
-        // Remove the processing message
-        setChatHistory((prev) =>
-          prev.filter((msg) => !(msg as any).isProcessing)
-        );
-
-        if (
-          result.data.attendance_summary &&
-          result.data.attendance_summary.length > 0
-        ) {
-          // Create the message with attendance data (same as text-based)
-          const newMessage = {
-            type: "bot" as const,
-            answer: result.message,
-            references: undefined,
-            mongodbquery: undefined,
-            activeTab: "answer" as const,
-            attendance_summary: result.data.attendance_summary,
-            class_info: classInfo,
-            bulkattandance: result.data.bulkattandance,
-            finish_collecting: result.data.finish_collecting,
-          };
-
-          // Set global state for editing
-          setAttendanceData(result.data.attendance_summary);
-          setClassInfo(classInfo);
-          setAttendanceStep("completed");
-
-          // Add the same buttons as text-based attendance
-          (newMessage as any).buttons = [
-            {
-              label: "Edit Attendance",
-              action: () => {
-                console.log("Edit Attendance clicked for OCR-based attendance");
-                console.log(
-                  "Setting attendance data:",
-                  result.data.attendance_summary
-                );
-                console.log("Setting class info:", classInfo);
-                console.log(
-                  "Setting editing message index to:",
-                  chatHistory.length
-                );
-
-                // Set the global state for editing
-                setAttendanceData(result.data.attendance_summary);
-                setClassInfo(classInfo);
-                setEditingMessageIndex(chatHistory.length);
-
-                // Force a re-render by updating the message to trigger edit mode
-                setChatHistory((prev) => {
-                  const updatedHistory = [...prev];
-                  const lastMessage = updatedHistory[updatedHistory.length - 1];
-                  if (lastMessage && lastMessage.type === "bot") {
-                    // Mark this message as being edited
-                    (lastMessage as any).isBeingEdited = true;
-                    console.log(
-                      "Set isBeingEdited flag to true for message:",
-                      updatedHistory.length - 1
-                    );
-                  }
-                  return updatedHistory;
-                });
-
-                // Add a message to indicate edit mode is active
-                setChatHistory((prev) => [
-                  ...prev,
-                  {
-                    type: "bot",
-                    text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
-                  },
-                ]);
-              },
-            },
-            {
-              label: "Approve",
-              action: () => handleOCRApproval(), // No need to pass message index, will search automatically
-            },
-            {
-              label: "Reject",
-              action: () => handleOCRRejection(),
-            },
-          ];
-
-          setChatHistory((prev) => [...prev, newMessage]);
-        } else {
-          // If no attendance data from image, ask for student details
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Image processed but no attendance data found. Please provide student details manually or try uploading a different image.",
-            },
-          ]);
-        }
-      } catch (err) {
-        // Clear processing state on error
-        setIsProcessingImage(false);
-        setChatHistory((prev) => {
-          // Remove processing message and add error message
-          const filteredHistory = prev.filter(
-            (msg) => !(msg as any).isProcessing
-          );
-          return [
-            ...filteredHistory,
-            {
-              type: "bot",
-              text: `❌ Image processing failed: ${
-                (err as Error).message
-              }. Please try uploading a different image or provide attendance data as text.`,
-            },
-          ];
-        });
-      }
+      const classInfoObj: ClassInfo = {
+        class_: classInfo.class_,
+        section: classInfo.section,
+        date: classInfo.date,
+      };
+      await handleAttendanceImageUpload({
+        file: pendingImageFile,
+        sessionId: sessionId || userId || "",
+        userId,
+        classInfo: classInfoObj,
+        isVoiceTriggered: false,
+        callbacks: getAttendanceFlowCallbacks(),
+      });
     }
-
     setShowClassInfoModal(false);
     setPendingImageFile(null);
   };
@@ -2547,66 +1800,6 @@ const AudioStreamerChatBot = ({
   const handleClassInfoCancel = () => {
     setShowClassInfoModal(false);
     setPendingImageFile(null);
-  };
-
-  // Handle OCR approval - save to MongoDB
-  const handleOCRApproval = async (
-    messageIndex?: number,
-    fallbackAttendanceData?: any[],
-    fallbackClassInfo?: any
-  ) => {
-    return handleUnifiedAttendanceApproval(
-      messageIndex,
-      "image",
-      fallbackAttendanceData,
-      fallbackClassInfo
-    );
-  };
-
-  // Handle OCR rejection - clear data and show upload option
-  const handleOCRRejection = () => {
-    console.log("OCR Rejection clicked");
-
-    // Clear the attendance data
-    setAttendanceData([]);
-    setClassInfo(null);
-    setEditingMessageIndex(null);
-
-    // Show rejection message with upload option
-    setChatHistory((prev) => [
-      ...prev,
-      {
-        type: "bot",
-        text: "❌ Attendance rejected. You can upload a new image or provide attendance data manually.",
-        buttons: [
-          {
-            label: "Upload New Image",
-            action: () => {
-              // Trigger file input click
-              const fileInput = document.querySelector(
-                'input[type="file"]'
-              ) as HTMLInputElement;
-              if (fileInput) {
-                fileInput.click();
-              }
-            },
-          },
-          {
-            label: "Enter Manually",
-            action: () => {
-              // Clear the message and let user type manually
-              setChatHistory((prev) => [
-                ...prev,
-                {
-                  type: "bot",
-                  text: 'Please provide attendance data manually. For example: "Mark all present for Class 4 A on 2025-02-08" or list individual students.',
-                },
-              ]);
-            },
-          },
-        ],
-      },
-    ]);
   };
 
   // Unified attendance data manager
@@ -3240,7 +2433,7 @@ const AudioStreamerChatBot = ({
                     ...prev,
                     {
                       type: "bot",
-                      text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Make your changes and click Save when done.",
+                      text: "✅ Edit mode activated! You can now modify the attendance data.",
                     },
                   ]);
                 },
@@ -6285,18 +5478,19 @@ const AudioStreamerChatBot = ({
 
                                       return true;
                                     })() && (
-                                      <div className="bg-white border border-gray-200 rounded-lg p-4 my-4 shadow-sm">
+                                      <div
+                                        id={`attendance-summary-${idx}`}
+                                        className="bg-white border border-gray-200 rounded-lg p-4 my-4 shadow-sm"
+                                      >
                                         {/* Header */}
                                         <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-300">
                                           <div>
                                             <h3 className="text-gray-900 m-0 mb-1 text-lg font-semibold">
-                                              {editingMessageIndex === idx ||
-                                              (msg as any).isBeingEdited
+                                              {editingMessageIndex !== null
                                                 ? "✏️ Edit Attendance Summary"
                                                 : "📋 Attendance Summary"}
                                             </h3>
-                                            {(editingMessageIndex === idx ||
-                                              (msg as any).isBeingEdited) && (
+                                            {editingMessageIndex !== null && (
                                               <div className="bg-blue-100 text-blue-900 p-2 rounded-md text-sm mb-4 font-medium">
                                                 ✏️ Edit mode active - You can
                                                 modify student names and
@@ -6304,8 +5498,7 @@ const AudioStreamerChatBot = ({
                                               </div>
                                             )}
                                             {/* Edit Mode Buttons - Show Save/Cancel when in edit mode */}
-                                            {(editingMessageIndex === idx ||
-                                              (msg as any).isBeingEdited) && (
+                                            {editingMessageIndex !== null && (
                                               <div className="flex gap-2 mb-4 p-2 rounded-md bg-gray-50 border border-gray-200">
                                                 <button
                                                   onClick={() =>
@@ -6368,8 +5561,7 @@ const AudioStreamerChatBot = ({
                                         <div className="flex gap-4 mb-4 p-3 rounded-md bg-gray-50 text-sm">
                                           {(() => {
                                             const isEditing =
-                                              editingMessageIndex === idx ||
-                                              (msg as any).isBeingEdited;
+                                              editingMessageIndex !== null;
                                             const dataToUse = isEditing
                                               ? attendanceData
                                               : msg.attendance_summary || [];
@@ -6423,8 +5615,7 @@ const AudioStreamerChatBot = ({
                                             <tbody>
                                               {(() => {
                                                 const isEditing =
-                                                  editingMessageIndex === idx ||
-                                                  (msg as any).isBeingEdited;
+                                                  editingMessageIndex !== null;
                                                 const dataToUse = isEditing
                                                   ? attendanceData
                                                   : msg.attendance_summary ||
@@ -6475,10 +5666,8 @@ const AudioStreamerChatBot = ({
                                                       <td className="px-3 py-3 border-r border-gray-200 text-gray-900">
                                                         {(() => {
                                                           const isEditing =
-                                                            editingMessageIndex ===
-                                                              idx ||
-                                                            (msg as any)
-                                                              .isBeingEdited;
+                                                            editingMessageIndex !==
+                                                            null;
                                                           console.log(
                                                             `Student name field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, idx=${idx}, isBeingEdited=${
                                                               (msg as any)
@@ -6521,10 +5710,8 @@ const AudioStreamerChatBot = ({
                                                       <td className="px-3 py-3 border-r border-gray-200 text-gray-900">
                                                         {(() => {
                                                           const isEditing =
-                                                            editingMessageIndex ===
-                                                              idx ||
-                                                            (msg as any)
-                                                              .isBeingEdited;
+                                                            editingMessageIndex !==
+                                                            null;
                                                           console.log(
                                                             `Attendance status field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, isBeingEdited=${
                                                               (msg as any)
@@ -6572,10 +5759,8 @@ const AudioStreamerChatBot = ({
                                                         })()}
                                                       </td>
                                                       <td className="px-3 py-3 text-center">
-                                                        {(editingMessageIndex ===
-                                                          idx ||
-                                                          (msg as any)
-                                                            .isBeingEdited) && (
+                                                        {editingMessageIndex !==
+                                                          null && (
                                                           <button
                                                             onClick={() =>
                                                               handleRemoveStudent(
@@ -6850,168 +6035,23 @@ const AudioStreamerChatBot = ({
 
                     try {
                       if (file.type.startsWith("image/")) {
-                        // For images, follow the same step-by-step flow as text-based attendance
-                        if (attendanceStep === "class_info") {
-                          // If we're in class info step, show class info modal
+                        // For images, use existing class info if available, otherwise show modal
+                        const existingClassInfo = classInfo || pendingClassInfo || attendanceFlowState.classInfo;
+                        
+                        if (existingClassInfo) {
+                          // Class info already provided - process image directly without modal
+                          await handleAttendanceImageUpload({
+                            file,
+                            sessionId: sessionId || userId || "",
+                            userId,
+                            classInfo: existingClassInfo,
+                            isVoiceTriggered: false,
+                            callbacks: getAttendanceFlowCallbacks(),
+                          });
+                        } else {
+                          // No class info yet - show modal to collect it
                           setPendingImageFile(file);
                           setShowClassInfoModal(true);
-                        } else if (attendanceStep === "student_details") {
-                          // If we're in student details step, process the image directly
-                          if (pendingClassInfo) {
-                            try {
-                              // Show processing indicator
-                              setIsProcessingImage(true);
-                              setChatHistory((prev) => [
-                                ...prev,
-                                {
-                                  type: "bot",
-                                  text: "🔄 Processing image... Please wait while I extract attendance information from your image.",
-                                  isProcessing: true,
-                                },
-                              ]);
-
-                              const result = await uploadAttendanceImage(
-                                file,
-                                pendingClassInfo
-                              );
-
-                              // Clear processing state
-                              setIsProcessingImage(false);
-
-                              // Remove the processing message
-                              setChatHistory((prev) =>
-                                prev.filter((msg) => !(msg as any).isProcessing)
-                              );
-
-                              if (
-                                result.data.attendance_summary &&
-                                result.data.attendance_summary.length > 0
-                              ) {
-                                // Create the message with attendance data (same as text-based)
-                                const newMessage = {
-                                  type: "bot" as const,
-                                  answer: result.message,
-                                  references: undefined,
-                                  mongodbquery: undefined,
-                                  activeTab: "answer" as const,
-                                  attendance_summary:
-                                    result.data.attendance_summary,
-                                  class_info: pendingClassInfo,
-                                  bulkattandance: result.data.bulkattandance,
-                                  finish_collecting:
-                                    result.data.finish_collecting,
-                                };
-
-                                // Set global state for editing
-                                setAttendanceData(
-                                  result.data.attendance_summary
-                                );
-                                setClassInfo(pendingClassInfo);
-                                setAttendanceStep("completed");
-
-                                // Add the same buttons as text-based attendance
-                                (newMessage as any).buttons = [
-                                  {
-                                    label: "Edit Attendance",
-                                    action: () => {
-                                      console.log(
-                                        "Edit Attendance clicked for image-based attendance"
-                                      );
-                                      console.log(
-                                        "Setting attendance data:",
-                                        result.data.attendance_summary
-                                      );
-                                      console.log(
-                                        "Setting class info:",
-                                        pendingClassInfo
-                                      );
-                                      console.log(
-                                        "Setting editing message index to:",
-                                        chatHistory.length
-                                      );
-
-                                      // Set the global state for editing
-                                      setAttendanceData(
-                                        result.data.attendance_summary
-                                      );
-                                      setClassInfo(pendingClassInfo);
-                                      setEditingMessageIndex(
-                                        chatHistory.length
-                                      );
-
-                                      // Force a re-render by updating the message to trigger edit mode
-                                      setChatHistory((prev) => {
-                                        const updatedHistory = [...prev];
-                                        const lastMessage =
-                                          updatedHistory[
-                                            updatedHistory.length - 1
-                                          ];
-                                        if (
-                                          lastMessage &&
-                                          lastMessage.type === "bot"
-                                        ) {
-                                          // Mark this message as being edited
-                                          (lastMessage as any).isBeingEdited =
-                                            true;
-                                          console.log(
-                                            "Set isBeingEdited flag to true for message:",
-                                            updatedHistory.length - 1
-                                          );
-                                        }
-                                        return updatedHistory;
-                                      });
-
-                                      // Add a message to indicate edit mode is active
-                                      setChatHistory((prev) => [
-                                        ...prev,
-                                        {
-                                          type: "bot",
-                                          text: "✅ Edit mode activated! You can now modify the attendance data in the table above. Use the Save/Cancel buttons in the table to save or discard your changes.",
-                                        },
-                                      ]);
-                                    },
-                                  },
-                                  {
-                                    label: "Approve",
-                                    action: () => handleOCRApproval(), // No need to pass message index, will search automatically
-                                  },
-                                  {
-                                    label: "Reject",
-                                    action: () => handleOCRRejection(),
-                                  },
-                                ];
-
-                                setChatHistory((prev) => [...prev, newMessage]);
-                              } else {
-                                // If no attendance data from image, ask for student details
-                                setChatHistory((prev) => [
-                                  ...prev,
-                                  {
-                                    type: "bot",
-                                    text: "Image processed but no attendance data found. Please provide student details manually or try uploading a different image.",
-                                  },
-                                ]);
-                              }
-                            } catch (error) {
-                              // Clear processing state on error
-                              setIsProcessingImage(false);
-                              setChatHistory((prev) => {
-                                // Remove processing message and add error message
-                                const filteredHistory = prev.filter(
-                                  (msg) => !(msg as any).isProcessing
-                                );
-                                return [
-                                  ...filteredHistory,
-                                  {
-                                    type: "bot",
-                                    text: `❌ Image processing failed: ${
-                                      (error as Error).message
-                                    }. Please try uploading a different image or provide attendance data as text.`,
-                                  },
-                                ];
-                              });
-                            }
-                          }
                         }
                       } else if (attendanceStep === "student_details") {
                         // Handle non-image files for attendance
