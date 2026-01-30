@@ -23,7 +23,6 @@ import {
   aiAPI,
   userAPI,
   leaveApprovalAPI,
-  courseProgressAPI,
   getAIHeaders,
 } from "../services/api";
 import { API_BASE_URL } from "../config/api";
@@ -158,15 +157,8 @@ const AudioStreamerChatBot = ({
   const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>(
     {}
   ); // <-- add for reject reasons
-  const [classSections, setClassSections] = useState<any[]>([]); // <-- add for course progress class sections
-  const [loadingClassSections, setLoadingClassSections] = useState(false); // <-- add for loading class sections
-  const [selectedClassSection, setSelectedClassSection] = useState<{
-    classId: string;
-    sectionId: string;
-    className?: string;
-    sectionName?: string;
-  } | null>(null); // <-- add for selected class/section
-  const [, setCourseProgressData] = useState<any>(null); // <-- add for course progress data
+  // Course progress is now fully backend-driven - no frontend state needed
+  // The backend returns course_progress data in the response which is stored in chat messages
 
   // Auto-routing states merge on 17-12-2025 manvi + lakshmi
 
@@ -182,6 +174,7 @@ const AudioStreamerChatBot = ({
   const [fullVoiceMode, setFullVoiceMode] = useState<boolean>(false); // Full Voice Mode (Hands-Free)
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
+  const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
   const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Debounce turn-complete
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0);
   const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voice input time
@@ -226,7 +219,7 @@ const AudioStreamerChatBot = ({
       const welcomeMessage = {
         type: "bot" as const,
         answer:
-          "Welcome! I'm ready to help you with queries. You can ask me anything or use the dropdown to select a specific flow.",
+          "Hello! I'm Sofisto, your school assistant.\nHow can I help you today?",
         activeTab: "answer" as const,
         feedback: undefined,
         references: undefined,
@@ -280,8 +273,12 @@ const AudioStreamerChatBot = ({
     classInfoRef.current = classInfo;
   }, [classInfo]);
 
-  // Helper function to interrupt any playing TTS
+  // Helper function to interrupt any playing TTS and cancel in-flight requests
   const interruptTTS = () => {
+    // Increment request ID to cancel any in-flight TTS requests
+    ttsRequestIdRef.current += 1;
+    console.log(`🛑 TTS interrupted - new request ID: ${ttsRequestIdRef.current}`);
+    
     if (currentTTSAudioRef.current) {
       const audio = currentTTSAudioRef.current;
       // Always interrupt if audio exists - pause and reset
@@ -289,7 +286,8 @@ const AudioStreamerChatBot = ({
         paused: audio.paused, 
         currentTime: audio.currentTime, 
         readyState: audio.readyState,
-        ended: audio.ended
+        ended: audio.ended,
+        requestId: (audio as any)._requestId
       });
       audio.pause();
       audio.currentTime = 0;
@@ -305,6 +303,9 @@ const AudioStreamerChatBot = ({
       currentTTSAudioRef.current = null;
       webrtcServiceRef.current?.interruptBotAudio();
     }
+    
+    // Clear loading state
+    setTtsLoading(null);
   };
 
   const startStreaming = async (useFullVoice = false) => {
@@ -602,9 +603,11 @@ const AudioStreamerChatBot = ({
     setIsProcessing(true);
 
     // CHECK FOR EXIT KEYWORDS - Exit current flow immediately
+    // Strip trailing punctuation (voice transcription often adds "." or "?" or "!")
     const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
+    const normalizedForExit = userMessage.toLowerCase().trim().replace(/[.!?,;:'"]+$/, '');
     const isExitCommand = exitKeywords.some(
-      (keyword) => userMessage.toLowerCase().trim() === keyword
+      (keyword) => normalizedForExit === keyword
     );
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
@@ -1216,140 +1219,56 @@ const AudioStreamerChatBot = ({
         getTTSSummary: generateQueryTTSSummary,
       });
     } else if (targetFlow === "course_progress") {
-      // Course progress flow - selection is handled via UI clicks
-      // This handles text-based queries or refreshes
+      // Course progress flow - fully backend-driven
+      // Send user message to backend and render the response
       try {
-        if (classSections.length === 0) {
-          // Fetch class sections if not already loaded
-          setLoadingClassSections(true);
-          const authToken = localStorage.getItem("token");
-          const { academic_session, branch_token } = getErpContext();
-          const response = await courseProgressAPI.fetchClassSections({
-            page: 1,
-            limit: 50,
-            bearer_token: authToken || undefined,
-            academic_session,
-            branch_token,
-          });
+        const authToken = localStorage.getItem("token");
+        const { academic_session, branch_token } = getErpContext();
+        
+        const response = await aiAPI.courseProgressChat({
+          session_id: sessionId || `session_${userId}`,
+          query: userMessage,
+          bearer_token: authToken || undefined,
+          academic_session,
+          branch_token,
+        });
 
+        if (response.status === "success" && response.data) {
+          const botMessage: any = {
+            type: "bot",
+            text: response.data.answer || "How can I help with course progress?",
+          };
+          
+          // If backend returns course progress data, include it for rendering
+          if (response.data.course_progress) {
+            botMessage.courseProgress = response.data.course_progress;
+            botMessage.classSection = response.data.class_section;
+          }
+          
+          // If backend returns class sections list, include it for rendering
+          if (response.data.class_sections && response.data.class_sections.length > 0) {
+            botMessage.classSectionsOptions = response.data.class_sections;
+          }
+          
+          setChatHistory((prev) => [...prev, botMessage]);
+          
+          // Play TTS if voice-initiated
           if (
-            (response.status === 200 || response.status === "success") &&
-            response.data?.options
+            isVoiceTriggeredRequestRef.current === true &&
+            response.data.tts_text
           ) {
-            const options = response.data.options || [];
-            setClassSections(options);
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: `📚 Found **${options.length}** class-section(s). Please select a class and section from the list above to view course progress.`,
-                classSections: options,
-              },
-            ]);
-            // If this Course Progress request was initiated via microphone,
-            // play a concise informational TTS line (plain text) and mark
-            // that the course-progress flow was voice-initiated so the
-            // subsequent class selection can also trigger TTS.
             try {
-              if (
-                isVoiceTriggeredRequestRef.current === true &&
-                // Double-check flow
-                targetFlow === "course_progress"
-              ) {
-                courseProgressVoiceInitiatedRef.current = true;
-                const speech = `Found ${options.length} class-sections. Please select a class and section from the list above to view course progress.`;
-                void handlePlayTTS(-1, speech);
-              }
+              void handlePlayTTS(-1, response.data.tts_text);
             } catch (ttsErr) {
               console.error("TTS playback failed:", ttsErr);
             }
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  response.message ||
-                  "No class sections found. Please try again.",
-              },
-            ]);
-          }
-          setLoadingClassSections(false);
-        } else if (selectedClassSection) {
-          // If a class section is already selected, refresh the progress
-          const authToken = localStorage.getItem("token");
-          const { academic_session, branch_token } = getErpContext();
-          const progressResponse = await courseProgressAPI.getProgress({
-            classId: selectedClassSection.classId,
-            sectionId: selectedClassSection.sectionId,
-            bearer_token: authToken || undefined,
-            academic_session,
-            branch_token,
-          });
-
-          if (
-            ((progressResponse.status as any) === 200 ||
-              progressResponse.status === "success") &&
-            progressResponse.data
-          ) {
-            // The API returns data.resp according to the controller
-            const progressData =
-              (progressResponse.data as any).resp ||
-              progressResponse.data.progress ||
-              progressResponse.data;
-            setCourseProgressData(progressData);
-
-            // Format a nice summary message
-            const teacherDiarys =
-              progressData.teacherDiarys || progressData || [];
-            const totalSubjects = Array.isArray(teacherDiarys)
-              ? teacherDiarys.length
-              : 0;
-            const summaryText =
-              totalSubjects > 0
-                ? `📊 **Course Progress for ${
-                    selectedClassSection.className || "Class"
-                  } ${
-                    selectedClassSection.sectionName || "Section"
-                  }**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                : `📊 **Course Progress for ${
-                    selectedClassSection.className || "Class"
-                  } ${
-                    selectedClassSection.sectionName || "Section"
-                  }**\n\nNo progress data available yet.`;
-
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: summaryText,
-                courseProgress: progressData,
-                classSection: {
-                  classId: selectedClassSection.classId,
-                  sectionId: selectedClassSection.sectionId,
-                  className: selectedClassSection.className,
-                  sectionName: selectedClassSection.sectionName,
-                },
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  progressResponse.message ||
-                  "Failed to fetch course progress. Please try again.",
-              },
-            ]);
           }
         } else {
-          // Remind user to select from the list
           setChatHistory((prev) => [
             ...prev,
             {
               type: "bot",
-              text: "Please select a class and section from the list above to view course progress.",
+              text: response.message || "Failed to process course progress request.",
             },
           ]);
         }
@@ -1586,14 +1505,29 @@ const AudioStreamerChatBot = ({
   };
 
   // TTS playback function - supports interruption in Full Voice Mode
+  // Uses request ID to ensure only the latest TTS request plays
   const handlePlayTTS = async (idx: number, text: string) => {
     // Interrupt any currently playing TTS before starting new one
     interruptTTS();
+    
+    // Increment request ID - this marks any previous in-flight requests as stale
+    ttsRequestIdRef.current += 1;
+    const thisRequestId = ttsRequestIdRef.current;
+    
+    console.log(`🔊 TTS Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`);
     
     setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
       const reader = await aiAPI.textToSpeech({ text });
+      
+      // Check if this request is still the latest (not cancelled by a newer request)
+      if (ttsRequestIdRef.current !== thisRequestId) {
+        console.log(`🔇 TTS Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`);
+        setTtsLoading(null);
+        return;
+      }
+      
       if (!reader) throw new Error("No stream");
       const audioChunks: Uint8Array[] = [];
       let done = false;
@@ -1601,15 +1535,31 @@ const AudioStreamerChatBot = ({
         const { value, done: streamDone } = await reader.read();
         if (value) audioChunks.push(value);
         done = streamDone;
+        
+        // Check again during streaming if request is still valid
+        if (ttsRequestIdRef.current !== thisRequestId) {
+          console.log(`🔇 TTS Request #${thisRequestId} cancelled during streaming`);
+          setTtsLoading(null);
+          return;
+        }
       }
+      
+      // Final check before creating audio
+      if (ttsRequestIdRef.current !== thisRequestId) {
+        console.log(`🔇 TTS Request #${thisRequestId} cancelled before playback`);
+        setTtsLoading(null);
+        return;
+      }
+      
       const audioBlob = new Blob(audioChunks as BlobPart[], {
         type: "audio/wav",
       });
       audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       
-      // Store URL on audio element for cleanup on interruption
+      // Store URL and request ID on audio element for cleanup
       (audio as any)._ttsUrl = audioUrl;
+      (audio as any)._requestId = thisRequestId;
       
       // Store audio reference for interruption
       currentTTSAudioRef.current = audio;
@@ -1641,7 +1591,16 @@ const AudioStreamerChatBot = ({
         setTtsLoading(null);
       };
       
+      // Final check right before playing
+      if (ttsRequestIdRef.current !== thisRequestId) {
+        console.log(`🔇 TTS Request #${thisRequestId} cancelled right before play`);
+        URL.revokeObjectURL(audioUrl);
+        setTtsLoading(null);
+        return;
+      }
+      
       // Play audio and handle play promise rejection
+      console.log(`🔊 TTS Request #${thisRequestId} playing`);
       try {
         await audio.play();
       } catch (playError) {
@@ -1661,7 +1620,10 @@ const AudioStreamerChatBot = ({
       }
       currentTTSAudioRef.current = null;
       setTtsLoading(null);
-      alert("Failed to play audio.");
+      // Don't show alert for cancelled requests
+      if (ttsRequestIdRef.current === thisRequestId) {
+        console.error("Failed to play audio:", err);
+      }
     }
   };
 
@@ -4114,88 +4076,60 @@ const AudioStreamerChatBot = ({
                           </div>
                           <div
                             onClick={async () => {
-                              setAutoRouting(false); // Disable auto-routing
+                              // Course progress is now backend-driven
+                              // Simply activate the flow and send initial message
+                              setAutoRouting(false);
                               setActiveFlow("course_progress");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              setSelectedClassSection(null);
-                              setCourseProgressData(null);
-
-                              // Fetch class sections when flow is activated
-                              setLoadingClassSections(true);
+                              
+                              // Send initial message to backend to start the flow
+                              setIsProcessing(true);
                               try {
                                 const authToken = localStorage.getItem("token");
-                                const { academic_session, branch_token } =
-                                  getErpContext();
-                                console.log(
-                                  "Fetching class sections with token:",
-                                  authToken ? "present" : "missing"
-                                );
-                                const response =
-                                  await courseProgressAPI.fetchClassSections({
-                                    page: 1,
-                                    limit: 50,
-                                    bearer_token: authToken || undefined,
-                                    academic_session,
-                                    branch_token,
-                                  });
+                                const { academic_session, branch_token } = getErpContext();
+                                
+                                const response = await aiAPI.courseProgressChat({
+                                  session_id: sessionId || `session_${userId}`,
+                                  query: "Show my course progress",
+                                  bearer_token: authToken || undefined,
+                                  academic_session,
+                                  branch_token,
+                                });
 
-                                console.log(
-                                  "Class sections API response:",
-                                  response
-                                );
-
-                                if (
-                                  (response.status === 200 ||
-                                    response.status === "success") &&
-                                  response.data?.options
-                                ) {
-                                  const options = response.data.options || [];
-                                  console.log(
-                                    "Parsed class sections:",
-                                    options
-                                  );
-                                  setClassSections(options);
-                                  setChatHistory((prev) => [
-                                    ...prev,
-                                    {
-                                      type: "bot",
-                                      text: `📊 **Course Progress Flow Activated (Manual override)!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
-                                      classSections: options,
-                                    },
-                                  ]);
+                                if (response.status === "success" && response.data) {
+                                  const answer = response.data.answer || "Course Progress flow activated. Which class and section would you like to see?";
+                                  const botMessage: any = {
+                                    type: "bot",
+                                    text: answer,
+                                  };
+                                  
+                                  // Include class sections for nice UI rendering
+                                  if (response.data.class_sections && response.data.class_sections.length > 0) {
+                                    botMessage.classSectionsOptions = response.data.class_sections;
+                                  }
+                                  
+                                  setChatHistory((prev) => [...prev, botMessage]);
                                 } else {
-                                  console.warn(
-                                    "Unexpected response structure:",
-                                    response
-                                  );
                                   setChatHistory((prev) => [
                                     ...prev,
                                     {
                                       type: "bot",
-                                      text: `⚠️ ${
-                                        response.message ||
-                                        "No class sections found. Please try again."
-                                      }`,
+                                      text: response.message || "Course Progress flow activated. Please say the class and section you want to view.",
                                     },
                                   ]);
                                 }
                               } catch (err: any) {
-                                console.error(
-                                  "Error fetching class sections:",
-                                  err
-                                );
+                                console.error("Error activating course progress flow:", err);
                                 setChatHistory((prev) => [
                                   ...prev,
                                   {
                                     type: "bot",
-                                    text: `❌ Error loading class sections: ${
-                                      err.message || "Unknown error"
-                                    }`,
+                                    text: `❌ Error: ${err.message || "Unknown error"}`,
                                   },
                                 ]);
                               } finally {
-                                setLoadingClassSections(false);
+                                setIsProcessing(false);
                               }
                             }}
                             style={{
@@ -4561,456 +4495,298 @@ const AudioStreamerChatBot = ({
                             </span>
                           </div>
                         )}
-                        {/* Show class sections for course progress flow - render regardless of text/answer */}
-                        {(msg as any).classSections &&
-                          Array.isArray((msg as any).classSections) &&
-                          (msg as any).classSections.length > 0 && (
-                            <>
-                              {loadingClassSections ? (
-                                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                                    <span className="text-blue-900 font-medium">
-                                      Loading class sections...
-                                    </span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="mt-4 space-y-3">
-                                  <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                                    <p className="text-sm text-blue-900 font-medium">
-                                      📚 Select a class and section to view
-                                      course progress:
-                                    </p>
-                                  </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {(msg as any).classSections.map(
-                                      (classSection: any, csIdx: number) => {
-                                        const className =
-                                          classSection.class?.name ||
-                                          "Unknown Class";
-                                        const sectionName =
-                                          classSection.section?.name ||
-                                          "Unknown Section";
-                                        // Use _id for get-progress API as it expects ObjectId
-                                        const classId =
-                                          classSection.class?._id ||
-                                          classSection.class?.uuid;
-                                        const sectionId =
-                                          classSection.section?._id ||
-                                          classSection.section?.uuid;
-                                        const isSelected =
-                                          selectedClassSection?.classId ===
-                                            classId &&
-                                          selectedClassSection?.sectionId ===
-                                            sectionId;
+                        {/* Course progress flow is now fully backend-driven - no class selection UI needed */}
+                        {/* The user simply says the class/section name via voice or text */}
 
-                                        return (
-                                          <div
-                                            key={
-                                              classSection.class?._id +
-                                                classSection.section?._id ||
-                                              csIdx
-                                            }
-                                            className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                                              isSelected
-                                                ? "border-blue-500 bg-blue-50 shadow-md"
-                                                : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
-                                            }`}
-                                            onClick={async () => {
-                                              if (!classId || !sectionId) {
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: "❌ Error: Missing class or section ID. Please try again.",
-                                                  },
-                                                ]);
-                                                return;
-                                              }
-
-                                              const newSelection = {
-                                                classId: classId,
-                                                sectionId: sectionId,
-                                                className: className,
-                                                sectionName: sectionName,
-                                              };
-                                              setSelectedClassSection(
-                                                newSelection
-                                              );
-
-                                              // Fetch course progress
-                                              setIsProcessing(true);
-                                              try {
-                                                const authToken =
-                                                  localStorage.getItem("token");
-                                                console.log(
-                                                  "Fetching course progress for:",
-                                                  {
-                                                    classId,
-                                                    sectionId,
-                                                    className,
-                                                    sectionName,
-                                                  }
-                                                );
-                                                const {
-                                                  academic_session,
-                                                  branch_token,
-                                                } = getErpContext();
-                                                const progressResponse =
-                                                  await courseProgressAPI.getProgress(
-                                                    {
-                                                      classId,
-                                                      sectionId,
-                                                      bearer_token:
-                                                        authToken || undefined,
-                                                      academic_session,
-                                                      branch_token,
-                                                    }
-                                                  );
-
-                                                console.log(
-                                                  "Course progress API response:",
-                                                  progressResponse
-                                                );
-
-                                                if (
-                                                  ((progressResponse.status as any) ===
-                                                    200 ||
-                                                    progressResponse.status ===
-                                                      "success") &&
-                                                  progressResponse.data
-                                                ) {
-                                                  // The API returns data.resp according to the controller
-                                                  const progressData =
-                                                    (
-                                                      progressResponse.data as any
-                                                    ).resp ||
-                                                    progressResponse.data
-                                                      .progress ||
-                                                    progressResponse.data;
-                                                  setCourseProgressData(
-                                                    progressData
-                                                  );
-
-                                                  // Format a nice summary message
-                                                  const teacherDiarys =
-                                                    progressData.teacherDiarys ||
-                                                    progressData ||
-                                                    [];
-                                                  const totalSubjects =
-                                                    Array.isArray(teacherDiarys)
-                                                      ? teacherDiarys.length
-                                                      : 0;
-                                                  const summaryText =
-                                                    totalSubjects > 0
-                                                      ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                                                      : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
-
-                                                  setChatHistory((prev) => [
-                                                    ...prev,
-                                                    {
-                                                      type: "bot",
-                                                      text: summaryText,
-                                                      courseProgress:
-                                                        progressData,
-                                                      classSection: {
-                                                        classId: classId,
-                                                        sectionId: sectionId,
-                                                        className: className,
-                                                        sectionName:
-                                                          sectionName,
-                                                      },
-                                                    },
-                                                  ]);
-                                                  // If the Course Progress flow was started via
-                                                  // microphone, play a short TTS summary for
-                                                  // the selected class-section. Speak only
-                                                  // one short sentence and clear the flag so
-                                                  // it does not repeat on re-renders.
-                                                  try {
-                                                    if (
-                                                      courseProgressVoiceInitiatedRef.current ===
-                                                      true
-                                                    ) {
-                                                      const classLabel = `${className} ${sectionName}`;
-                                                      let speech = "";
-                                                      if (totalSubjects > 0) {
-                                                        speech = `Course Progress for ${classLabel}. Scroll down to see details.`;
-                                                      } else {
-                                                        speech = `Course Progress for ${classLabel}. No progress data available yet.`;
-                                                      }
-                                                      void handlePlayTTS(
-                                                        -1,
-                                                        speech
-                                                      );
-                                                      courseProgressVoiceInitiatedRef.current =
-                                                        false;
-                                                    }
-                                                  } catch (ttsErr) {
-                                                    console.error(
-                                                      "TTS playback failed:",
-                                                      ttsErr
-                                                    );
-                                                  }
-                                                } else {
-                                                  console.warn(
-                                                    "Unexpected progress response:",
-                                                    progressResponse
-                                                  );
-                                                  setChatHistory((prev) => [
-                                                    ...prev,
-                                                    {
-                                                      type: "bot",
-                                                      text:
-                                                        progressResponse.message ||
-                                                        "Failed to fetch course progress. Please try again.",
-                                                    },
-                                                  ]);
-                                                }
-                                              } catch (err: any) {
-                                                console.error(
-                                                  "Error fetching course progress:",
-                                                  err
-                                                );
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: `❌ Error fetching course progress: ${
-                                                      err.message ||
-                                                      "Unknown error"
-                                                    }`,
-                                                  },
-                                                ]);
-                                              } finally {
-                                                setIsProcessing(false);
-                                              }
-                                            }}
-                                          >
-                                            <div className="flex items-center justify-between">
-                                              <div>
-                                                <h4 className="text-base font-semibold text-gray-900">
-                                                  {className}
-                                                </h4>
-                                                <p className="text-sm text-gray-600 mt-1">
-                                                  Section: {sectionName}
-                                                </p>
-                                              </div>
-                                              {isSelected && (
-                                                <div className="text-blue-600 text-xl">
-                                                  ✓
-                                                </div>
-                                              )}
-                                            </div>
-                                          </div>
-                                        );
-                                      }
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                            </>
-                          )}
-
-                        {/* Show course progress data - render regardless of text/answer */}
+                        {/* Show course progress data - Mobile-friendly UI */}
                         {msg.courseProgress && (msg as any).classSection && (
-                          <div className="mt-4 p-4 bg-white border border-gray-300 rounded-lg shadow-md">
-                            <div className="mb-4 pb-3 border-b border-gray-200">
-                              <h4 className="text-lg font-semibold text-gray-900">
-                                📊 Course Progress:{" "}
-                                {(msg as any).classSection.className}{" "}
-                                {(msg as any).classSection.sectionName}
-                              </h4>
-                              {(msg.courseProgress as any).meta && (
-                                <p className="text-sm text-gray-600 mt-1">
-                                  Total Subjects:{" "}
-                                  {(msg.courseProgress as any).meta
-                                    .totalSubjects || 0}
-                                </p>
-                              )}
-                            </div>
-                            <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                          <div className="mt-3 bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-2xl shadow-lg overflow-hidden border border-indigo-100">
+                            {/* Header Section */}
+                            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 sm:px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+                                  <span className="text-xl sm:text-2xl">📊</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="text-base sm:text-lg font-bold text-white truncate">
+                                    {(msg as any).classSection.className} - {(msg as any).classSection.sectionName}
+                                  </h4>
+                                  <p className="text-xs sm:text-sm text-indigo-100">Course Progress Report</p>
+                                </div>
+                              </div>
+                              
+                              {/* Overall Progress Summary */}
                               {(() => {
                                 const progressData = msg.courseProgress as any;
-                                const teacherDiarys =
-                                  progressData.teacherDiarys ||
-                                  progressData ||
-                                  [];
+                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
+                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) return null;
+                                
+                                const totalProgress = teacherDiarys.reduce((sum: number, s: any) => 
+                                  sum + (s.avrage_progress || s.average_progress || 0), 0);
+                                const avgOverall = Math.round(totalProgress / teacherDiarys.length);
+                                
+                                return (
+                                  <div className="mt-4 bg-white/10 backdrop-blur rounded-xl p-3 sm:p-4">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <span className="text-xs sm:text-sm text-white/90 font-medium">Overall Progress</span>
+                                      <span className="text-lg sm:text-xl font-bold text-white">{avgOverall}%</span>
+                                    </div>
+                                    <div className="w-full h-2.5 sm:h-3 bg-white/20 rounded-full overflow-hidden">
+                                      <div 
+                                        className="h-full bg-gradient-to-r from-green-400 to-emerald-400 rounded-full transition-all duration-700 ease-out"
+                                        style={{ width: `${Math.min(avgOverall, 100)}%` }}
+                                      />
+                                    </div>
+                                    <div className="flex justify-between mt-2 text-xs text-white/70">
+                                      <span>{teacherDiarys.length} Subjects</span>
+                                      <span>{avgOverall >= 75 ? '🎉 Great!' : avgOverall >= 50 ? '👍 Good' : '📈 Keep Going'}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
 
-                                if (
-                                  !Array.isArray(teacherDiarys) ||
-                                  teacherDiarys.length === 0
-                                ) {
+                            {/* Subjects List */}
+                            <div className="p-3 sm:p-4 max-h-[60vh] sm:max-h-[500px] overflow-y-auto">
+                              {(() => {
+                                const progressData = msg.courseProgress as any;
+                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
+
+                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) {
                                   return (
-                                    <div className="text-center py-8 text-gray-500">
-                                      No course progress data available.
+                                    <div className="text-center py-8">
+                                      <div className="w-16 h-16 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
+                                        <span className="text-2xl">📭</span>
+                                      </div>
+                                      <p className="text-gray-500 text-sm">No course progress data available</p>
                                     </div>
                                   );
                                 }
 
-                                return teacherDiarys.map(
-                                  (subject: any, subjectIdx: number) => {
-                                    const subjectName =
-                                      subject.name || "Unknown Subject";
-                                    const avgProgress =
-                                      subject.avrage_progress ||
-                                      subject.average_progress ||
-                                      0;
-                                    const chapters = subject.chapters || [];
+                                const getProgressStyle = (progress: number) => {
+                                  if (progress >= 75) return { bg: 'bg-emerald-50', bar: 'bg-gradient-to-r from-emerald-400 to-green-500', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+                                  if (progress >= 50) return { bg: 'bg-amber-50', bar: 'bg-gradient-to-r from-amber-400 to-yellow-500', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-700 border-amber-200' };
+                                  if (progress >= 25) return { bg: 'bg-orange-50', bar: 'bg-gradient-to-r from-orange-400 to-red-400', text: 'text-orange-700', badge: 'bg-orange-100 text-orange-700 border-orange-200' };
+                                  return { bg: 'bg-red-50', bar: 'bg-gradient-to-r from-red-400 to-rose-500', text: 'text-red-700', badge: 'bg-red-100 text-red-700 border-red-200' };
+                                };
 
-                                    // Determine progress color
-                                    const getProgressColor = (
-                                      progress: number
-                                    ) => {
-                                      if (progress >= 75) return "bg-green-500";
-                                      if (progress >= 50)
-                                        return "bg-yellow-500";
-                                      if (progress >= 25)
-                                        return "bg-orange-500";
-                                      return "bg-red-500";
-                                    };
+                                return (
+                                  <div className="space-y-3">
+                                    {teacherDiarys.map((subject: any, subjectIdx: number) => {
+                                      const subjectName = subject.name || "Unknown Subject";
+                                      const avgProgress = subject.avrage_progress || subject.average_progress || 0;
+                                      const chapters = subject.chapters || [];
+                                      const style = getProgressStyle(avgProgress);
 
-                                    const getProgressBgColor = (
-                                      progress: number
-                                    ) => {
-                                      if (progress >= 75) return "bg-green-100";
-                                      if (progress >= 50)
-                                        return "bg-yellow-100";
-                                      if (progress >= 25)
-                                        return "bg-orange-100";
-                                      return "bg-red-100";
-                                    };
+                                      return (
+                                        <details
+                                          key={subject.id || subjectIdx}
+                                          className={`group rounded-xl border ${style.bg} border-gray-200 overflow-hidden transition-all duration-200`}
+                                        >
+                                          <summary className="flex items-center gap-3 p-3 sm:p-4 cursor-pointer list-none select-none hover:bg-white/50 transition-colors">
+                                            {/* Subject Icon */}
+                                            <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl ${style.bg} border ${style.badge.split(' ')[2]} flex items-center justify-center flex-shrink-0`}>
+                                              <span className="text-lg sm:text-xl">📚</span>
+                                            </div>
+                                            
+                                            {/* Subject Info */}
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                <h5 className="text-sm sm:text-base font-semibold text-gray-800 truncate">
+                                                  {subjectName}
+                                                </h5>
+                                                <span className={`flex-shrink-0 text-xs sm:text-sm font-bold px-2 py-0.5 rounded-full border ${style.badge}`}>
+                                                  {avgProgress}%
+                                                </span>
+                                              </div>
+                                              
+                                              {/* Progress Bar */}
+                                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                <div
+                                                  className={`h-full ${style.bar} rounded-full transition-all duration-500`}
+                                                  style={{ width: `${Math.min(avgProgress, 100)}%` }}
+                                                />
+                                              </div>
+                                              
+                                              {/* Chapter Count */}
+                                              <div className="flex items-center justify-between mt-1.5">
+                                                <span className="text-xs text-gray-500">
+                                                  {chapters.length} chapter{chapters.length !== 1 ? 's' : ''}
+                                                </span>
+                                                <span className="text-xs text-indigo-500 group-open:rotate-180 transition-transform duration-200">
+                                                  ▼ Details
+                                                </span>
+                                              </div>
+                                            </div>
+                                          </summary>
 
-                                    return (
-                                      <div
-                                        key={subject.id || subjectIdx}
-                                        className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-lg p-4 shadow-sm"
-                                      >
-                                        {/* Subject Header */}
-                                        <div className="mb-4">
-                                          <div className="flex items-center justify-between mb-2">
-                                            <h5 className="text-base font-semibold text-gray-900">
-                                              📚 {subjectName}
-                                            </h5>
-                                            <span
-                                              className={`text-sm font-bold px-2 py-1 rounded ${
-                                                avgProgress >= 75
-                                                  ? "text-green-700 bg-green-100"
-                                                  : avgProgress >= 50
-                                                  ? "text-yellow-700 bg-yellow-100"
-                                                  : avgProgress >= 25
-                                                  ? "text-orange-700 bg-orange-100"
-                                                  : "text-red-700 bg-red-100"
-                                              }`}
-                                            >
-                                              {avgProgress}%
-                                            </span>
-                                          </div>
-                                          {/* Subject Progress Bar */}
-                                          <div
-                                            className={`w-full h-3 rounded-full overflow-hidden ${getProgressBgColor(
-                                              avgProgress
-                                            )}`}
-                                          >
-                                            <div
-                                              className={`h-full ${getProgressColor(
-                                                avgProgress
-                                              )} transition-all duration-500 ease-out`}
-                                              style={{
-                                                width: `${Math.min(
-                                                  avgProgress,
-                                                  100
-                                                )}%`,
-                                              }}
-                                            />
-                                          </div>
-                                        </div>
-
-                                        {/* Chapters List */}
-                                        {chapters.length > 0 ? (
-                                          <div className="space-y-2">
-                                            <h6 className="text-sm font-medium text-gray-700 mb-2">
-                                              Chapters ({chapters.length}):
-                                            </h6>
-                                            {chapters.map(
-                                              (
-                                                chapter: any,
-                                                chapterIdx: number
-                                              ) => {
-                                                const chapterName =
-                                                  chapter.name ||
-                                                  "Unknown Chapter";
-                                                const chapterProgress =
-                                                  chapter.coverage_status || 0;
+                                          {/* Chapters (Expandable) */}
+                                          {chapters.length > 0 && (
+                                            <div className="px-3 pb-3 sm:px-4 sm:pb-4 pt-1 space-y-2 border-t border-gray-100 bg-white/30">
+                                              {chapters.map((chapter: any, chapterIdx: number) => {
+                                                const chapterName = chapter.name || "Unknown Chapter";
+                                                const chapterProgress = chapter.coverage_status || 0;
+                                                const chStyle = getProgressStyle(chapterProgress);
 
                                                 return (
                                                   <div
-                                                    key={
-                                                      chapter.id || chapterIdx
-                                                    }
-                                                    className="bg-white border border-gray-200 rounded-md p-3 hover:shadow-sm transition-shadow"
+                                                    key={chapter.id || chapterIdx}
+                                                    className="bg-white rounded-lg p-2.5 sm:p-3 border border-gray-100 shadow-sm"
                                                   >
-                                                    <div className="flex items-center justify-between mb-1">
-                                                      <span className="text-sm text-gray-800 font-medium">
+                                                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                      <span className="text-xs sm:text-sm text-gray-700 font-medium truncate flex-1">
                                                         {chapterName}
                                                       </span>
-                                                      <span
-                                                        className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                                                          chapterProgress >= 75
-                                                            ? "text-green-700 bg-green-100"
-                                                            : chapterProgress >=
-                                                              50
-                                                            ? "text-yellow-700 bg-yellow-100"
-                                                            : chapterProgress >=
-                                                              25
-                                                            ? "text-orange-700 bg-orange-100"
-                                                            : "text-red-700 bg-red-100"
-                                                        }`}
-                                                      >
+                                                      <span className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${chStyle.badge}`}>
                                                         {chapterProgress}%
                                                       </span>
                                                     </div>
-                                                    {/* Chapter Progress Bar */}
-                                                    <div
-                                                      className={`w-full h-2 rounded-full overflow-hidden ${getProgressBgColor(
-                                                        chapterProgress
-                                                      )}`}
-                                                    >
+                                                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
                                                       <div
-                                                        className={`h-full ${getProgressColor(
-                                                          chapterProgress
-                                                        )} transition-all duration-500 ease-out`}
-                                                        style={{
-                                                          width: `${Math.min(
-                                                            chapterProgress,
-                                                            100
-                                                          )}%`,
-                                                        }}
+                                                        className={`h-full ${chStyle.bar} rounded-full transition-all duration-500`}
+                                                        style={{ width: `${Math.min(chapterProgress, 100)}%` }}
                                                       />
                                                     </div>
                                                   </div>
                                                 );
-                                              }
-                                            )}
-                                          </div>
-                                        ) : (
-                                          <div className="text-sm text-gray-500 italic">
-                                            No chapters available
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  }
+                                              })}
+                                            </div>
+                                          )}
+                                          
+                                          {chapters.length === 0 && (
+                                            <div className="px-4 pb-3 pt-1 border-t border-gray-100">
+                                              <p className="text-xs text-gray-400 italic text-center py-2">No chapters available</p>
+                                            </div>
+                                          )}
+                                        </details>
+                                      );
+                                    })}
+                                  </div>
                                 );
                               })()}
+                            </div>
+                            
+                            {/* Footer Legend */}
+                            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100">
+                              <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-3 h-3 rounded-full bg-gradient-to-r from-emerald-400 to-green-500"></div>
+                                  <span className="text-gray-600">75%+</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-3 h-3 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500"></div>
+                                  <span className="text-gray-600">50-74%</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-3 h-3 rounded-full bg-gradient-to-r from-orange-400 to-red-400"></div>
+                                  <span className="text-gray-600">25-49%</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-3 h-3 rounded-full bg-gradient-to-r from-red-400 to-rose-500"></div>
+                                  <span className="text-gray-600">&lt;25%</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         )}
 
-                        {msg.text ? (
-                          <div>{msg.text}</div>
-                        ) : (
+                        {/* Class sections selection UI - Voice/Text friendly */}
+                        {(msg as any).classSectionsOptions && 
+                          Array.isArray((msg as any).classSectionsOptions) && 
+                          (msg as any).classSectionsOptions.length > 0 && (
+                          <div className="mt-3 bg-gradient-to-br from-blue-50 via-white to-indigo-50 rounded-2xl shadow-lg overflow-hidden border border-blue-100">
+                            {/* Header */}
+                            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 sm:px-5 sm:py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+                                  <span className="text-xl">📚</span>
+                                </div>
+                                <div>
+                                  <h4 className="text-base sm:text-lg font-bold text-white">
+                                    Select Your Class
+                                  </h4>
+                                  <p className="text-xs sm:text-sm text-blue-100">
+                                    {(msg as any).classSectionsOptions.length} class section{(msg as any).classSectionsOptions.length !== 1 ? 's' : ''} available
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Class Sections Grid */}
+                            <div className="p-3 sm:p-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                                {(msg as any).classSectionsOptions.map((cs: any, csIdx: number) => {
+                                  const className = cs.class?.name || "Unknown";
+                                  const sectionName = cs.section?.name || "Unknown";
+                                  const isClassTeacher = cs.isClassTeacher === true;
+                                  
+                                  return (
+                                    <div
+                                      key={cs.class?._id + cs.section?._id || csIdx}
+                                      className={`relative p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 ${
+                                        isClassTeacher 
+                                          ? 'bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200' 
+                                          : 'bg-white border-gray-200 hover:border-blue-300'
+                                      }`}
+                                    >
+                                      {/* Class Teacher Badge */}
+                                      {isClassTeacher && (
+                                        <div className="absolute -top-2 -right-2 bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">
+                                          Class Teacher
+                                        </div>
+                                      )}
+                                      
+                                      <div className="flex items-center gap-3">
+                                        {/* Number Badge */}
+                                        <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-lg sm:text-xl ${
+                                          isClassTeacher 
+                                            ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white' 
+                                            : 'bg-gradient-to-br from-blue-500 to-indigo-500 text-white'
+                                        }`}>
+                                          {csIdx + 1}
+                                        </div>
+                                        
+                                        {/* Class Info */}
+                                        <div className="flex-1 min-w-0">
+                                          <div className="text-base sm:text-lg font-bold text-gray-800">
+                                            {className}
+                                          </div>
+                                          <div className="text-sm text-gray-500">
+                                            Section {sectionName}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              
+                              {/* Hint */}
+                              <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                                <div className="flex items-start gap-2">
+                                  <span className="text-blue-500 text-lg">💡</span>
+                                  <div className="text-sm text-blue-700">
+                                    <span className="font-semibold">How to select:</span>
+                                    <ul className="mt-1 space-y-0.5 text-blue-600">
+                                      <li>• Say the class name: "<span className="font-medium">{(msg as any).classSectionsOptions[0]?.class?.name || 'III'} {(msg as any).classSectionsOptions[0]?.section?.name || 'A'}</span>"</li>
+                                      <li>• Or say: "<span className="font-medium">first one</span>", "<span className="font-medium">second</span>", etc.</li>
+                                      <li>• Or type: "<span className="font-medium">Class 3 A</span>" or "<span className="font-medium">3 A</span>"</li>
+                                    </ul>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Only show text if no special UI components are displayed */}
+                        {msg.text && 
+                          !(msg as any).classSectionsOptions && 
+                          !(msg.courseProgress && (msg as any).classSection) && (
+                          <div className="text-gray-800 leading-relaxed">{msg.text}</div>
+                        )}
+                        
+                        {!msg.text && (
                           <>
                             {/* Only show answer, no tabs */}
                             {(() => {

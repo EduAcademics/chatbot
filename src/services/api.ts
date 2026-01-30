@@ -183,6 +183,31 @@ interface AssignmentChatResponse {
   message?: string;
 }
 
+interface CourseProgressChatRequest {
+  session_id: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface CourseProgressChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+    course_progress?: any;
+    class_section?: {
+      classId: string;
+      sectionId: string;
+      className?: string;
+      sectionName?: string;
+    };
+    class_sections?: any[];
+  };
+  message?: string;
+}
+
 interface LeaveApprovalRequest {
   user_id: string;
   page?: number;
@@ -479,6 +504,17 @@ export const aiAPI = {
   // Assignment chat
   assignmentChat: async (request: AssignmentChatRequest): Promise<AssignmentChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/assignment-chat`, {
+      method: 'POST',
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
+  // Course progress chat (backend-driven flow)
+  courseProgressChat: async (request: CourseProgressChatRequest): Promise<CourseProgressChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/course-progress-chat`, {
       method: 'POST',
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),
