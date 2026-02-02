@@ -749,7 +749,16 @@ export const courseProgressAPI = {
     );
 
     if (!response.ok) {
-      throw new Error("Failed to fetch class sections");
+      const errorText = await response.text().catch(() => "Unknown error");
+      console.error("Failed to fetch class sections:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+        hasToken: !!request.bearer_token,
+      });
+      throw new Error(
+        `Failed to fetch class sections (${response.status}: ${response.statusText})`,
+      );
     }
 
     return await response.json();

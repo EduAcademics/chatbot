@@ -524,6 +524,232 @@ const AudioStreamerChatBot = ({
     }
   };
 
+  /**
+   * Match user input (typed or spoken) against available class sections.
+   * Supports variations like "Class 6 A", "6A", "6 A", "six A", "class six section A", etc.
+   * Also handles Roman numerals (III, IV, V) to Arabic (3, 4, 5) conversion.
+   * Returns the matched class section or null if no match found.
+   */
+  const matchClassSectionFromInput = (
+    userInput: string,
+    availableClassSections: any[],
+  ): {
+    classId: string;
+    sectionId: string;
+    className: string;
+    sectionName: string;
+  } | null => {
+    if (!availableClassSections || availableClassSections.length === 0) {
+      return null;
+    }
+
+    // Normalize input: lowercase, remove extra spaces, handle common variations
+    const normalized = userInput
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Word-to-number mapping for spoken numbers
+    const wordToNumber: { [key: string]: string } = {
+      one: "1",
+      two: "2",
+      three: "3",
+      four: "4",
+      five: "5",
+      six: "6",
+      seven: "7",
+      eight: "8",
+      nine: "9",
+      ten: "10",
+      eleven: "11",
+      twelve: "12",
+      first: "1",
+      second: "2",
+      third: "3",
+      fourth: "4",
+      fifth: "5",
+      sixth: "6",
+      seventh: "7",
+      eighth: "8",
+      ninth: "9",
+      tenth: "10",
+    };
+
+    // Roman numeral to Arabic number mapping
+    const romanToArabic: { [key: string]: string } = {
+      i: "1",
+      ii: "2",
+      iii: "3",
+      iv: "4",
+      v: "5",
+      vi: "6",
+      vii: "7",
+      viii: "8",
+      ix: "9",
+      x: "10",
+      xi: "11",
+      xii: "12",
+    };
+
+    // Arabic to Roman mapping (for matching against class names that use Roman numerals)
+    const arabicToRoman: { [key: string]: string } = {
+      "1": "i",
+      "2": "ii",
+      "3": "iii",
+      "4": "iv",
+      "5": "v",
+      "6": "vi",
+      "7": "vii",
+      "8": "viii",
+      "9": "ix",
+      "10": "x",
+      "11": "xi",
+      "12": "xii",
+    };
+
+    // Replace word numbers with digits
+    let processedInput = normalized;
+    Object.entries(wordToNumber).forEach(([word, num]) => {
+      processedInput = processedInput.replace(
+        new RegExp(`\\b${word}\\b`, "g"),
+        num,
+      );
+    });
+
+    // Remove common filler words
+    processedInput = processedInput
+      .replace(
+        /\b(class|section|grade|std|standard|for|the|show|progress|of)\b/g,
+        " ",
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+
+    console.log("🔍 Class matching - processed input:", processedInput);
+
+    // Try to extract class number/roman and section letter
+    // Patterns: "6 a", "6a", "iii a", "3a", etc.
+    const classPatterns = [
+      /^(\d+)\s*([a-z])$/, // "6a" or "6 a"
+      /^(\d+)\s+([a-z])$/, // "6 a" with space
+      /^(\d+)[^a-z]*([a-z])$/, // "6-a", "6_a", etc.
+      /^([ivx]+)\s*([a-z])$/, // "iii a" or "iiia" (Roman numerals)
+    ];
+
+    let extractedClass: string | null = null;
+    let extractedSection: string | null = null;
+
+    for (const pattern of classPatterns) {
+      const match = processedInput.match(pattern);
+      if (match) {
+        extractedClass = match[1];
+        extractedSection = match[2].toUpperCase();
+        break;
+      }
+    }
+
+    // Convert extracted class to both Arabic and Roman forms for matching
+    let arabicClass: string | null = null;
+    let romanClass: string | null = null;
+
+    if (extractedClass) {
+      if (/^\d+$/.test(extractedClass)) {
+        // Input is Arabic number
+        arabicClass = extractedClass;
+        romanClass = arabicToRoman[extractedClass] || null;
+      } else if (/^[ivx]+$/i.test(extractedClass)) {
+        // Input is Roman numeral
+        romanClass = extractedClass.toLowerCase();
+        arabicClass = romanToArabic[romanClass] || null;
+      }
+    }
+
+    console.log(
+      "🔍 Extracted class:",
+      extractedClass,
+      "section:",
+      extractedSection,
+    );
+    console.log("🔍 Arabic:", arabicClass, "Roman:", romanClass);
+
+    // Search for matching class section
+    for (const cs of availableClassSections) {
+      const className = (cs.class?.name || "").trim();
+      const classNameLower = className.toLowerCase();
+      const sectionName = (cs.section?.name || "").trim();
+      const sectionNameLower = sectionName.toLowerCase();
+      const classId = cs.class?._id || cs.class?.uuid;
+      const sectionId = cs.section?._id || cs.section?.uuid;
+
+      if (!classId || !sectionId) continue;
+
+      // Try matching with extracted class and section
+      if (extractedSection) {
+        // Check if section matches
+        if (sectionNameLower === extractedSection.toLowerCase()) {
+          // Check if class matches (try both Arabic and Roman)
+          const classMatches =
+            (arabicClass && classNameLower.includes(arabicClass)) ||
+            (romanClass && classNameLower.includes(romanClass)) ||
+            (extractedClass && classNameLower.includes(extractedClass));
+
+          if (classMatches) {
+            console.log("✅ Found match:", className, sectionName);
+            return {
+              classId,
+              sectionId,
+              className: className,
+              sectionName: sectionName,
+            };
+          }
+        }
+      }
+
+      // Try fuzzy match: check if input contains both class and section references
+      const combinedName = `${classNameLower} ${sectionNameLower}`;
+      const inputTokens = processedInput.split(" ").filter(Boolean);
+
+      let matchScore = 0;
+      for (const token of inputTokens) {
+        // Check direct match or Roman/Arabic equivalent
+        if (combinedName.includes(token)) {
+          matchScore++;
+        } else if (
+          arabicToRoman[token] &&
+          combinedName.includes(arabicToRoman[token])
+        ) {
+          matchScore++;
+        } else if (
+          romanToArabic[token] &&
+          combinedName.includes(romanToArabic[token])
+        ) {
+          matchScore++;
+        }
+      }
+
+      // If most tokens match, consider it a match
+      if (inputTokens.length > 0 && matchScore >= inputTokens.length * 0.5) {
+        console.log(
+          "✅ Found fuzzy match:",
+          className,
+          sectionName,
+          "score:",
+          matchScore,
+        );
+        return {
+          classId,
+          sectionId,
+          className: className,
+          sectionName: sectionName,
+        };
+      }
+    }
+
+    console.log("❌ No class section match found for input:", userInput);
+    return null;
+  };
+
   const handleSubmit = async () => {
     if (!inputText.trim()) return;
     // Normalize input: remove trailing punctuation for commands/numbers
@@ -1813,8 +2039,8 @@ const AudioStreamerChatBot = ({
         setIsProcessing(false);
       }
     } else if (targetFlow === "course_progress") {
-      // Course progress flow - selection is handled via UI clicks
-      // This handles text-based queries or refreshes
+      // Course progress flow - supports both text/voice input and UI clicks
+      // This handles text-based class selection and queries
       try {
         if (classSections.length === 0) {
           // Fetch class sections if not already loaded
@@ -1835,32 +2061,148 @@ const AudioStreamerChatBot = ({
           ) {
             const options = response.data.options || [];
             setClassSections(options);
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: `📚 Found **${options.length}** class-section(s). Please select a class and section from the list above to view course progress.`,
-                classSections: options,
-              },
-            ]);
-            // If this Course Progress request was initiated via microphone,
-            // play a concise informational TTS line (plain text) and mark
-            // that the course-progress flow was voice-initiated so the
-            // subsequent class selection can also trigger TTS.
-            try {
+
+            // Check if user's message contains a class selection
+            const matchedClass = matchClassSectionFromInput(
+              userMessage,
+              options,
+            );
+
+            if (matchedClass) {
+              // User provided class info along with the initial request - process it immediately
+              console.log(
+                "📊 Class matched from initial message:",
+                matchedClass,
+              );
+              setSelectedClassSection(matchedClass);
+
+              // Fetch course progress for the matched class
+              const progressResponse = await courseProgressAPI.getProgress({
+                classId: matchedClass.classId,
+                sectionId: matchedClass.sectionId,
+                bearer_token: authToken || undefined,
+                academic_session,
+                branch_token,
+              });
+
               if (
-                isVoiceTriggeredRequestRef.current === true &&
-                // Double-check flow
-                targetFlow === "course_progress"
+                ((progressResponse.status as any) === 200 ||
+                  progressResponse.status === "success") &&
+                progressResponse.data
               ) {
-                // Consume the trigger so it can't leak into later typed requests
-                isVoiceTriggeredRequestRef.current = false;
-                courseProgressVoiceInitiatedRef.current = true;
-                const speech = `Found ${options.length} class-sections. Please select a class and section from the list above to view course progress.`;
-                void handlePlayTTS(-1, speech);
+                const progressData =
+                  (progressResponse.data as any).resp ||
+                  progressResponse.data.progress ||
+                  progressResponse.data;
+                setCourseProgressData(progressData);
+
+                const teacherDiarys =
+                  progressData.teacherDiarys || progressData || [];
+                const totalSubjects = Array.isArray(teacherDiarys)
+                  ? teacherDiarys.length
+                  : 0;
+                const summaryText =
+                  totalSubjects > 0
+                    ? `📊 **Course Progress for ${matchedClass.className} ${matchedClass.sectionName}**\n\nI found progress for **${totalSubjects}** subject${totalSubjects === 1 ? "" : "s"}. Please scroll down to view the detailed progress.`
+                    : `📊 **Course Progress for ${matchedClass.className} ${matchedClass.sectionName}**\n\nNo progress data available yet.`;
+
+                setChatHistory((prev) => [
+                  ...prev,
+                  {
+                    type: "bot",
+                    text: summaryText,
+                    courseProgress: progressData,
+                    classSection: matchedClass,
+                  },
+                ]);
+
+                // Voice TTS for initial matched class - flow ends, no mic auto-enable
+                if (isVoiceTriggeredRequestRef.current === true) {
+                  isVoiceTriggeredRequestRef.current = false;
+                  const speech =
+                    totalSubjects > 0
+                      ? `Course Progress for ${matchedClass.className} ${matchedClass.sectionName}. I found progress for ${totalSubjects} subject${totalSubjects === 1 ? "" : "s"}. Please scroll down to view the detailed progress.`
+                      : `Course Progress for ${matchedClass.className} ${matchedClass.sectionName}. No progress data available yet.`;
+                  // Play TTS without enabling mic (flow complete)
+                  void handlePlayTTS(-1, speech);
+                  // Deactivate voice mode as flow is complete
+                  voiceManager.current.deactivateVoiceMode();
+                  setIsVoiceModeActive(false);
+                  console.log(
+                    "🎤 Course progress flow complete, voice mode deactivated",
+                  );
+                }
+              } else {
+                setChatHistory((prev) => [
+                  ...prev,
+                  {
+                    type: "bot",
+                    text:
+                      progressResponse.message ||
+                      "Failed to fetch course progress. Please try again.",
+                  },
+                ]);
               }
-            } catch (ttsErr) {
-              console.error("TTS playback failed:", ttsErr);
+            } else {
+              // No class matched in initial message - show available classes
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  classSections: options,
+                },
+              ]);
+              // If this Course Progress request was initiated via microphone,
+              // play a conversational TTS and enable mic for class name input
+              try {
+                if (
+                  isVoiceTriggeredRequestRef.current === true &&
+                  targetFlow === "course_progress"
+                ) {
+                  isVoiceTriggeredRequestRef.current = false;
+                  courseProgressVoiceInitiatedRef.current = true;
+
+                  // Activate voice mode so auto-mic will work
+                  voiceManager.current.activateVoiceMode();
+                  setIsVoiceModeActive(true);
+
+                  const speech = `Alright! Please say the class name to view the course progress. For example, you can say Third A or type 3 A.`;
+
+                  // Play TTS and then auto-enable mic for class name input
+                  try {
+                    const reader = await aiAPI.textToSpeech({ text: speech });
+                    if (reader) {
+                      const audioChunks: Uint8Array[] = [];
+                      let done = false;
+                      while (!done) {
+                        const { value, done: streamDone } = await reader.read();
+                        if (value) audioChunks.push(value);
+                        done = streamDone;
+                      }
+                      const audioBlob = new Blob(audioChunks as BlobPart[], {
+                        type: "audio/wav",
+                      });
+                      const url = URL.createObjectURL(audioBlob);
+                      const audio = new Audio(url);
+                      audio.play();
+                      audio.onended = () => {
+                        URL.revokeObjectURL(url);
+                        // Auto-enable mic after TTS for class name input
+                        voiceManager.current.setShouldAutoMic(true);
+                        console.log(
+                          "🎤 TTS complete, mic auto-enabled for class name input",
+                        );
+                      };
+                    }
+                  } catch (ttsErr) {
+                    console.error("TTS playback failed:", ttsErr);
+                    // Still enable mic even if TTS fails
+                    voiceManager.current.setShouldAutoMic(true);
+                  }
+                }
+              } catch (ttsErr) {
+                console.error("TTS playback failed:", ttsErr);
+              }
             }
           } else {
             setChatHistory((prev) => [
@@ -1874,91 +2216,226 @@ const AudioStreamerChatBot = ({
             ]);
           }
           setLoadingClassSections(false);
-        } else if (selectedClassSection) {
-          // If a class section is already selected, refresh the progress
-          const authToken = localStorage.getItem("token");
-          const { academic_session, branch_token } = getErpContext();
-          const progressResponse = await courseProgressAPI.getProgress({
-            classId: selectedClassSection.classId,
-            sectionId: selectedClassSection.sectionId,
-            bearer_token: authToken || undefined,
-            academic_session,
-            branch_token,
-          });
-
-          if (
-            ((progressResponse.status as any) === 200 ||
-              progressResponse.status === "success") &&
-            progressResponse.data
-          ) {
-            // The API returns data.resp according to the controller
-            const progressData =
-              (progressResponse.data as any).resp ||
-              progressResponse.data.progress ||
-              progressResponse.data;
-            setCourseProgressData(progressData);
-
-            // Format a nice summary message
-            const teacherDiarys =
-              progressData.teacherDiarys || progressData || [];
-            const totalSubjects = Array.isArray(teacherDiarys)
-              ? teacherDiarys.length
-              : 0;
-            const summaryText =
-              totalSubjects > 0
-                ? `📊 **Course Progress for ${
-                    selectedClassSection.className || "Class"
-                  } ${
-                    selectedClassSection.sectionName || "Section"
-                  }**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                : `📊 **Course Progress for ${
-                    selectedClassSection.className || "Class"
-                  } ${
-                    selectedClassSection.sectionName || "Section"
-                  }**\n\nNo progress data available yet.`;
-
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text: summaryText,
-                courseProgress: progressData,
-                classSection: {
-                  classId: selectedClassSection.classId,
-                  sectionId: selectedClassSection.sectionId,
-                  className: selectedClassSection.className,
-                  sectionName: selectedClassSection.sectionName,
-                },
-              },
-            ]);
-          } else {
-            setChatHistory((prev) => [
-              ...prev,
-              {
-                type: "bot",
-                text:
-                  progressResponse.message ||
-                  "Failed to fetch course progress. Please try again.",
-              },
-            ]);
-          }
         } else {
-          // Remind user to select from the list
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: "Please select a class and section from the list above to view course progress.",
-            },
-          ]);
+          // Class sections already loaded - try to match user's input
+          const matchedClass = matchClassSectionFromInput(
+            userMessage,
+            classSections,
+          );
+
+          if (matchedClass) {
+            // User selected a class via text/voice input
+            console.log("📊 Class matched from user input:", matchedClass);
+            setSelectedClassSection(matchedClass);
+
+            const authToken = localStorage.getItem("token");
+            const { academic_session, branch_token } = getErpContext();
+            const progressResponse = await courseProgressAPI.getProgress({
+              classId: matchedClass.classId,
+              sectionId: matchedClass.sectionId,
+              bearer_token: authToken || undefined,
+              academic_session,
+              branch_token,
+            });
+
+            if (
+              ((progressResponse.status as any) === 200 ||
+                progressResponse.status === "success") &&
+              progressResponse.data
+            ) {
+              const progressData =
+                (progressResponse.data as any).resp ||
+                progressResponse.data.progress ||
+                progressResponse.data;
+              setCourseProgressData(progressData);
+
+              const teacherDiarys =
+                progressData.teacherDiarys || progressData || [];
+              const totalSubjects = Array.isArray(teacherDiarys)
+                ? teacherDiarys.length
+                : 0;
+              const summaryText =
+                totalSubjects > 0
+                  ? `📊 **Course Progress for ${matchedClass.className} ${matchedClass.sectionName}**\n\nI found progress for **${totalSubjects}** subject${totalSubjects === 1 ? "" : "s"}. Please scroll down to view the detailed progress.`
+                  : `📊 **Course Progress for ${matchedClass.className} ${matchedClass.sectionName}**\n\nNo progress data available yet.`;
+
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  text: summaryText,
+                  courseProgress: progressData,
+                  classSection: matchedClass,
+                },
+              ]);
+
+              // Voice TTS for matched class - flow ends, no mic auto-enable
+              if (courseProgressVoiceInitiatedRef.current === true) {
+                courseProgressVoiceInitiatedRef.current = false;
+                const speech =
+                  totalSubjects > 0
+                    ? `Course Progress for ${matchedClass.className} ${matchedClass.sectionName}. I found progress for ${totalSubjects} subject${totalSubjects === 1 ? "" : "s"}. Please scroll down to view the detailed progress.`
+                    : `Course Progress for ${matchedClass.className} ${matchedClass.sectionName}. No progress data available yet.`;
+                // Play TTS without enabling mic (flow complete)
+                void handlePlayTTS(-1, speech);
+                // Deactivate voice mode as flow is complete
+                voiceManager.current.deactivateVoiceMode();
+                setIsVoiceModeActive(false);
+                console.log(
+                  "🎤 Course progress flow complete, voice mode deactivated",
+                );
+              }
+            } else {
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  text:
+                    progressResponse.message ||
+                    "Failed to fetch course progress. Please try again.",
+                },
+              ]);
+            }
+          } else if (selectedClassSection) {
+            // No new class matched but we have a selected class - refresh its progress
+            const authToken = localStorage.getItem("token");
+            const { academic_session, branch_token } = getErpContext();
+            const progressResponse = await courseProgressAPI.getProgress({
+              classId: selectedClassSection.classId,
+              sectionId: selectedClassSection.sectionId,
+              bearer_token: authToken || undefined,
+              academic_session,
+              branch_token,
+            });
+
+            if (
+              ((progressResponse.status as any) === 200 ||
+                progressResponse.status === "success") &&
+              progressResponse.data
+            ) {
+              const progressData =
+                (progressResponse.data as any).resp ||
+                progressResponse.data.progress ||
+                progressResponse.data;
+              setCourseProgressData(progressData);
+
+              const teacherDiarys =
+                progressData.teacherDiarys || progressData || [];
+              const totalSubjects = Array.isArray(teacherDiarys)
+                ? teacherDiarys.length
+                : 0;
+              const summaryText =
+                totalSubjects > 0
+                  ? `📊 **Course Progress for ${selectedClassSection.className || "Class"} ${selectedClassSection.sectionName || "Section"}**\n\nI found progress for **${totalSubjects}** subject${totalSubjects === 1 ? "" : "s"}. Please scroll down to view the detailed progress.`
+                  : `📊 **Course Progress for ${selectedClassSection.className || "Class"} ${selectedClassSection.sectionName || "Section"}**\n\nNo progress data available yet.`;
+
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  text: summaryText,
+                  courseProgress: progressData,
+                  classSection: {
+                    classId: selectedClassSection.classId,
+                    sectionId: selectedClassSection.sectionId,
+                    className: selectedClassSection.className,
+                    sectionName: selectedClassSection.sectionName,
+                  },
+                },
+              ]);
+            } else {
+              setChatHistory((prev) => [
+                ...prev,
+                {
+                  type: "bot",
+                  text:
+                    progressResponse.message ||
+                    "Failed to fetch course progress. Please try again.",
+                },
+              ]);
+            }
+          } else {
+            // No match found and no previous selection - help user with available options
+            const availableClasses = classSections
+              .slice(0, 5)
+              .map(
+                (cs: any) =>
+                  `${cs.class?.name || "?"} ${cs.section?.name || "?"}`,
+              )
+              .join(", ");
+            const moreText =
+              classSections.length > 5
+                ? ` and ${classSections.length - 5} more`
+                : "";
+
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                text: `❓ I couldn't match "${userMessage}" to any class. Available classes include: **${availableClasses}**${moreText}.\n\nPlease type or speak the class name clearly (e.g., "Class 6 A" or "6A").`,
+              },
+            ]);
+
+            // Voice feedback for no match - keep mic enabled for retry
+            if (courseProgressVoiceInitiatedRef.current) {
+              const speech = `I couldn't match that class. Please say the class name clearly, for example, Third A.`;
+              try {
+                const reader = await aiAPI.textToSpeech({ text: speech });
+                if (reader) {
+                  const audioChunks: Uint8Array[] = [];
+                  let done = false;
+                  while (!done) {
+                    const { value, done: streamDone } = await reader.read();
+                    if (value) audioChunks.push(value);
+                    done = streamDone;
+                  }
+                  const audioBlob = new Blob(audioChunks as BlobPart[], {
+                    type: "audio/wav",
+                  });
+                  const url = URL.createObjectURL(audioBlob);
+                  const audio = new Audio(url);
+                  audio.play();
+                  audio.onended = () => {
+                    URL.revokeObjectURL(url);
+                    // Keep mic enabled for retry
+                    voiceManager.current.setShouldAutoMic(true);
+                    console.log("🎤 TTS complete, mic auto-enabled for retry");
+                  };
+                }
+              } catch (ttsErr) {
+                console.error("TTS playback failed:", ttsErr);
+                voiceManager.current.setShouldAutoMic(true);
+              }
+            }
+          }
         }
       } catch (err: any) {
         console.error("Error in course progress flow:", err);
+        setLoadingClassSections(false);
+
+        // Provide more helpful error message based on error type
+        let errorMessage = err.message || "Unknown error occurred";
+        if (
+          errorMessage.includes("401") ||
+          errorMessage.includes("Unauthorized")
+        ) {
+          errorMessage = "Authentication failed. Please log in again and try.";
+        } else if (
+          errorMessage.includes("403") ||
+          errorMessage.includes("Forbidden")
+        ) {
+          errorMessage =
+            "You don't have permission to access class sections. Please contact your administrator.";
+        } else if (errorMessage.includes("Failed to fetch")) {
+          errorMessage =
+            "Network error - could not connect to the server. Please check your connection.";
+        }
+
         setChatHistory((prev) => [
           ...prev,
           {
             type: "bot",
-            text: `❌ Error: ${err.message || "Unknown error occurred"}`,
+            text: `❌ Error: ${errorMessage}`,
           },
         ]);
       } finally {
@@ -4696,7 +5173,6 @@ const AudioStreamerChatBot = ({
                                     ...prev,
                                     {
                                       type: "bot",
-                                      text: `📊 **Course Progress Flow Activated (Manual override)!**\n\nI found **${options.length}** class-section(s) available. Please select a class and section from the list below to view the course progress.`,
                                       classSections: options,
                                     },
                                   ]);
@@ -5114,11 +5590,16 @@ const AudioStreamerChatBot = ({
                                 <div className="mt-4 space-y-3">
                                   <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                                     <p className="text-sm text-blue-900 font-medium">
-                                      📚 Select a class and section to view
-                                      course progress:
+                                      🎯 Alright! Please say or type the class
+                                      name to view the course progress.
+                                    </p>
+                                    <p className="text-xs text-blue-700 mt-1">
+                                      For example, you can say{" "}
+                                      <strong>"Third A"</strong> or type{" "}
+                                      <strong>"3 A"</strong>.
                                     </p>
                                   </div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
                                     {(msg as any).classSections.map(
                                       (classSection: any, csIdx: number) => {
                                         const className =
@@ -5147,201 +5628,38 @@ const AudioStreamerChatBot = ({
                                                 classSection.section?._id ||
                                               csIdx
                                             }
-                                            className={`bg-white border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                                            className={`bg-white border rounded-lg px-3 py-2 text-sm transition-all flex items-center justify-between ${
                                               isSelected
-                                                ? "border-blue-500 bg-blue-50 shadow-md"
-                                                : "border-gray-300 hover:border-blue-300 hover:shadow-sm"
+                                                ? "border-blue-500 bg-blue-50 font-semibold"
+                                                : "border-gray-200 text-gray-700 hover:border-gray-300 hover:bg-gray-50"
                                             }`}
-                                            onClick={async () => {
-                                              if (!classId || !sectionId) {
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: "❌ Error: Missing class or section ID. Please try again.",
-                                                  },
-                                                ]);
-                                                return;
-                                              }
-
-                                              const newSelection = {
-                                                classId: classId,
-                                                sectionId: sectionId,
-                                                className: className,
-                                                sectionName: sectionName,
-                                              };
-                                              setSelectedClassSection(
-                                                newSelection,
-                                              );
-
-                                              // Fetch course progress
-                                              setIsProcessing(true);
-                                              try {
-                                                const authToken =
-                                                  localStorage.getItem("token");
-                                                console.log(
-                                                  "Fetching course progress for:",
-                                                  {
-                                                    classId,
-                                                    sectionId,
-                                                    className,
-                                                    sectionName,
-                                                  },
-                                                );
-                                                const {
-                                                  academic_session,
-                                                  branch_token,
-                                                } = getErpContext();
-                                                const progressResponse =
-                                                  await courseProgressAPI.getProgress(
-                                                    {
-                                                      classId,
-                                                      sectionId,
-                                                      bearer_token:
-                                                        authToken || undefined,
-                                                      academic_session,
-                                                      branch_token,
-                                                    },
-                                                  );
-
-                                                console.log(
-                                                  "Course progress API response:",
-                                                  progressResponse,
-                                                );
-
-                                                if (
-                                                  ((progressResponse.status as any) ===
-                                                    200 ||
-                                                    progressResponse.status ===
-                                                      "success") &&
-                                                  progressResponse.data
-                                                ) {
-                                                  // The API returns data.resp according to the controller
-                                                  const progressData =
-                                                    (
-                                                      progressResponse.data as any
-                                                    ).resp ||
-                                                    progressResponse.data
-                                                      .progress ||
-                                                    progressResponse.data;
-                                                  setCourseProgressData(
-                                                    progressData,
-                                                  );
-
-                                                  // Format a nice summary message
-                                                  const teacherDiarys =
-                                                    progressData.teacherDiarys ||
-                                                    progressData ||
-                                                    [];
-                                                  const totalSubjects =
-                                                    Array.isArray(teacherDiarys)
-                                                      ? teacherDiarys.length
-                                                      : 0;
-                                                  const summaryText =
-                                                    totalSubjects > 0
-                                                      ? `📊 **Course Progress for ${className} ${sectionName}**\n\nFound **${totalSubjects}** subject(s) with progress tracking. See details below.`
-                                                      : `📊 **Course Progress for ${className} ${sectionName}**\n\nNo progress data available yet.`;
-
-                                                  setChatHistory((prev) => [
-                                                    ...prev,
-                                                    {
-                                                      type: "bot",
-                                                      text: summaryText,
-                                                      courseProgress:
-                                                        progressData,
-                                                      classSection: {
-                                                        classId: classId,
-                                                        sectionId: sectionId,
-                                                        className: className,
-                                                        sectionName:
-                                                          sectionName,
-                                                      },
-                                                    },
-                                                  ]);
-                                                  // If the Course Progress flow was started via
-                                                  // microphone, play a short TTS summary for
-                                                  // the selected class-section. Speak only
-                                                  // one short sentence and clear the flag so
-                                                  // it does not repeat on re-renders.
-                                                  try {
-                                                    if (
-                                                      courseProgressVoiceInitiatedRef.current ===
-                                                      true
-                                                    ) {
-                                                      const classLabel = `${className} ${sectionName}`;
-                                                      let speech = "";
-                                                      if (totalSubjects > 0) {
-                                                        speech = `Course Progress for ${classLabel}. Scroll down to see details.`;
-                                                      } else {
-                                                        speech = `Course Progress for ${classLabel}. No progress data available yet.`;
-                                                      }
-                                                      void handlePlayTTS(
-                                                        -1,
-                                                        speech,
-                                                      );
-                                                      courseProgressVoiceInitiatedRef.current = false;
-                                                    }
-                                                  } catch (ttsErr) {
-                                                    console.error(
-                                                      "TTS playback failed:",
-                                                      ttsErr,
-                                                    );
-                                                  }
-                                                } else {
-                                                  console.warn(
-                                                    "Unexpected progress response:",
-                                                    progressResponse,
-                                                  );
-                                                  setChatHistory((prev) => [
-                                                    ...prev,
-                                                    {
-                                                      type: "bot",
-                                                      text:
-                                                        progressResponse.message ||
-                                                        "Failed to fetch course progress. Please try again.",
-                                                    },
-                                                  ]);
-                                                }
-                                              } catch (err: any) {
-                                                console.error(
-                                                  "Error fetching course progress:",
-                                                  err,
-                                                );
-                                                setChatHistory((prev) => [
-                                                  ...prev,
-                                                  {
-                                                    type: "bot",
-                                                    text: `❌ Error fetching course progress: ${
-                                                      err.message ||
-                                                      "Unknown error"
-                                                    }`,
-                                                  },
-                                                ]);
-                                              } finally {
-                                                setIsProcessing(false);
-                                              }
-                                            }}
+                                            title={`Say "${className} ${sectionName}" or type it`}
                                           >
-                                            <div className="flex items-center justify-between">
-                                              <div>
-                                                <h4 className="text-base font-semibold text-gray-900">
-                                                  {className}
-                                                </h4>
-                                                <p className="text-sm text-gray-600 mt-1">
-                                                  Section: {sectionName}
-                                                </p>
-                                              </div>
-                                              {isSelected && (
-                                                <div className="text-blue-600 text-xl">
-                                                  ✓
-                                                </div>
-                                              )}
+                                            <div className="flex items-center gap-2">
+                                              <span className="text-gray-400">
+                                                📚
+                                              </span>
+                                              <span className="font-medium">
+                                                {className}
+                                              </span>
+                                              <span className="text-gray-500">
+                                                {sectionName}
+                                              </span>
                                             </div>
+                                            {isSelected && (
+                                              <span className="text-blue-600">
+                                                ✓
+                                              </span>
+                                            )}
                                           </div>
                                         );
                                       },
                                     )}
                                   </div>
+                                  <p className="text-xs text-gray-500 mt-2">
+                                    💬 Just type in the box below or tap the mic
+                                    to speak!
+                                  </p>
                                 </div>
                               )}
                             </>
