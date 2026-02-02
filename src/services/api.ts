@@ -654,7 +654,8 @@ export const leaveApprovalAPI = {
 // Course Progress API
 const ERP_API_BASE_URL = 'https://api.eduacademics.com';
 
-interface ClassSectionOption {
+// @ts-expect-error - Kept for future use
+interface _ClassSectionOption {
   _id: string;
   classId: string;
   sectionId: string;

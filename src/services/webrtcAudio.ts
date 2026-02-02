@@ -1,4 +1,4 @@
-import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
+import { PipecatClient, RTVIEvent, type RTVIMessage, type Participant } from '@pipecat-ai/client-js';
 import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport';
 
 const BOT_START_URL = import.meta.env.VITE_BOT_START_URL || 'http://localhost:7860/start';
@@ -44,7 +44,7 @@ export class WebRTCAudioService {
             this.isConnected = false;
             callbacks.onDisconnected();
           },
-          onUserTranscript: (data) => {
+          onUserTranscript: (data: { text?: string; final?: boolean }) => {
             if (data.text && data.text.trim()) {
               callbacks.onTranscript(data.text, data.final || false);
               if (fullVoiceMode && data.final && callbacks.onTurnComplete) {
@@ -52,8 +52,8 @@ export class WebRTCAudioService {
               }
             }
           },
-          onError: (error) => {
-            callbacks.onError(new Error(error.message));
+          onError: (error: RTVIMessage) => {
+            callbacks.onError(new Error(String(error)));
           },
         },
       });
@@ -90,7 +90,7 @@ export class WebRTCAudioService {
 
     let botAudioElement: HTMLAudioElement | null = null;
 
-    this.client.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.client.on(RTVIEvent.TrackStarted, (track: MediaStreamTrack, participant?: Participant) => {
       if (!participant?.local && track.kind === 'audio') {
         botAudioElement = document.createElement('audio');
         botAudioElement.autoplay = true;

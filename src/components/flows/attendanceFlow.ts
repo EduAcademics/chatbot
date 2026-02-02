@@ -368,7 +368,7 @@ export async function handleAttendanceChat(
           type: "bot",
           answer: answer ?? generateAttendanceSummaryMessage(attendance_summary, finalClassInfo ?? state.classInfo),
           attendance_summary,
-          class_info: finalClassInfo ?? state.classInfo,
+          class_info: finalClassInfo ?? state.classInfo ?? undefined,
           buttons,
           bulkattandance: response.data.bulkattandance,
           finish_collecting: true,
@@ -377,7 +377,7 @@ export async function handleAttendanceChat(
         if (isVoiceTriggered) {
           callbacks.playTTS(
             -1,
-            generateAttendanceTTSSummary(answer ?? "", attendance_summary, finalClassInfo ?? state.classInfo)
+            generateAttendanceTTSSummary(answer ?? "", attendance_summary, finalClassInfo ?? state.classInfo ?? undefined)
           );
         }
       } else {
@@ -388,7 +388,7 @@ export async function handleAttendanceChat(
           class_info: finalClassInfo ?? undefined,
         });
         if (isVoiceTriggered) {
-          callbacks.playTTS(-1, generateAttendanceTTSSummary(text, undefined, finalClassInfo ?? state.classInfo));
+          callbacks.playTTS(-1, generateAttendanceTTSSummary(text, undefined, finalClassInfo ?? state.classInfo ?? undefined));
         }
       }
 
@@ -581,7 +581,7 @@ export async function handleAttendanceImageUpload(params: {
       response.data.attendance_summary.length > 0
     ) {
       const attendanceData = response.data.attendance_summary;
-      const answer = response.data.message ?? response.data.answer ?? generateAttendanceSummaryMessage(attendanceData, classInfo);
+      const answer = response.data.message ?? generateAttendanceSummaryMessage(attendanceData, classInfo);
 
       callbacks.setAttendanceState({
         step: "review",

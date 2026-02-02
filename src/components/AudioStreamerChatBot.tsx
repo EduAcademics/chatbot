@@ -142,7 +142,7 @@ const AudioStreamerChatBot = ({
   const [pendingClassInfo, setPendingClassInfo] = useState<ClassInfo | null>(null); // <-- add for pending class info
   // Unified attendance flow state
   const [attendanceFlowState, setAttendanceFlowState] = useState<AttendanceState>(INITIAL_ATTENDANCE_STATE);
-  const [, setIsProcessingImage] = useState(false); // <-- add for image processing state
+  const [, _setIsProcessingImage] = useState(false); // <-- add for image processing state
   // Debug wrapper for setAttendanceData
 
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null); // <-- add for class info
@@ -481,7 +481,8 @@ const AudioStreamerChatBot = ({
   };
 
   // Upload attendance image through OCR processing
-  const uploadAttendanceImage = async (
+  // @ts-expect-error - Kept for future use
+  const _uploadAttendanceImage = async (
     file: File,
     classInfo: { class_: string; section: string; date: string }
   ) => {
@@ -2134,7 +2135,8 @@ const AudioStreamerChatBot = ({
   };
 
   // Handle text-based attendance approval - save to MongoDB
-  const handleTextAttendanceApproval = async (
+  // @ts-expect-error - Kept for future use
+  const _handleTextAttendanceApproval = async (
     messageIndex: number,
     fallbackAttendanceData?: any[],
     fallbackClassInfo?: any
@@ -2194,7 +2196,8 @@ const AudioStreamerChatBot = ({
   };
 
   // Handle voice-based attendance approval - save to MongoDB
-  const handleVoiceAttendanceApproval = async (
+  // @ts-expect-error - Kept for future use
+  const _handleVoiceAttendanceApproval = async (
     messageIndex: number,
     fallbackAttendanceData?: any[],
     fallbackClassInfo?: any
@@ -2208,7 +2211,8 @@ const AudioStreamerChatBot = ({
   };
 
   // Handle voice-based attendance rejection - clear data and show options
-  const handleVoiceAttendanceRejection = () => {
+  // @ts-expect-error - Kept for future use
+  const _handleVoiceAttendanceRejection = () => {
     console.log("Voice Attendance Rejection clicked");
 
     // Clear the attendance data
