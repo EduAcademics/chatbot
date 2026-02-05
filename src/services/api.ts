@@ -268,6 +268,11 @@ interface RejectLeaveRequest {
 
 interface TextToSpeechRequest {
   text: string;
+  // When true, backend will treat this as a query-flow TTS
+  // request and may generate a summarized version of the text
+  // or use cached query context. For action flows, keep this
+  // undefined or false so that the exact text is spoken.
+  is_query?: boolean;
 }
 
 interface FeedbackRequest {

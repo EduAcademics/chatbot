@@ -37,6 +37,10 @@ import {
   INITIAL_ATTENDANCE_STATE,
   generateAttendanceTTSSummary,
 } from "./flows/attendanceFlow";
+import {
+  handleLeaveChat,
+  generateLeaveTTSSummary,
+} from "./flows/leaveFlow";
 import type {
   AttendanceState,
   AttendanceFlowCallbacks,
@@ -635,7 +639,7 @@ const AudioStreamerChatBot = ({
       setActiveFlow("none");
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
-      const exitMessage = `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`;
+      const exitMessage = `✅ Exited from ${activeFlow} flow.\nWelcome back! You can ask me anything`;
       setChatHistory((prev) => [
         ...prev,
         { type: "bot", text: exitMessage },
@@ -899,40 +903,21 @@ const AudioStreamerChatBot = ({
       if (targetFlow === "leave" && isNewFlowInitialization) {
         console.log("📍 Initializing leave flow state");
 
-        // IMPORTANT: Set activeFlow (and ref) BEFORE returning so next message stays in leave flow
+        // IMPORTANT: Set activeFlow (and ref) BEFORE processing the message
         activeFlowRef.current = "leave";
         setActiveFlow("leave");
 
-        // Add welcome message matching manual mode
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "📝 I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
-          },
-        ]);
-
-        // If this Leave request was initiated via microphone,
-        // play a concise informational TTS line and mark
-        // that the leave flow was voice-initiated so the
-        // subsequent responses can also trigger TTS.
-        try {
-          if (
-            isVoiceTriggeredRequestRef.current === true &&
-            // Double-check flow
-            targetFlow === "leave"
-          ) {
-            leaveVoiceInitiatedRef.current = true;
-            const speech = "I'll help you apply for leave. Please provide details like: Start date and end date, Leave type such as sick, casual, earned, etc., and Reason for leave.";
-            void handlePlayTTS(-1, speech);
-          }
-        } catch (ttsErr) {
-          console.error("TTS playback failed:", ttsErr);
+        // If this leave flow was started by voice, mark it so TTS plays for all leave responses
+        if (isVoiceTriggeredRequestRef.current === true) {
+          leaveVoiceInitiatedRef.current = true;
+          console.log("🎤 Leave flow voice-initiated: TTS will play for leave responses");
         }
+        // Consume trigger so it doesn't leak to later requests
+        isVoiceTriggeredRequestRef.current = false;
 
-        // Stop here - don't process the initialization message, wait for user's next input
-        setIsProcessing(false);
-        return;
+        // Don't return - let the flow continue to make the API call.
+        // The backend leave agent will return the initial prompt (Step 1: Half Day / Full Day / Long Leave).
+        console.log("📍 Leave flow initialized, continuing to API call...");
       }
     } else {
       console.log("📍 Using current activeFlow:", activeFlow);
@@ -1017,7 +1002,8 @@ const AudioStreamerChatBot = ({
         try {
           if (isVoiceTriggeredRequestRef.current === true) {
             const speech = generateQueryTTSSummary(answerForTts);
-            void handlePlayTTS(-1, speech);
+            // Mark as QUERY flow so backend can generate/query-specific TTS
+            void handlePlayTTS(-1, speech, true);
           }
         } catch (ttsErr) {
           console.error("Query TTS playback failed:", ttsErr);
@@ -1033,7 +1019,8 @@ const AudioStreamerChatBot = ({
         ]);
         try {
           if (isVoiceTriggeredRequestRef.current === true) {
-            void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage));
+            // Treat query error as QUERY flow for TTS
+            void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage), true);
           }
         } catch (ttsErr) {
           console.error("Query TTS playback failed:", ttsErr);
@@ -1071,137 +1058,29 @@ const AudioStreamerChatBot = ({
         setIsProcessing(false);
       }
     } else if (targetFlow === "leave") {
-      // Leave application flow
-      try {
-        // Get auth token from localStorage
-        const authToken = localStorage.getItem("token");
-        const { academic_session, branch_token } = getErpContext();
-
-        const data = await aiAPI.leaveChat({
-          session_id: sessionId || userId,
-          user_id: userId, // Pass user_id (will be mapped to employee UUID)
-          query: userMessage,
-          bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session,
-          branch_token,
-        });
-
-        if (data.status === "success" && data.data) {
-          const answer = data.data.answer || "";
-          const leaveData = data.data.leave_data;
-
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: answer,
-              activeTab: "answer" as const,
-            },
-          ]);
-
-          // If leave data is present, log it (you can add UI to display it)
-          if (leaveData) {
-            console.log("Leave application data:", leaveData);
-          }
-
-          // TTS: voice-only, strictly gated. Do NOT speak when input was typed
-          // or for any other flow. This uses the leaveVoiceInitiatedRef that is set
-          // only when the microphone-based submission initializes the leave flow.
-          try {
-            if (
-              leaveVoiceInitiatedRef.current === true &&
-              targetFlow === "leave"
-            ) {
-              // Generate concise summary for TTS instead of full message
-              const speech = generateLeaveTTSSummary(answer);
-
-              // Use the component's TTS helper to play speech. Pass a non-disruptive index.
-              void handlePlayTTS(-1, speech);
-            }
-          } catch (ttsErr) {
-            console.error("TTS playback failed:", ttsErr);
-          }
-
-          // If submission failed (error message), stay in the flow to allow retry
-          if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
-          ) {
-            console.log(
-              "⚠️ Leave submission error detected, staying in flow for retry"
-            );
-            // Keep the activeFlow as "leave" so the next message stays in leave flow
-            setActiveFlow("leave");
-          }
-
-          // If submission succeeded (success message), exit the flow
-          if (answer.includes("✅") && answer.includes("successfully")) {
-            console.log("✅ Leave submitted successfully, exiting flow");
-            leaveVoiceInitiatedRef.current = false;
-            setTimeout(() => {
-              activeFlowRef.current = "none";
-              setActiveFlow("none");
-            }, 1000);
-          }
-        } else {
-          const errorMessage =
-            data.message ||
-            "Sorry, there was an error processing your leave request.";
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: errorMessage,
-            },
-          ]);
-
-          // TTS for error messages if voice-initiated
-          try {
-            if (
-              leaveVoiceInitiatedRef.current === true &&
-              targetFlow === "leave"
-            ) {
-              // Generate concise summary for TTS instead of full message
-              const speech = generateLeaveTTSSummary(errorMessage);
-              void handlePlayTTS(-1, speech);
-            }
-          } catch (ttsErr) {
-            console.error("TTS playback failed:", ttsErr);
-          }
-
-          // Keep the leave flow active for retry
-          setActiveFlow("leave");
-        }
-      } catch (err) {
-        const errorMessage = "Sorry, there was an error processing your leave request.";
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: errorMessage,
-          },
-        ]);
-
-        // TTS for error messages if voice-initiated
-        try {
-          if (
-            leaveVoiceInitiatedRef.current === true &&
-            targetFlow === "leave"
-          ) {
-            // Generate concise summary for TTS instead of full message
-            const speech = generateLeaveTTSSummary(errorMessage);
-            void handlePlayTTS(-1, speech);
-          }
-        } catch (ttsErr) {
-          console.error("TTS playback failed:", ttsErr);
-        }
-
-        // Keep the leave flow active for retry
-        setActiveFlow("leave");
-      } finally {
-        setIsProcessing(false);
+      const leaveMessageViaVoice = isVoiceTriggeredRequestRef.current === true;
+      if (leaveMessageViaVoice) {
+        leaveVoiceInitiatedRef.current = true;
+        isVoiceTriggeredRequestRef.current = false;
       }
+      await handleLeaveChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: leaveMessageViaVoice,
+        voiceInitiatedFlow: leaveVoiceInitiatedRef.current,
+        getErpContext,
+        appendBotMessage: (msg) =>
+          setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => {
+          leaveVoiceInitiatedRef.current = false;
+          activeFlowRef.current = "none";
+          setActiveFlow("none");
+        },
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateLeaveTTSSummary,
+      });
     } else if (targetFlow === "assignment") {
       await handleAssignmentChat({
         userMessage,
@@ -1412,83 +1291,6 @@ const AudioStreamerChatBot = ({
     }
   );
 
-  // Helper function to generate concise TTS summary for leave messages
-  const generateLeaveTTSSummary = (answer: string): string => {
-    const lowerAnswer = answer.toLowerCase();
-    
-    // Transport incharge alternative selection
-    if (
-      lowerAnswer.includes("transport vehicle incharge") ||
-      lowerAnswer.includes("alternative incharge")
-    ) {
-      if (lowerAnswer.includes("available employees") || lowerAnswer.includes("you can select")) {
-        return "You are assigned as a transport vehicle incharge so please select alternative person who can handle your duty in your absence from below";
-      }
-      if (lowerAnswer.includes("no suggested alternative") || lowerAnswer.includes("no alternative employees")) {
-        return "You are assigned as a transport vehicle incharge but no alternative employees are available. Please contact your administrator";
-      }
-      return "You are assigned as a transport vehicle incharge so please select alternative person who can handle your duty in your absence";
-    }
-    
-    // Asking for leave information
-    if (
-      lowerAnswer.includes("please provide") ||
-      lowerAnswer.includes("missing information") ||
-      lowerAnswer.includes("need") && (lowerAnswer.includes("date") || lowerAnswer.includes("leave type"))
-    ) {
-      if (lowerAnswer.includes("start date") || lowerAnswer.includes("end date")) {
-        return "Please provide the start date and end date for your leave";
-      }
-      if (lowerAnswer.includes("leave type")) {
-        return "Please specify the type of leave you want to apply for";
-      }
-      if (lowerAnswer.includes("reason") || lowerAnswer.includes("description")) {
-        return "Please provide a reason or description for your leave";
-      }
-      return "Please provide the required leave information";
-    }
-    
-    // Leave validation or summary
-    if (
-      lowerAnswer.includes("leave summary") ||
-      lowerAnswer.includes("review") ||
-      lowerAnswer.includes("confirm")
-    ) {
-      return "Please review your leave details and confirm if everything is correct";
-    }
-    
-    // Success messages
-    if (lowerAnswer.includes("successfully") && lowerAnswer.includes("submitted")) {
-      return "Leave application submitted successfully. Your request has been sent for approval";
-    }
-    
-    // Error messages
-    if (lowerAnswer.includes("error") || lowerAnswer.includes("failed")) {
-      if (lowerAnswer.includes("alternative incharge") || lowerAnswer.includes("transport")) {
-        return "Please provide alternative transport incharge before submitting";
-      }
-      return "An error occurred. Please check your leave details and try again";
-    }
-    
-    // Default: return first sentence or first 100 characters, cleaned
-    const cleaned = answer
-      .replace(/\*\*/g, "")
-      .replace(/\*/g, "")
-      .replace(/📝|✅|❌|⚠️|•/g, "")
-      .replace(/\n/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    
-    // Try to get first sentence
-    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
-    if (firstSentence.length > 0 && firstSentence.length < 200) {
-      return firstSentence;
-    }
-    
-    // Fallback to first 150 characters
-    return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
-  };
-
   // Helper for query-flow TTS: strip markdown and truncate for voice playback
   const generateQueryTTSSummary = (answer: string): string => {
     if (!answer || !answer.trim()) return "No response.";
@@ -1507,7 +1309,10 @@ const AudioStreamerChatBot = ({
 
   // TTS playback function - supports interruption in Full Voice Mode
   // Uses request ID to ensure only the latest TTS request plays
-  const handlePlayTTS = async (idx: number, text: string) => {
+  // `isQuery` marks whether this is a query-flow TTS (true) or an
+  // action-flow / system message TTS (false). Backend uses this flag
+  // to decide whether to generate a summarized TTS or speak raw text.
+  const handlePlayTTS = async (idx: number, text: string, isQuery: boolean = false) => {
     // Interrupt any currently playing TTS before starting new one
     interruptTTS();
     
@@ -1520,7 +1325,7 @@ const AudioStreamerChatBot = ({
     setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
-      const reader = await aiAPI.textToSpeech({ text });
+      const reader = await aiAPI.textToSpeech({ text, is_query: isQuery });
       
       // Check if this request is still the latest (not cancelled by a newer request)
       if (ttsRequestIdRef.current !== thisRequestId) {
@@ -3911,19 +3716,63 @@ const AudioStreamerChatBot = ({
                             Attendance (Voice)
                           </div>
                           <div
-                            onClick={() => {
+                            onClick={async () => {
                               setAutoRouting(false);
                               activeFlowRef.current = "leave";
                               setActiveFlow("leave");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
+                              // Start interactive 6-step leave flow: show user message and fetch Step 1 from backend
+                              const initialMessage = "apply leave";
                               setChatHistory((prev) => [
                                 ...prev,
-                                {
-                                  type: "bot",
-                                  text: "Leave application flow activated (Manual override)! 📝 Please provide your leave details. I'll help you apply for leave. You can provide information like: start date, end date, leave type, and reason. For example: 'I want to apply for leave from 2025-11-14 to 2025-11-14 for personal reasons'.",
-                                },
+                                { type: "user", text: initialMessage },
                               ]);
+                              setIsProcessing(true);
+                              try {
+                                const authToken = localStorage.getItem("token");
+                                const { academic_session, branch_token } =
+                                  getErpContext();
+                                const data = await aiAPI.leaveChat({
+                                  session_id: sessionId || userId,
+                                  user_id: userId,
+                                  query: initialMessage,
+                                  bearer_token: authToken || undefined,
+                                  academic_session,
+                                  branch_token,
+                                });
+                                if (data.status === "success" && data.data) {
+                                  const answer = data.data.answer || "";
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      answer,
+                                      activeTab: "answer" as const,
+                                    },
+                                  ]);
+                                } else {
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    {
+                                      type: "bot",
+                                      text:
+                                        data.message ||
+                                        "Could not start leave flow. Please try again.",
+                                    },
+                                  ]);
+                                }
+                              } catch (err) {
+                                setChatHistory((prev) => [
+                                  ...prev,
+                                  {
+                                    type: "bot",
+                                    text: "Sorry, there was an error starting the leave flow. Please try again.",
+                                  },
+                                ]);
+                              } finally {
+                                setIsProcessing(false);
+                              }
                             }}
                             style={{
                               opacity: activeFlow === "leave" ? 1 : 0.7,
