@@ -43,6 +43,7 @@ import type {
   ClassInfo,
   AttendanceRecord,
 } from "./flows/attendanceFlow";
+import { handleLeaveChat } from "./flows/leaveApplicationFlow";
 // Removed separate editable component - using inline editing instead
 type TabType = "answer" | "references" | "query";
 type FlowType =
@@ -130,7 +131,7 @@ const AudioStreamerChatBot = ({
     [idx: number]: string;
   }>({});
   const [showCorrectionBox, setShowCorrectionBox] = useState<number | null>(
-    null
+    null,
   );
   const [activeFlow, setActiveFlow] = useState<FlowType>("none"); // <-- add
   const [sessionId, setSessionId] = useState<string | null>(null); // <-- add
@@ -139,23 +140,26 @@ const AudioStreamerChatBot = ({
   const [attendanceStep, setAttendanceStep] = useState<
     "class_info" | "student_details" | "completed"
   >("class_info");
-  const [pendingClassInfo, setPendingClassInfo] = useState<ClassInfo | null>(null); // <-- add for pending class info
+  const [pendingClassInfo, setPendingClassInfo] = useState<ClassInfo | null>(
+    null,
+  ); // <-- add for pending class info
   // Unified attendance flow state
-  const [attendanceFlowState, setAttendanceFlowState] = useState<AttendanceState>(INITIAL_ATTENDANCE_STATE);
+  const [attendanceFlowState, setAttendanceFlowState] =
+    useState<AttendanceState>(INITIAL_ATTENDANCE_STATE);
   const [, _setIsProcessingImage] = useState(false); // <-- add for image processing state
   // Debug wrapper for setAttendanceData
 
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null); // <-- add for class info
   const classInfoRef = useRef<ClassInfo | null>(null); // Ref to access current classInfo in closures
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(
-    null
+    null,
   ); // Track which message is being edited
   const [showClassInfoModal, setShowClassInfoModal] = useState(false); // <-- add for class info modal
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null); // <-- add for pending image
   const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
   const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
   const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>(
-    {}
+    {},
   ); // <-- add for reject reasons
   // Course progress is now fully backend-driven - no frontend state needed
   // The backend returns course_progress data in the response which is stored in chat messages
@@ -164,7 +168,7 @@ const AudioStreamerChatBot = ({
 
   const [autoRouting, setAutoRouting] = useState<boolean>(true);
   const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
-    "llm"
+    "llm",
   );
   const [_detectedFlow, setDetectedFlow] = useState<string | null>(null);
   const [_classificationConfidence, setClassificationConfidence] =
@@ -175,7 +179,9 @@ const AudioStreamerChatBot = ({
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
   const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
-  const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Debounce turn-complete
+  const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  ); // Debounce turn-complete
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0);
   const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voice input time
 
@@ -277,33 +283,35 @@ const AudioStreamerChatBot = ({
   const interruptTTS = () => {
     // Increment request ID to cancel any in-flight TTS requests
     ttsRequestIdRef.current += 1;
-    console.log(`🛑 TTS interrupted - new request ID: ${ttsRequestIdRef.current}`);
-    
+    console.log(
+      `🛑 TTS interrupted - new request ID: ${ttsRequestIdRef.current}`,
+    );
+
     if (currentTTSAudioRef.current) {
       const audio = currentTTSAudioRef.current;
       // Always interrupt if audio exists - pause and reset
-      console.log("🛑 Interrupting TTS playback", { 
-        paused: audio.paused, 
-        currentTime: audio.currentTime, 
+      console.log("🛑 Interrupting TTS playback", {
+        paused: audio.paused,
+        currentTime: audio.currentTime,
         readyState: audio.readyState,
         ended: audio.ended,
-        requestId: (audio as any)._requestId
+        requestId: (audio as any)._requestId,
       });
       audio.pause();
       audio.currentTime = 0;
-      
+
       // Clean up URL if stored on audio element
       const url = (audio as any)._ttsUrl;
       if (url) {
         URL.revokeObjectURL(url);
         (audio as any)._ttsUrl = null;
       }
-      
+
       // Clear the ref so we know TTS was interrupted
       currentTTSAudioRef.current = null;
       webrtcServiceRef.current?.interruptBotAudio();
     }
-    
+
     // Clear loading state
     setTtsLoading(null);
   };
@@ -313,60 +321,102 @@ const AudioStreamerChatBot = ({
       // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
       finalTextRef.current = "";
-      
+
       // Create WebRTC service instance
       const webrtcService = new WebRTCAudioService();
       webrtcServiceRef.current = webrtcService;
 
       // Connect with callbacks; pass useFullVoice for Full Voice Mode
-      await webrtcService.connect(selectedLanguage, {
-        onTranscript: (text: string, isFinal: boolean) => {
-          const trimmed = text.trim();
-          if (!trimmed) return;
+      await webrtcService.connect(
+        selectedLanguage,
+        {
+          onTranscript: (text: string, isFinal: boolean) => {
+            const trimmed = text.trim();
+            if (!trimmed) return;
 
-          // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
-          if (useFullVoice) {
-            interruptTTS();
-          }
-
-          if (isFinal) {
-            // Final result: add to accumulated final text and clear interim
-            finalTextRef.current = finalTextRef.current
-              ? finalTextRef.current + " " + trimmed
-              : trimmed;
-            lastInterimTextRef.current = "";
-            
-            // Update input with final text only (no interim)
-            setInputText(finalTextRef.current);
-          } else {
-            // Interim result: show final text + current interim
-            lastInterimTextRef.current = trimmed;
-            const displayText = finalTextRef.current
-              ? finalTextRef.current + " " + trimmed
-              : trimmed;
-            
-            // Update input in real-time with interim
-            setInputText(displayText);
-          }
-
-          // Full-voice flows (attendance, assignment): 3-second auto-submit
-          const useFullVoiceTimer =
-            activeFlow === "full_voice_attendance" ||
-            (activeFlow === "assignment" && useFullVoice);
-          if (useFullVoiceTimer) {
-            setLastVoiceInputTime(Date.now());
-
-            if (fullVoiceAutoSubmitTimer) {
-              clearTimeout(fullVoiceAutoSubmitTimer);
+            // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
+            if (useFullVoice) {
+              interruptTTS();
             }
 
-            const currentText = isFinal
-              ? finalTextRef.current
-              : (finalTextRef.current + " " + trimmed);
-            const timer = setTimeout(async () => {
-              const finalInput = currentText.trim();
+            if (isFinal) {
+              // Final result: add to accumulated final text and clear interim
+              finalTextRef.current = finalTextRef.current
+                ? finalTextRef.current + " " + trimmed
+                : trimmed;
+              lastInterimTextRef.current = "";
+
+              // Update input with final text only (no interim)
+              setInputText(finalTextRef.current);
+            } else {
+              // Interim result: show final text + current interim
+              lastInterimTextRef.current = trimmed;
+              const displayText = finalTextRef.current
+                ? finalTextRef.current + " " + trimmed
+                : trimmed;
+
+              // Update input in real-time with interim
+              setInputText(displayText);
+            }
+
+            // Full-voice flows (attendance, assignment): 3-second auto-submit
+            const useFullVoiceTimer =
+              activeFlow === "full_voice_attendance" ||
+              (activeFlow === "assignment" && useFullVoice);
+            if (useFullVoiceTimer) {
+              setLastVoiceInputTime(Date.now());
+
+              if (fullVoiceAutoSubmitTimer) {
+                clearTimeout(fullVoiceAutoSubmitTimer);
+              }
+
+              const currentText = isFinal
+                ? finalTextRef.current
+                : finalTextRef.current + " " + trimmed;
+              const timer = setTimeout(async () => {
+                const finalInput = currentText.trim();
+                if (!finalInput || isProcessing) return;
+                setFullVoiceAutoSubmitTimer(null);
+                setInputText(finalInput);
+                isVoiceTriggeredRequestRef.current = true;
+                try {
+                  await handleSubmit(finalInput);
+                } finally {
+                  isVoiceTriggeredRequestRef.current = false;
+                }
+              }, 3000);
+              setFullVoiceAutoSubmitTimer(timer);
+            }
+          },
+          onError: (error: Error) => {
+            console.error("WebRTC error:", error);
+            setIsRecording(false);
+            setIsVoiceActive(false);
+          },
+          onConnected: () => {
+            setIsRecording(true);
+          },
+          onDisconnected: () => {
+            setIsRecording(false);
+            setIsVoiceActive(false);
+            console.log("WebRTC disconnected");
+          },
+          onTurnComplete: () => {
+            if (!useFullVoice || !finalTextRef.current.trim() || isProcessing)
+              return;
+            // These flows use 3s timer only; skip turn-complete to avoid double submit
+            const useFullVoiceTimer =
+              activeFlow === "full_voice_attendance" ||
+              (activeFlow === "assignment" && useFullVoice);
+            if (useFullVoiceTimer) return;
+            if (turnCompleteTimerRef.current)
+              clearTimeout(turnCompleteTimerRef.current);
+            turnCompleteTimerRef.current = setTimeout(async () => {
+              turnCompleteTimerRef.current = null;
+              const finalInput = finalTextRef.current.trim();
               if (!finalInput || isProcessing) return;
-              setFullVoiceAutoSubmitTimer(null);
+              lastInterimTextRef.current = "";
+              finalTextRef.current = "";
               setInputText(finalInput);
               isVoiceTriggeredRequestRef.current = true;
               try {
@@ -374,54 +424,18 @@ const AudioStreamerChatBot = ({
               } finally {
                 isVoiceTriggeredRequestRef.current = false;
               }
-            }, 3000);
-            setFullVoiceAutoSubmitTimer(timer);
-          }
-        },
-        onError: (error: Error) => {
-          console.error("WebRTC error:", error);
-          setIsRecording(false);
-          setIsVoiceActive(false);
-        },
-        onConnected: () => {
-          setIsRecording(true);
-        },
-        onDisconnected: () => {
-          setIsRecording(false);
-          setIsVoiceActive(false);
-          console.log("WebRTC disconnected");
-        },
-        onTurnComplete: () => {
-          if (!useFullVoice || !finalTextRef.current.trim() || isProcessing) return;
-          // These flows use 3s timer only; skip turn-complete to avoid double submit
-          const useFullVoiceTimer =
-            activeFlow === "full_voice_attendance" ||
-            (activeFlow === "assignment" && useFullVoice);
-          if (useFullVoiceTimer) return;
-          if (turnCompleteTimerRef.current) clearTimeout(turnCompleteTimerRef.current);
-          turnCompleteTimerRef.current = setTimeout(async () => {
-            turnCompleteTimerRef.current = null;
-            const finalInput = finalTextRef.current.trim();
-            if (!finalInput || isProcessing) return;
-            lastInterimTextRef.current = "";
-            finalTextRef.current = "";
-            setInputText(finalInput);
-            isVoiceTriggeredRequestRef.current = true;
-            try {
-              await handleSubmit(finalInput);
-            } finally {
-              isVoiceTriggeredRequestRef.current = false;
+            }, 800);
+          },
+          onVoiceActivity: (isActive: boolean) => {
+            setIsVoiceActive(isActive);
+            // Interrupt TTS when voice activity is detected
+            if (isActive && useFullVoice) {
+              interruptTTS();
             }
-          }, 800);
+          },
         },
-        onVoiceActivity: (isActive: boolean) => {
-          setIsVoiceActive(isActive);
-          // Interrupt TTS when voice activity is detected
-          if (isActive && useFullVoice) {
-            interruptTTS();
-          }
-        },
-      }, useFullVoice);
+        useFullVoice,
+      );
     } catch (error) {
       console.error("Failed to start WebRTC streaming:", error);
       setIsRecording(false);
@@ -484,7 +498,7 @@ const AudioStreamerChatBot = ({
   // @ts-expect-error - Kept for future use
   const _uploadAttendanceImage = async (
     file: File,
-    classInfo: { class_: string; section: string; date: string }
+    classInfo: { class_: string; section: string; date: string },
   ) => {
     try {
       const result = await aiAPI.processAttendanceImage({
@@ -548,7 +562,7 @@ const AudioStreamerChatBot = ({
    * Classify user query to determine appropriate flow
    */
   const classifyQuery = async (
-    message: string
+    message: string,
   ): Promise<{
     flow: string;
     confidence: number;
@@ -606,9 +620,12 @@ const AudioStreamerChatBot = ({
     // CHECK FOR EXIT KEYWORDS - Exit current flow immediately
     // Strip trailing punctuation (voice transcription often adds "." or "?" or "!")
     const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
-    const normalizedForExit = userMessage.toLowerCase().trim().replace(/[.!?,;:'"]+$/, '');
+    const normalizedForExit = userMessage
+      .toLowerCase()
+      .trim()
+      .replace(/[.!?,;:'"]+$/, "");
     const isExitCommand = exitKeywords.some(
-      (keyword) => normalizedForExit === keyword
+      (keyword) => normalizedForExit === keyword,
     );
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
@@ -636,10 +653,7 @@ const AudioStreamerChatBot = ({
       setAttendanceStep("class_info");
       setPendingClassInfo(null);
       const exitMessage = `✅ Exited from ${activeFlow} flow. Welcome back! You can ask me anything or use the dropdown to select a specific flow.`;
-      setChatHistory((prev) => [
-        ...prev,
-        { type: "bot", text: exitMessage },
-      ]);
+      setChatHistory((prev) => [...prev, { type: "bot", text: exitMessage }]);
       try {
         if (isVoiceTriggeredRequestRef.current === true) {
           void handlePlayTTS(-1, generateQueryTTSSummary(exitMessage));
@@ -689,7 +703,7 @@ const AudioStreamerChatBot = ({
       "display",
     ];
     const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
-      userMessage.toLowerCase().includes(keyword)
+      userMessage.toLowerCase().includes(keyword),
     );
 
     // Stay in active flow if user is responding (not starting new request)
@@ -757,25 +771,30 @@ const AudioStreamerChatBot = ({
         "sunday",
       ];
       const isSimpleResponse = simpleResponses.includes(
-        userMessage.toLowerCase().trim()
+        userMessage.toLowerCase().trim(),
       );
 
-      if (isSimpleResponse && activeFlowRef.current !== "none" && activeFlowRef.current !== "query") {
+      if (
+        isSimpleResponse &&
+        activeFlowRef.current !== "none" &&
+        activeFlowRef.current !== "query"
+      ) {
         // Keep current flow for simple confirmation words
         console.log(
           "📍 Simple response detected, keeping current flow:",
-          activeFlowRef.current
+          activeFlowRef.current,
         );
         targetFlow = activeFlowRef.current;
       } else if (
-        (activeFlowRef.current !== "none" && activeFlowRef.current !== "query") &&
+        activeFlowRef.current !== "none" &&
+        activeFlowRef.current !== "query" &&
         userMessage.length < 50 &&
         !looksLikeNewRequest
       ) {
         // Short message in an active flow (likely a response to a question) - stay in current flow
         console.log(
           "📍 Short response in active flow, staying in:",
-          activeFlowRef.current
+          activeFlowRef.current,
         );
         targetFlow = activeFlowRef.current;
       } else {
@@ -795,13 +814,13 @@ const AudioStreamerChatBot = ({
             tokens.includes("leave") || tokens.includes("leaves");
           const approvalTokens = ["approval", "approve", "approvals"];
           const hasApprovalToken = approvalTokens.some((t) =>
-            tokens.includes(t)
+            tokens.includes(t),
           );
 
           if (hasLeaveToken && hasApprovalToken) {
             console.log(
               "📍 Lexical override: forcing leave_approval based on tokens",
-              { tokens }
+              { tokens },
             );
             // Mark classificationResult so downstream logic treats this as a
             // detected/new flow (same shape as classifier result). We set a
@@ -849,7 +868,11 @@ const AudioStreamerChatBot = ({
       setUserOptionSelected(true);
 
       // IMPORTANT: Initialize flow state when detected (same as manual mode)
-      if (targetFlow === "attendance" || targetFlow === "voice_attendance" || targetFlow === "full_voice_attendance") {
+      if (
+        targetFlow === "attendance" ||
+        targetFlow === "voice_attendance" ||
+        targetFlow === "full_voice_attendance"
+      ) {
         console.log("📍 Initializing unified attendance flow state");
         setAttendanceStep("class_info");
         setPendingClassInfo(null);
@@ -862,7 +885,9 @@ const AudioStreamerChatBot = ({
         try {
           if (
             isVoiceTriggeredRequestRef.current === true &&
-            (targetFlow === "attendance" || targetFlow === "voice_attendance" || targetFlow === "full_voice_attendance")
+            (targetFlow === "attendance" ||
+              targetFlow === "voice_attendance" ||
+              targetFlow === "full_voice_attendance")
           ) {
             attendanceVoiceInitiatedRef.current = true;
           }
@@ -899,40 +924,21 @@ const AudioStreamerChatBot = ({
       if (targetFlow === "leave" && isNewFlowInitialization) {
         console.log("📍 Initializing leave flow state");
 
-        // IMPORTANT: Set activeFlow (and ref) BEFORE returning so next message stays in leave flow
+        // IMPORTANT: Set activeFlow (and ref) BEFORE processing so next message stays in leave flow
         activeFlowRef.current = "leave";
         setActiveFlow("leave");
 
-        // Add welcome message matching manual mode
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: "📝 I'll help you apply for leave. Please provide details like:\n• Start date and end date\n• Leave type (sick, casual, earned, etc.)\n• Reason for leave",
-          },
-        ]);
-
         // If this Leave request was initiated via microphone,
-        // play a concise informational TTS line and mark
-        // that the leave flow was voice-initiated so the
+        // mark that the leave flow was voice-initiated so the
         // subsequent responses can also trigger TTS.
-        try {
-          if (
-            isVoiceTriggeredRequestRef.current === true &&
-            // Double-check flow
-            targetFlow === "leave"
-          ) {
-            leaveVoiceInitiatedRef.current = true;
-            const speech = "I'll help you apply for leave. Please provide details like: Start date and end date, Leave type such as sick, casual, earned, etc., and Reason for leave.";
-            void handlePlayTTS(-1, speech);
-          }
-        } catch (ttsErr) {
-          console.error("TTS playback failed:", ttsErr);
+        if (isVoiceTriggeredRequestRef.current === true) {
+          leaveVoiceInitiatedRef.current = true;
         }
 
-        // Stop here - don't process the initialization message, wait for user's next input
-        setIsProcessing(false);
-        return;
+        // DON'T return here - let the message go to the backend
+        // The backend (SimpleLeaveAgent) will handle the interactive dialog
+        // and return the first response with leave quotas and duration prompt
+        console.log("📍 Sending initial message to backend for leave flow");
       }
     } else {
       console.log("📍 Using current activeFlow:", activeFlow);
@@ -942,10 +948,7 @@ const AudioStreamerChatBot = ({
     if (!userOptionSelected && targetFlow === "none") {
       const promptText =
         "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.";
-      setChatHistory((prev) => [
-        ...prev,
-        { type: "bot", text: promptText },
-      ]);
+      setChatHistory((prev) => [...prev, { type: "bot", text: promptText }]);
       try {
         if (isVoiceTriggeredRequestRef.current === true) {
           void handlePlayTTS(-1, generateQueryTTSSummary(promptText));
@@ -1066,142 +1069,31 @@ const AudioStreamerChatBot = ({
           },
         ]);
         if (attendanceVoiceInitiatedRef.current) {
-          void handlePlayTTS(-1, "Error processing attendance. Please try again.");
+          void handlePlayTTS(
+            -1,
+            "Error processing attendance. Please try again.",
+          );
         }
         setIsProcessing(false);
       }
     } else if (targetFlow === "leave") {
-      // Leave application flow
-      try {
-        // Get auth token from localStorage
-        const authToken = localStorage.getItem("token");
-        const { academic_session, branch_token } = getErpContext();
-
-        const data = await aiAPI.leaveChat({
-          session_id: sessionId || userId,
-          user_id: userId, // Pass user_id (will be mapped to employee UUID)
-          query: userMessage,
-          bearer_token: authToken || undefined, // Pass bearer token if available
-          academic_session,
-          branch_token,
-        });
-
-        if (data.status === "success" && data.data) {
-          const answer = data.data.answer || "";
-          const leaveData = data.data.leave_data;
-
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              answer: answer,
-              activeTab: "answer" as const,
-            },
-          ]);
-
-          // If leave data is present, log it (you can add UI to display it)
-          if (leaveData) {
-            console.log("Leave application data:", leaveData);
-          }
-
-          // TTS: voice-only, strictly gated. Do NOT speak when input was typed
-          // or for any other flow. This uses the leaveVoiceInitiatedRef that is set
-          // only when the microphone-based submission initializes the leave flow.
-          try {
-            if (
-              leaveVoiceInitiatedRef.current === true &&
-              targetFlow === "leave"
-            ) {
-              // Generate concise summary for TTS instead of full message
-              const speech = generateLeaveTTSSummary(answer);
-
-              // Use the component's TTS helper to play speech. Pass a non-disruptive index.
-              void handlePlayTTS(-1, speech);
-            }
-          } catch (ttsErr) {
-            console.error("TTS playback failed:", ttsErr);
-          }
-
-          // If submission failed (error message), stay in the flow to allow retry
-          if (
-            answer.includes("❌") ||
-            answer.includes("error") ||
-            answer.includes("failed")
-          ) {
-            console.log(
-              "⚠️ Leave submission error detected, staying in flow for retry"
-            );
-            // Keep the activeFlow as "leave" so the next message stays in leave flow
-            setActiveFlow("leave");
-          }
-
-          // If submission succeeded (success message), exit the flow
-          if (answer.includes("✅") && answer.includes("successfully")) {
-            console.log("✅ Leave submitted successfully, exiting flow");
-            leaveVoiceInitiatedRef.current = false;
-            setTimeout(() => {
-              activeFlowRef.current = "none";
-              setActiveFlow("none");
-            }, 1000);
-          }
-        } else {
-          const errorMessage =
-            data.message ||
-            "Sorry, there was an error processing your leave request.";
-          setChatHistory((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: errorMessage,
-            },
-          ]);
-
-          // TTS for error messages if voice-initiated
-          try {
-            if (
-              leaveVoiceInitiatedRef.current === true &&
-              targetFlow === "leave"
-            ) {
-              // Generate concise summary for TTS instead of full message
-              const speech = generateLeaveTTSSummary(errorMessage);
-              void handlePlayTTS(-1, speech);
-            }
-          } catch (ttsErr) {
-            console.error("TTS playback failed:", ttsErr);
-          }
-
-          // Keep the leave flow active for retry
-          setActiveFlow("leave");
-        }
-      } catch (err) {
-        const errorMessage = "Sorry, there was an error processing your leave request.";
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: errorMessage,
-          },
-        ]);
-
-        // TTS for error messages if voice-initiated
-        try {
-          if (
-            leaveVoiceInitiatedRef.current === true &&
-            targetFlow === "leave"
-          ) {
-            // Generate concise summary for TTS instead of full message
-            const speech = generateLeaveTTSSummary(errorMessage);
-            void handlePlayTTS(-1, speech);
-          }
-        } catch (ttsErr) {
-          console.error("TTS playback failed:", ttsErr);
-        }
-
-        // Keep the leave flow active for retry
-        setActiveFlow("leave");
-      } finally {
-        setIsProcessing(false);
-      }
+      // Leave application flow - using extracted handler
+      await handleLeaveChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: leaveVoiceInitiatedRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => {
+          leaveVoiceInitiatedRef.current = false;
+          activeFlowRef.current = "none";
+          setActiveFlow("none");
+        },
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        setActiveFlow: (flow) => setActiveFlow(flow as FlowType),
+      });
     } else if (targetFlow === "assignment") {
       await handleAssignmentChat({
         userMessage,
@@ -1209,8 +1101,7 @@ const AudioStreamerChatBot = ({
         userId,
         isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
         getErpContext,
-        appendBotMessage: (msg) =>
-          setChatHistory((prev) => [...prev, msg]),
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => {
           activeFlowRef.current = "none";
           setActiveFlow("none");
@@ -1225,7 +1116,7 @@ const AudioStreamerChatBot = ({
       try {
         const authToken = localStorage.getItem("token");
         const { academic_session, branch_token } = getErpContext();
-        
+
         const response = await aiAPI.courseProgressChat({
           session_id: sessionId || `session_${userId}`,
           query: userMessage,
@@ -1237,22 +1128,26 @@ const AudioStreamerChatBot = ({
         if (response.status === "success" && response.data) {
           const botMessage: any = {
             type: "bot",
-            text: response.data.answer || "How can I help with course progress?",
+            text:
+              response.data.answer || "How can I help with course progress?",
           };
-          
+
           // If backend returns course progress data, include it for rendering
           if (response.data.course_progress) {
             botMessage.courseProgress = response.data.course_progress;
             botMessage.classSection = response.data.class_section;
           }
-          
+
           // If backend returns class sections list, include it for rendering
-          if (response.data.class_sections && response.data.class_sections.length > 0) {
+          if (
+            response.data.class_sections &&
+            response.data.class_sections.length > 0
+          ) {
             botMessage.classSectionsOptions = response.data.class_sections;
           }
-          
+
           setChatHistory((prev) => [...prev, botMessage]);
-          
+
           // Play TTS if voice-initiated
           if (
             isVoiceTriggeredRequestRef.current === true &&
@@ -1269,7 +1164,9 @@ const AudioStreamerChatBot = ({
             ...prev,
             {
               type: "bot",
-              text: response.message || "Failed to process course progress request.",
+              text:
+                response.message ||
+                "Failed to process course progress request.",
             },
           ]);
         }
@@ -1409,85 +1306,8 @@ const AudioStreamerChatBot = ({
         prevProps.answer === nextProps.answer &&
         prevProps.messageIdx === nextProps.messageIdx
       );
-    }
+    },
   );
-
-  // Helper function to generate concise TTS summary for leave messages
-  const generateLeaveTTSSummary = (answer: string): string => {
-    const lowerAnswer = answer.toLowerCase();
-    
-    // Transport incharge alternative selection
-    if (
-      lowerAnswer.includes("transport vehicle incharge") ||
-      lowerAnswer.includes("alternative incharge")
-    ) {
-      if (lowerAnswer.includes("available employees") || lowerAnswer.includes("you can select")) {
-        return "You are assigned as a transport vehicle incharge so please select alternative person who can handle your duty in your absence from below";
-      }
-      if (lowerAnswer.includes("no suggested alternative") || lowerAnswer.includes("no alternative employees")) {
-        return "You are assigned as a transport vehicle incharge but no alternative employees are available. Please contact your administrator";
-      }
-      return "You are assigned as a transport vehicle incharge so please select alternative person who can handle your duty in your absence";
-    }
-    
-    // Asking for leave information
-    if (
-      lowerAnswer.includes("please provide") ||
-      lowerAnswer.includes("missing information") ||
-      lowerAnswer.includes("need") && (lowerAnswer.includes("date") || lowerAnswer.includes("leave type"))
-    ) {
-      if (lowerAnswer.includes("start date") || lowerAnswer.includes("end date")) {
-        return "Please provide the start date and end date for your leave";
-      }
-      if (lowerAnswer.includes("leave type")) {
-        return "Please specify the type of leave you want to apply for";
-      }
-      if (lowerAnswer.includes("reason") || lowerAnswer.includes("description")) {
-        return "Please provide a reason or description for your leave";
-      }
-      return "Please provide the required leave information";
-    }
-    
-    // Leave validation or summary
-    if (
-      lowerAnswer.includes("leave summary") ||
-      lowerAnswer.includes("review") ||
-      lowerAnswer.includes("confirm")
-    ) {
-      return "Please review your leave details and confirm if everything is correct";
-    }
-    
-    // Success messages
-    if (lowerAnswer.includes("successfully") && lowerAnswer.includes("submitted")) {
-      return "Leave application submitted successfully. Your request has been sent for approval";
-    }
-    
-    // Error messages
-    if (lowerAnswer.includes("error") || lowerAnswer.includes("failed")) {
-      if (lowerAnswer.includes("alternative incharge") || lowerAnswer.includes("transport")) {
-        return "Please provide alternative transport incharge before submitting";
-      }
-      return "An error occurred. Please check your leave details and try again";
-    }
-    
-    // Default: return first sentence or first 100 characters, cleaned
-    const cleaned = answer
-      .replace(/\*\*/g, "")
-      .replace(/\*/g, "")
-      .replace(/📝|✅|❌|⚠️|•/g, "")
-      .replace(/\n/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-    
-    // Try to get first sentence
-    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
-    if (firstSentence.length > 0 && firstSentence.length < 200) {
-      return firstSentence;
-    }
-    
-    // Fallback to first 150 characters
-    return cleaned.substring(0, 150).trim() + (cleaned.length > 150 ? "..." : "");
-  };
 
   // Helper for query-flow TTS: strip markdown and truncate for voice playback
   const generateQueryTTSSummary = (answer: string): string => {
@@ -1502,7 +1322,9 @@ const AudioStreamerChatBot = ({
       .replace(/\s+/g, " ")
       .trim();
     const max = 300;
-    return cleaned.length <= max ? cleaned : cleaned.substring(0, max).trim() + "...";
+    return cleaned.length <= max
+      ? cleaned
+      : cleaned.substring(0, max).trim() + "...";
   };
 
   // TTS playback function - supports interruption in Full Voice Mode
@@ -1510,25 +1332,29 @@ const AudioStreamerChatBot = ({
   const handlePlayTTS = async (idx: number, text: string) => {
     // Interrupt any currently playing TTS before starting new one
     interruptTTS();
-    
+
     // Increment request ID - this marks any previous in-flight requests as stale
     ttsRequestIdRef.current += 1;
     const thisRequestId = ttsRequestIdRef.current;
-    
-    console.log(`🔊 TTS Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`);
-    
+
+    console.log(
+      `🔊 TTS Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`,
+    );
+
     setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
       const reader = await aiAPI.textToSpeech({ text });
-      
+
       // Check if this request is still the latest (not cancelled by a newer request)
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(`🔇 TTS Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`);
+        console.log(
+          `🔇 TTS Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`,
+        );
         setTtsLoading(null);
         return;
       }
-      
+
       if (!reader) throw new Error("No stream");
       const audioChunks: Uint8Array[] = [];
       let done = false;
@@ -1536,35 +1362,39 @@ const AudioStreamerChatBot = ({
         const { value, done: streamDone } = await reader.read();
         if (value) audioChunks.push(value);
         done = streamDone;
-        
+
         // Check again during streaming if request is still valid
         if (ttsRequestIdRef.current !== thisRequestId) {
-          console.log(`🔇 TTS Request #${thisRequestId} cancelled during streaming`);
+          console.log(
+            `🔇 TTS Request #${thisRequestId} cancelled during streaming`,
+          );
           setTtsLoading(null);
           return;
         }
       }
-      
+
       // Final check before creating audio
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(`🔇 TTS Request #${thisRequestId} cancelled before playback`);
+        console.log(
+          `🔇 TTS Request #${thisRequestId} cancelled before playback`,
+        );
         setTtsLoading(null);
         return;
       }
-      
+
       const audioBlob = new Blob(audioChunks as BlobPart[], {
         type: "audio/wav",
       });
       audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
-      
+
       // Store URL and request ID on audio element for cleanup
       (audio as any)._ttsUrl = audioUrl;
       (audio as any)._requestId = thisRequestId;
-      
+
       // Store audio reference for interruption
       currentTTSAudioRef.current = audio;
-      
+
       // Handle cleanup when audio ends naturally
       audio.onended = () => {
         if (currentTTSAudioRef.current === audio) {
@@ -1577,7 +1407,7 @@ const AudioStreamerChatBot = ({
         }
         setTtsLoading(null);
       };
-      
+
       // Handle errors during playback
       audio.onerror = (error) => {
         console.error("TTS audio error:", error);
@@ -1591,15 +1421,17 @@ const AudioStreamerChatBot = ({
         }
         setTtsLoading(null);
       };
-      
+
       // Final check right before playing
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(`🔇 TTS Request #${thisRequestId} cancelled right before play`);
+        console.log(
+          `🔇 TTS Request #${thisRequestId} cancelled right before play`,
+        );
         URL.revokeObjectURL(audioUrl);
         setTtsLoading(null);
         return;
       }
-      
+
       // Play audio and handle play promise rejection
       console.log(`🔊 TTS Request #${thisRequestId} playing`);
       try {
@@ -1642,7 +1474,7 @@ const AudioStreamerChatBot = ({
   const handleSendFeedback = async (
     idx: number,
     type: "Approved" | "Rejected",
-    comment?: string
+    comment?: string,
   ) => {
     const feedbackCommentValue = comment ?? "";
     try {
@@ -1655,8 +1487,8 @@ const AudioStreamerChatBot = ({
         prev.map((msg, i) =>
           i === idx && msg.type === "bot"
             ? { ...msg, feedback: type, feedbackMessage: data.message }
-            : msg
-        )
+            : msg,
+        ),
       );
       setFeedbackComment((prev) => ({ ...prev, [idx]: "" }));
       setShowCorrectionBox(null);
@@ -1665,8 +1497,8 @@ const AudioStreamerChatBot = ({
         prev.map((msg, i) =>
           i === idx && msg.type === "bot"
             ? { ...msg, feedbackMessage: "Failed to send feedback." }
-            : msg
-        )
+            : msg,
+        ),
       );
     }
   };
@@ -1718,7 +1550,7 @@ const AudioStreamerChatBot = ({
   const handleAttendanceDataChange = (
     index: number,
     field: string,
-    value: string
+    value: string,
   ) => {
     const updatedData = [...attendanceData];
     updatedData[index] = { ...updatedData[index], [field]: value };
@@ -1726,7 +1558,10 @@ const AudioStreamerChatBot = ({
   };
 
   const handleAddStudent = () => {
-    const newStudent: AttendanceRecord = { student_name: "", attendance_status: "Present" };
+    const newStudent: AttendanceRecord = {
+      student_name: "",
+      attendance_status: "Present",
+    };
     setAttendanceData([...attendanceData, newStudent]);
   };
 
@@ -1769,7 +1604,7 @@ const AudioStreamerChatBot = ({
   const getAttendanceDataForApproval = (
     messageIndex?: number,
     fallbackAttendanceData?: any[],
-    fallbackClassInfo?: any
+    fallbackClassInfo?: any,
   ) => {
     console.log("=== getAttendanceDataForApproval DEBUG ===");
     console.log("messageIndex:", messageIndex);
@@ -1795,15 +1630,23 @@ const AudioStreamerChatBot = ({
     });
 
     // Priority 0: If messageIndex is provided, check that specific message FIRST (highest priority for saved/edited data)
-    if (messageIndex !== undefined && messageIndex >= 0 && messageIndex < chatHistory.length) {
+    if (
+      messageIndex !== undefined &&
+      messageIndex >= 0 &&
+      messageIndex < chatHistory.length
+    ) {
       const targetMessage = chatHistory[messageIndex];
-      console.log(`🔍 Priority 0: Checking provided message index ${messageIndex} first (highest priority for saved/edited data):`, {
-        type: targetMessage?.type,
-        hasAttendanceSummary: !!targetMessage?.attendance_summary,
-        attendanceSummaryLength: targetMessage?.attendance_summary?.length || 0,
-        hasClassInfo: !!targetMessage?.class_info,
-      });
-      
+      console.log(
+        `🔍 Priority 0: Checking provided message index ${messageIndex} first (highest priority for saved/edited data):`,
+        {
+          type: targetMessage?.type,
+          hasAttendanceSummary: !!targetMessage?.attendance_summary,
+          attendanceSummaryLength:
+            targetMessage?.attendance_summary?.length || 0,
+          hasClassInfo: !!targetMessage?.class_info,
+        },
+      );
+
       if (
         targetMessage?.type === "bot" &&
         targetMessage?.attendance_summary &&
@@ -1812,7 +1655,7 @@ const AudioStreamerChatBot = ({
         console.log(
           `✅ Priority 0: Found attendance data in provided message index ${messageIndex} (saved/edited data):`,
           targetMessage.attendance_summary.length,
-          "records"
+          "records",
         );
         return {
           attendanceData: targetMessage.attendance_summary,
@@ -1834,14 +1677,14 @@ const AudioStreamerChatBot = ({
 
     // Priority 2: Search chat history from most recent to oldest for messages with attendance_summary
     console.log(
-      "🔍 Priority 2: Searching for attendance data in chat history (from most recent)..."
+      "🔍 Priority 2: Searching for attendance data in chat history (from most recent)...",
     );
     for (let i = chatHistory.length - 1; i >= 0; i--) {
       // Skip the message at messageIndex if it was already checked in Priority 0
       if (messageIndex !== undefined && i === messageIndex) {
         continue;
       }
-      
+
       const msg = chatHistory[i];
       console.log(`Checking message ${i}:`, {
         type: msg.type,
@@ -1860,7 +1703,7 @@ const AudioStreamerChatBot = ({
         console.log(
           `✅ Priority 2: Found attendance data in message ${i}:`,
           msg.attendance_summary.length,
-          "records"
+          "records",
         );
         return {
           attendanceData: msg.attendance_summary,
@@ -1877,7 +1720,7 @@ const AudioStreamerChatBot = ({
       if (messageIndex !== undefined && i === messageIndex) {
         continue;
       }
-      
+
       const msg = chatHistory[i];
       if (
         msg.type === "bot" &&
@@ -1886,14 +1729,14 @@ const AudioStreamerChatBot = ({
       ) {
         console.log(
           `Found message with buttons at index ${i}:`,
-          (msg as any).buttons
+          (msg as any).buttons,
         );
         // Try to get data from this message or use global state
         if (msg.attendance_summary && msg.attendance_summary.length > 0) {
           console.log(
             `✅ Priority 3: Using attendance data from button message ${i}:`,
             msg.attendance_summary.length,
-            "records"
+            "records",
           );
           return {
             attendanceData: msg.attendance_summary,
@@ -1904,7 +1747,7 @@ const AudioStreamerChatBot = ({
           console.log(
             `✅ Priority 3: Using global state for button message ${i}:`,
             attendanceData.length,
-            "records"
+            "records",
           );
           return {
             attendanceData: attendanceData,
@@ -1926,14 +1769,11 @@ const AudioStreamerChatBot = ({
     }
 
     // Priority 5: Use fallbackAttendanceData and fallbackClassInfo if provided (captured from button closure)
-    if (
-      fallbackAttendanceData &&
-      fallbackAttendanceData.length > 0
-    ) {
+    if (fallbackAttendanceData && fallbackAttendanceData.length > 0) {
       console.log(
         "✅ Priority 5: Using fallback attendance data (captured from button closure):",
         fallbackAttendanceData.length,
-        "records"
+        "records",
       );
       return {
         attendanceData: fallbackAttendanceData,
@@ -1945,7 +1785,7 @@ const AudioStreamerChatBot = ({
     // Priority 6: Last resort - try to get data from session storage
     try {
       const sessionAttendanceData = sessionStorage.getItem(
-        "pendingAttendanceData"
+        "pendingAttendanceData",
       );
       const sessionClassInfo = sessionStorage.getItem("pendingClassInfo");
 
@@ -1979,11 +1819,11 @@ const AudioStreamerChatBot = ({
     messageIndex?: number,
     attendanceType: "text" | "image" | "voice" = "text",
     fallbackAttendanceData?: any[],
-    fallbackClassInfo?: any
+    fallbackClassInfo?: any,
   ) => {
     console.log(
       `🚀 ${attendanceType.toUpperCase()} Attendance Approval clicked for message:`,
-      messageIndex
+      messageIndex,
     );
     console.log(`🚀 Current global state:`, {
       attendanceData: attendanceData,
@@ -2009,14 +1849,14 @@ const AudioStreamerChatBot = ({
       const dataToSave = getAttendanceDataForApproval(
         messageIndex,
         fallbackAttendanceData,
-        fallbackClassInfo
+        fallbackClassInfo,
       );
 
       console.log(`🚀 Data to save result:`, dataToSave);
 
       if (!dataToSave) {
         console.error(
-          `❌ No attendance data found for ${attendanceType} approval`
+          `❌ No attendance data found for ${attendanceType} approval`,
         );
         setChatHistory((prev) => [
           ...prev,
@@ -2038,7 +1878,7 @@ const AudioStreamerChatBot = ({
       });
 
       console.log(
-        `🎯 Date being sent to backend: '${dataToSave.classInfo?.date}'`
+        `🎯 Date being sent to backend: '${dataToSave.classInfo?.date}'`,
       );
 
       // Send approval message to backend with the current data
@@ -2054,7 +1894,7 @@ const AudioStreamerChatBot = ({
         // Remove the loading message and show success message
         setChatHistory((prev) => {
           const filtered = prev.filter(
-            (msg) => !(msg.text && msg.text.includes("⏳ Processing"))
+            (msg) => !(msg.text && msg.text.includes("⏳ Processing")),
           );
           const successMessage = `✅ ${
             attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
@@ -2074,7 +1914,9 @@ const AudioStreamerChatBot = ({
         // TTS for success message if voice-initiated
         try {
           if (attendanceVoiceInitiatedRef.current === true) {
-            const speech = generateAttendanceTTSSummary("Attendance marked successfully");
+            const speech = generateAttendanceTTSSummary(
+              "Attendance marked successfully",
+            );
             void handlePlayTTS(-1, speech);
             // Clear the ref after successful completion
             attendanceVoiceInitiatedRef.current = false;
@@ -2111,7 +1953,7 @@ const AudioStreamerChatBot = ({
       }`;
       setChatHistory((prev) => {
         const filtered = prev.filter(
-          (msg) => !(msg.text && msg.text.includes("⏳ Processing"))
+          (msg) => !(msg.text && msg.text.includes("⏳ Processing")),
         );
         return [
           ...filtered,
@@ -2139,13 +1981,13 @@ const AudioStreamerChatBot = ({
   const _handleTextAttendanceApproval = async (
     messageIndex: number,
     fallbackAttendanceData?: any[],
-    fallbackClassInfo?: any
+    fallbackClassInfo?: any,
   ) => {
     return handleUnifiedAttendanceApproval(
       messageIndex,
       "text",
       fallbackAttendanceData,
-      fallbackClassInfo
+      fallbackClassInfo,
     );
   };
 
@@ -2183,7 +2025,7 @@ const AudioStreamerChatBot = ({
             action: () => {
               // Trigger file input click
               const fileInput = document.querySelector(
-                'input[type="file"]'
+                'input[type="file"]',
               ) as HTMLInputElement;
               if (fileInput) {
                 fileInput.click();
@@ -2200,13 +2042,13 @@ const AudioStreamerChatBot = ({
   const _handleVoiceAttendanceApproval = async (
     messageIndex: number,
     fallbackAttendanceData?: any[],
-    fallbackClassInfo?: any
+    fallbackClassInfo?: any,
   ) => {
     return handleUnifiedAttendanceApproval(
       messageIndex,
       "voice",
       fallbackAttendanceData,
-      fallbackClassInfo
+      fallbackClassInfo,
     );
   };
 
@@ -2257,7 +2099,7 @@ const AudioStreamerChatBot = ({
             label: "Upload Image",
             action: () => {
               const fileInput = document.querySelector(
-                'input[type="file"]'
+                'input[type="file"]',
               ) as HTMLInputElement;
               if (fileInput) {
                 fileInput.click();
@@ -2282,7 +2124,7 @@ const AudioStreamerChatBot = ({
       console.log("Current message:", currentMessage);
       console.log(
         "Message attendance_summary:",
-        currentMessage?.attendance_summary
+        currentMessage?.attendance_summary,
       );
 
       // Use global state if we're editing, otherwise use message data
@@ -2312,7 +2154,7 @@ const AudioStreamerChatBot = ({
                 answer: `Attendance Summary Updated:\n\n| Student Name | Attendance Status |\n|--------------|------------------|\n${currentAttendanceData
                   .map(
                     (item) =>
-                      `| ${item.student_name} | ${item.attendance_status} |`
+                      `| ${item.student_name} | ${item.attendance_status} |`,
                   )
                   .join("\n")}\n\nClass: ${currentClassInfo?.class_} ${
                   currentClassInfo?.section
@@ -2331,11 +2173,11 @@ const AudioStreamerChatBot = ({
         // Store in session storage for persistence
         sessionStorage.setItem(
           "pendingAttendanceData",
-          JSON.stringify(currentAttendanceData)
+          JSON.stringify(currentAttendanceData),
         );
         sessionStorage.setItem(
           "pendingClassInfo",
-          JSON.stringify(currentClassInfo)
+          JSON.stringify(currentClassInfo),
         );
 
         // Exit edit mode AFTER updating global state
@@ -2352,7 +2194,7 @@ const AudioStreamerChatBot = ({
             (updatedHistory[messageIndex] as any).isBeingEdited = false;
             console.log(
               "Cleared isBeingEdited flag for message:",
-              messageIndex
+              messageIndex,
             );
           }
           return updatedHistory;
@@ -2379,7 +2221,11 @@ const AudioStreamerChatBot = ({
                   setChatHistory((prev) => {
                     const updatedHistory = [...prev];
                     const message = updatedHistory[messageIndex];
-                    if (message && message.type === "bot" && message.attendance_summary) {
+                    if (
+                      message &&
+                      message.type === "bot" &&
+                      message.attendance_summary
+                    ) {
                       // Load the updated data from the message back into global state for editing
                       setAttendanceData(message.attendance_summary);
                       setClassInfo(message.class_info);
@@ -2387,7 +2233,8 @@ const AudioStreamerChatBot = ({
 
                       // Mark message as being edited
                       if (updatedHistory[messageIndex]) {
-                        (updatedHistory[messageIndex] as any).isBeingEdited = true;
+                        (updatedHistory[messageIndex] as any).isBeingEdited =
+                          true;
                       }
                       return updatedHistory;
                     }
@@ -2407,22 +2254,26 @@ const AudioStreamerChatBot = ({
               {
                 label: "Approve",
                 action: () => {
-                  console.log("✅ Approve button clicked after save - using captured data:", {
-                    capturedSavedAttendanceData: capturedSavedAttendanceData.length,
-                    capturedSavedClassInfo: capturedSavedClassInfo,
-                    messageIndex: messageIndex,
-                  });
-                  
+                  console.log(
+                    "✅ Approve button clicked after save - using captured data:",
+                    {
+                      capturedSavedAttendanceData:
+                        capturedSavedAttendanceData.length,
+                      capturedSavedClassInfo: capturedSavedClassInfo,
+                      messageIndex: messageIndex,
+                    },
+                  );
+
                   // Determine attendance type based on the source (default to text)
                   let attendanceType: "text" | "image" | "voice" = "text";
-                  
+
                   // Pass the captured edited data as fallback parameters
                   // This ensures the edited data is used even if chatHistory hasn't updated yet
                   handleUnifiedAttendanceApproval(
                     messageIndex,
                     attendanceType,
                     capturedSavedAttendanceData,
-                    capturedSavedClassInfo
+                    capturedSavedClassInfo,
                   );
                 },
               },
@@ -4005,7 +3856,7 @@ const AudioStreamerChatBot = ({
                               } catch (err: any) {
                                 console.error(
                                   "Error fetching leave approval requests:",
-                                  err
+                                  err,
                                 );
                                 const errorMessage =
                                   err.message ||
@@ -4086,45 +3937,66 @@ const AudioStreamerChatBot = ({
                               setActiveFlow("course_progress");
                               setUserOptionSelected(true);
                               setIsMenuOpen(false);
-                              
+
                               // Send initial message to backend to start the flow
                               setIsProcessing(true);
                               try {
                                 const authToken = localStorage.getItem("token");
-                                const { academic_session, branch_token } = getErpContext();
-                                
-                                const response = await aiAPI.courseProgressChat({
-                                  session_id: sessionId || `session_${userId}`,
-                                  query: "Show my course progress",
-                                  bearer_token: authToken || undefined,
-                                  academic_session,
-                                  branch_token,
-                                });
+                                const { academic_session, branch_token } =
+                                  getErpContext();
 
-                                if (response.status === "success" && response.data) {
-                                  const answer = response.data.answer || "Course Progress flow activated. Which class and section would you like to see?";
+                                const response = await aiAPI.courseProgressChat(
+                                  {
+                                    session_id:
+                                      sessionId || `session_${userId}`,
+                                    query: "Show my course progress",
+                                    bearer_token: authToken || undefined,
+                                    academic_session,
+                                    branch_token,
+                                  },
+                                );
+
+                                if (
+                                  response.status === "success" &&
+                                  response.data
+                                ) {
+                                  const answer =
+                                    response.data.answer ||
+                                    "Course Progress flow activated. Which class and section would you like to see?";
                                   const botMessage: any = {
                                     type: "bot",
                                     text: answer,
                                   };
-                                  
+
                                   // Include class sections for nice UI rendering
-                                  if (response.data.class_sections && response.data.class_sections.length > 0) {
-                                    botMessage.classSectionsOptions = response.data.class_sections;
+                                  if (
+                                    response.data.class_sections &&
+                                    response.data.class_sections.length > 0
+                                  ) {
+                                    botMessage.classSectionsOptions =
+                                      response.data.class_sections;
                                   }
-                                  
-                                  setChatHistory((prev) => [...prev, botMessage]);
+
+                                  setChatHistory((prev) => [
+                                    ...prev,
+                                    botMessage,
+                                  ]);
                                 } else {
                                   setChatHistory((prev) => [
                                     ...prev,
                                     {
                                       type: "bot",
-                                      text: response.message || "Course Progress flow activated. Please say the class and section you want to view.",
+                                      text:
+                                        response.message ||
+                                        "Course Progress flow activated. Please say the class and section you want to view.",
                                     },
                                   ]);
                                 }
                               } catch (err: any) {
-                                console.error("Error activating course progress flow:", err);
+                                console.error(
+                                  "Error activating course progress flow:",
+                                  err,
+                                );
                                 setChatHistory((prev) => [
                                   ...prev,
                                   {
@@ -4509,41 +4381,75 @@ const AudioStreamerChatBot = ({
                             <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 sm:px-6">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-                                  <span className="text-xl sm:text-2xl">📊</span>
+                                  <span className="text-xl sm:text-2xl">
+                                    📊
+                                  </span>
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <h4 className="text-base sm:text-lg font-bold text-white truncate">
-                                    {(msg as any).classSection.className} - {(msg as any).classSection.sectionName}
+                                    {(msg as any).classSection.className} -{" "}
+                                    {(msg as any).classSection.sectionName}
                                   </h4>
-                                  <p className="text-xs sm:text-sm text-indigo-100">Course Progress Report</p>
+                                  <p className="text-xs sm:text-sm text-indigo-100">
+                                    Course Progress Report
+                                  </p>
                                 </div>
                               </div>
-                              
+
                               {/* Overall Progress Summary */}
                               {(() => {
                                 const progressData = msg.courseProgress as any;
-                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
-                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) return null;
-                                
-                                const totalProgress = teacherDiarys.reduce((sum: number, s: any) => 
-                                  sum + (s.avrage_progress || s.average_progress || 0), 0);
-                                const avgOverall = Math.round(totalProgress / teacherDiarys.length);
-                                
+                                const teacherDiarys =
+                                  progressData.teacherDiarys ||
+                                  progressData ||
+                                  [];
+                                if (
+                                  !Array.isArray(teacherDiarys) ||
+                                  teacherDiarys.length === 0
+                                )
+                                  return null;
+
+                                const totalProgress = teacherDiarys.reduce(
+                                  (sum: number, s: any) =>
+                                    sum +
+                                    (s.avrage_progress ||
+                                      s.average_progress ||
+                                      0),
+                                  0,
+                                );
+                                const avgOverall = Math.round(
+                                  totalProgress / teacherDiarys.length,
+                                );
+
                                 return (
                                   <div className="mt-4 bg-white/10 backdrop-blur rounded-xl p-3 sm:p-4">
                                     <div className="flex items-center justify-between mb-2">
-                                      <span className="text-xs sm:text-sm text-white/90 font-medium">Overall Progress</span>
-                                      <span className="text-lg sm:text-xl font-bold text-white">{avgOverall}%</span>
+                                      <span className="text-xs sm:text-sm text-white/90 font-medium">
+                                        Overall Progress
+                                      </span>
+                                      <span className="text-lg sm:text-xl font-bold text-white">
+                                        {avgOverall}%
+                                      </span>
                                     </div>
                                     <div className="w-full h-2.5 sm:h-3 bg-white/20 rounded-full overflow-hidden">
-                                      <div 
+                                      <div
                                         className="h-full bg-gradient-to-r from-green-400 to-emerald-400 rounded-full transition-all duration-700 ease-out"
-                                        style={{ width: `${Math.min(avgOverall, 100)}%` }}
+                                        style={{
+                                          width: `${Math.min(avgOverall, 100)}%`,
+                                        }}
                                       />
                                     </div>
                                     <div className="flex justify-between mt-2 text-xs text-white/70">
-                                      <span>{teacherDiarys.length} Subjects</span>
-                                      <span>{avgOverall >= 75 ? '🎉 Great!' : avgOverall >= 50 ? '👍 Good' : '📈 Keep Going'}</span>
+                                      <span>
+                                        {teacherDiarys.length} Subjects
+                                      </span>
+                                      <span>
+                                        {avgOverall >= 75
+                                          ? "🎉 Great!"
+                                          : avgOverall >= 50
+                                            ? "👍 Good"
+                                            : "📈 Keep Going"}
+                                      </span>
                                     </div>
                                   </div>
                                 );
@@ -4554,122 +4460,196 @@ const AudioStreamerChatBot = ({
                             <div className="p-3 sm:p-4 max-h-[60vh] sm:max-h-[500px] overflow-y-auto">
                               {(() => {
                                 const progressData = msg.courseProgress as any;
-                                const teacherDiarys = progressData.teacherDiarys || progressData || [];
+                                const teacherDiarys =
+                                  progressData.teacherDiarys ||
+                                  progressData ||
+                                  [];
 
-                                if (!Array.isArray(teacherDiarys) || teacherDiarys.length === 0) {
+                                if (
+                                  !Array.isArray(teacherDiarys) ||
+                                  teacherDiarys.length === 0
+                                ) {
                                   return (
                                     <div className="text-center py-8">
                                       <div className="w-16 h-16 mx-auto mb-3 bg-gray-100 rounded-full flex items-center justify-center">
                                         <span className="text-2xl">📭</span>
                                       </div>
-                                      <p className="text-gray-500 text-sm">No course progress data available</p>
+                                      <p className="text-gray-500 text-sm">
+                                        No course progress data available
+                                      </p>
                                     </div>
                                   );
                                 }
 
                                 const getProgressStyle = (progress: number) => {
-                                  if (progress >= 75) return { bg: 'bg-emerald-50', bar: 'bg-gradient-to-r from-emerald-400 to-green-500', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
-                                  if (progress >= 50) return { bg: 'bg-amber-50', bar: 'bg-gradient-to-r from-amber-400 to-yellow-500', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-700 border-amber-200' };
-                                  if (progress >= 25) return { bg: 'bg-orange-50', bar: 'bg-gradient-to-r from-orange-400 to-red-400', text: 'text-orange-700', badge: 'bg-orange-100 text-orange-700 border-orange-200' };
-                                  return { bg: 'bg-red-50', bar: 'bg-gradient-to-r from-red-400 to-rose-500', text: 'text-red-700', badge: 'bg-red-100 text-red-700 border-red-200' };
+                                  if (progress >= 75)
+                                    return {
+                                      bg: "bg-emerald-50",
+                                      bar: "bg-gradient-to-r from-emerald-400 to-green-500",
+                                      text: "text-emerald-700",
+                                      badge:
+                                        "bg-emerald-100 text-emerald-700 border-emerald-200",
+                                    };
+                                  if (progress >= 50)
+                                    return {
+                                      bg: "bg-amber-50",
+                                      bar: "bg-gradient-to-r from-amber-400 to-yellow-500",
+                                      text: "text-amber-700",
+                                      badge:
+                                        "bg-amber-100 text-amber-700 border-amber-200",
+                                    };
+                                  if (progress >= 25)
+                                    return {
+                                      bg: "bg-orange-50",
+                                      bar: "bg-gradient-to-r from-orange-400 to-red-400",
+                                      text: "text-orange-700",
+                                      badge:
+                                        "bg-orange-100 text-orange-700 border-orange-200",
+                                    };
+                                  return {
+                                    bg: "bg-red-50",
+                                    bar: "bg-gradient-to-r from-red-400 to-rose-500",
+                                    text: "text-red-700",
+                                    badge:
+                                      "bg-red-100 text-red-700 border-red-200",
+                                  };
                                 };
 
                                 return (
                                   <div className="space-y-3">
-                                    {teacherDiarys.map((subject: any, subjectIdx: number) => {
-                                      const subjectName = subject.name || "Unknown Subject";
-                                      const avgProgress = subject.avrage_progress || subject.average_progress || 0;
-                                      const chapters = subject.chapters || [];
-                                      const style = getProgressStyle(avgProgress);
+                                    {teacherDiarys.map(
+                                      (subject: any, subjectIdx: number) => {
+                                        const subjectName =
+                                          subject.name || "Unknown Subject";
+                                        const avgProgress =
+                                          subject.avrage_progress ||
+                                          subject.average_progress ||
+                                          0;
+                                        const chapters = subject.chapters || [];
+                                        const style =
+                                          getProgressStyle(avgProgress);
 
-                                      return (
-                                        <details
-                                          key={subject.id || subjectIdx}
-                                          className={`group rounded-xl border ${style.bg} border-gray-200 overflow-hidden transition-all duration-200`}
-                                        >
-                                          <summary className="flex items-center gap-3 p-3 sm:p-4 cursor-pointer list-none select-none hover:bg-white/50 transition-colors">
-                                            {/* Subject Icon */}
-                                            <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl ${style.bg} border ${style.badge.split(' ')[2]} flex items-center justify-center flex-shrink-0`}>
-                                              <span className="text-lg sm:text-xl">📚</span>
-                                            </div>
-                                            
-                                            {/* Subject Info */}
-                                            <div className="flex-1 min-w-0">
-                                              <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                <h5 className="text-sm sm:text-base font-semibold text-gray-800 truncate">
-                                                  {subjectName}
-                                                </h5>
-                                                <span className={`flex-shrink-0 text-xs sm:text-sm font-bold px-2 py-0.5 rounded-full border ${style.badge}`}>
-                                                  {avgProgress}%
+                                        return (
+                                          <details
+                                            key={subject.id || subjectIdx}
+                                            className={`group rounded-xl border ${style.bg} border-gray-200 overflow-hidden transition-all duration-200`}
+                                          >
+                                            <summary className="flex items-center gap-3 p-3 sm:p-4 cursor-pointer list-none select-none hover:bg-white/50 transition-colors">
+                                              {/* Subject Icon */}
+                                              <div
+                                                className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl ${style.bg} border ${style.badge.split(" ")[2]} flex items-center justify-center flex-shrink-0`}
+                                              >
+                                                <span className="text-lg sm:text-xl">
+                                                  📚
                                                 </span>
                                               </div>
-                                              
-                                              {/* Progress Bar */}
-                                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                                                <div
-                                                  className={`h-full ${style.bar} rounded-full transition-all duration-500`}
-                                                  style={{ width: `${Math.min(avgProgress, 100)}%` }}
-                                                />
-                                              </div>
-                                              
-                                              {/* Chapter Count */}
-                                              <div className="flex items-center justify-between mt-1.5">
-                                                <span className="text-xs text-gray-500">
-                                                  {chapters.length} chapter{chapters.length !== 1 ? 's' : ''}
-                                                </span>
-                                                <span className="text-xs text-indigo-500 group-open:rotate-180 transition-transform duration-200">
-                                                  ▼ Details
-                                                </span>
-                                              </div>
-                                            </div>
-                                          </summary>
 
-                                          {/* Chapters (Expandable) */}
-                                          {chapters.length > 0 && (
-                                            <div className="px-3 pb-3 sm:px-4 sm:pb-4 pt-1 space-y-2 border-t border-gray-100 bg-white/30">
-                                              {chapters.map((chapter: any, chapterIdx: number) => {
-                                                const chapterName = chapter.name || "Unknown Chapter";
-                                                const chapterProgress = chapter.coverage_status || 0;
-                                                const chStyle = getProgressStyle(chapterProgress);
-
-                                                return (
-                                                  <div
-                                                    key={chapter.id || chapterIdx}
-                                                    className="bg-white rounded-lg p-2.5 sm:p-3 border border-gray-100 shadow-sm"
+                                              {/* Subject Info */}
+                                              <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                  <h5 className="text-sm sm:text-base font-semibold text-gray-800 truncate">
+                                                    {subjectName}
+                                                  </h5>
+                                                  <span
+                                                    className={`flex-shrink-0 text-xs sm:text-sm font-bold px-2 py-0.5 rounded-full border ${style.badge}`}
                                                   >
-                                                    <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                      <span className="text-xs sm:text-sm text-gray-700 font-medium truncate flex-1">
-                                                        {chapterName}
-                                                      </span>
-                                                      <span className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${chStyle.badge}`}>
-                                                        {chapterProgress}%
-                                                      </span>
-                                                    </div>
-                                                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                    {avgProgress}%
+                                                  </span>
+                                                </div>
+
+                                                {/* Progress Bar */}
+                                                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                  <div
+                                                    className={`h-full ${style.bar} rounded-full transition-all duration-500`}
+                                                    style={{
+                                                      width: `${Math.min(avgProgress, 100)}%`,
+                                                    }}
+                                                  />
+                                                </div>
+
+                                                {/* Chapter Count */}
+                                                <div className="flex items-center justify-between mt-1.5">
+                                                  <span className="text-xs text-gray-500">
+                                                    {chapters.length} chapter
+                                                    {chapters.length !== 1
+                                                      ? "s"
+                                                      : ""}
+                                                  </span>
+                                                  <span className="text-xs text-indigo-500 group-open:rotate-180 transition-transform duration-200">
+                                                    ▼ Details
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            </summary>
+
+                                            {/* Chapters (Expandable) */}
+                                            {chapters.length > 0 && (
+                                              <div className="px-3 pb-3 sm:px-4 sm:pb-4 pt-1 space-y-2 border-t border-gray-100 bg-white/30">
+                                                {chapters.map(
+                                                  (
+                                                    chapter: any,
+                                                    chapterIdx: number,
+                                                  ) => {
+                                                    const chapterName =
+                                                      chapter.name ||
+                                                      "Unknown Chapter";
+                                                    const chapterProgress =
+                                                      chapter.coverage_status ||
+                                                      0;
+                                                    const chStyle =
+                                                      getProgressStyle(
+                                                        chapterProgress,
+                                                      );
+
+                                                    return (
                                                       <div
-                                                        className={`h-full ${chStyle.bar} rounded-full transition-all duration-500`}
-                                                        style={{ width: `${Math.min(chapterProgress, 100)}%` }}
-                                                      />
-                                                    </div>
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                          )}
-                                          
-                                          {chapters.length === 0 && (
-                                            <div className="px-4 pb-3 pt-1 border-t border-gray-100">
-                                              <p className="text-xs text-gray-400 italic text-center py-2">No chapters available</p>
-                                            </div>
-                                          )}
-                                        </details>
-                                      );
-                                    })}
+                                                        key={
+                                                          chapter.id ||
+                                                          chapterIdx
+                                                        }
+                                                        className="bg-white rounded-lg p-2.5 sm:p-3 border border-gray-100 shadow-sm"
+                                                      >
+                                                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                          <span className="text-xs sm:text-sm text-gray-700 font-medium truncate flex-1">
+                                                            {chapterName}
+                                                          </span>
+                                                          <span
+                                                            className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded ${chStyle.badge}`}
+                                                          >
+                                                            {chapterProgress}%
+                                                          </span>
+                                                        </div>
+                                                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                                          <div
+                                                            className={`h-full ${chStyle.bar} rounded-full transition-all duration-500`}
+                                                            style={{
+                                                              width: `${Math.min(chapterProgress, 100)}%`,
+                                                            }}
+                                                          />
+                                                        </div>
+                                                      </div>
+                                                    );
+                                                  },
+                                                )}
+                                              </div>
+                                            )}
+
+                                            {chapters.length === 0 && (
+                                              <div className="px-4 pb-3 pt-1 border-t border-gray-100">
+                                                <p className="text-xs text-gray-400 italic text-center py-2">
+                                                  No chapters available
+                                                </p>
+                                              </div>
+                                            )}
+                                          </details>
+                                        );
+                                      },
+                                    )}
                                   </div>
                                 );
                               })()}
                             </div>
-                            
+
                             {/* Footer Legend */}
                             <div className="px-4 py-3 bg-gray-50 border-t border-gray-100">
                               <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 text-xs">
@@ -4695,101 +4675,156 @@ const AudioStreamerChatBot = ({
                         )}
 
                         {/* Class sections selection UI - Voice/Text friendly */}
-                        {(msg as any).classSectionsOptions && 
-                          Array.isArray((msg as any).classSectionsOptions) && 
+                        {(msg as any).classSectionsOptions &&
+                          Array.isArray((msg as any).classSectionsOptions) &&
                           (msg as any).classSectionsOptions.length > 0 && (
-                          <div className="mt-3 bg-gradient-to-br from-blue-50 via-white to-indigo-50 rounded-2xl shadow-lg overflow-hidden border border-blue-100">
-                            {/* Header */}
-                            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 sm:px-5 sm:py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-                                  <span className="text-xl">📚</span>
-                                </div>
-                                <div>
-                                  <h4 className="text-base sm:text-lg font-bold text-white">
-                                    Select Your Class
-                                  </h4>
-                                  <p className="text-xs sm:text-sm text-blue-100">
-                                    {(msg as any).classSectionsOptions.length} class section{(msg as any).classSectionsOptions.length !== 1 ? 's' : ''} available
-                                  </p>
+                            <div className="mt-3 bg-gradient-to-br from-blue-50 via-white to-indigo-50 rounded-2xl shadow-lg overflow-hidden border border-blue-100">
+                              {/* Header */}
+                              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 sm:px-5 sm:py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
+                                    <span className="text-xl">📚</span>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-base sm:text-lg font-bold text-white">
+                                      Select Your Class
+                                    </h4>
+                                    <p className="text-xs sm:text-sm text-blue-100">
+                                      {(msg as any).classSectionsOptions.length}{" "}
+                                      class section
+                                      {(msg as any).classSectionsOptions
+                                        .length !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      available
+                                    </p>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            
-                            {/* Class Sections Grid */}
-                            <div className="p-3 sm:p-4">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                                {(msg as any).classSectionsOptions.map((cs: any, csIdx: number) => {
-                                  const className = cs.class?.name || "Unknown";
-                                  const sectionName = cs.section?.name || "Unknown";
-                                  const isClassTeacher = cs.isClassTeacher === true;
-                                  
-                                  return (
-                                    <div
-                                      key={cs.class?._id + cs.section?._id || csIdx}
-                                      className={`relative p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 ${
-                                        isClassTeacher 
-                                          ? 'bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200' 
-                                          : 'bg-white border-gray-200 hover:border-blue-300'
-                                      }`}
-                                    >
-                                      {/* Class Teacher Badge */}
-                                      {isClassTeacher && (
-                                        <div className="absolute -top-2 -right-2 bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">
-                                          Class Teacher
-                                        </div>
-                                      )}
-                                      
-                                      <div className="flex items-center gap-3">
-                                        {/* Number Badge */}
-                                        <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-lg sm:text-xl ${
-                                          isClassTeacher 
-                                            ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white' 
-                                            : 'bg-gradient-to-br from-blue-500 to-indigo-500 text-white'
-                                        }`}>
-                                          {csIdx + 1}
-                                        </div>
-                                        
-                                        {/* Class Info */}
-                                        <div className="flex-1 min-w-0">
-                                          <div className="text-base sm:text-lg font-bold text-gray-800">
-                                            {className}
+
+                              {/* Class Sections Grid */}
+                              <div className="p-3 sm:p-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                                  {(msg as any).classSectionsOptions.map(
+                                    (cs: any, csIdx: number) => {
+                                      const className =
+                                        cs.class?.name || "Unknown";
+                                      const sectionName =
+                                        cs.section?.name || "Unknown";
+                                      const isClassTeacher =
+                                        cs.isClassTeacher === true;
+
+                                      return (
+                                        <div
+                                          key={
+                                            cs.class?._id + cs.section?._id ||
+                                            csIdx
+                                          }
+                                          className={`relative p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 ${
+                                            isClassTeacher
+                                              ? "bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200"
+                                              : "bg-white border-gray-200 hover:border-blue-300"
+                                          }`}
+                                        >
+                                          {/* Class Teacher Badge */}
+                                          {isClassTeacher && (
+                                            <div className="absolute -top-2 -right-2 bg-gradient-to-r from-amber-400 to-yellow-500 text-white text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">
+                                              Class Teacher
+                                            </div>
+                                          )}
+
+                                          <div className="flex items-center gap-3">
+                                            {/* Number Badge */}
+                                            <div
+                                              className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center font-bold text-lg sm:text-xl ${
+                                                isClassTeacher
+                                                  ? "bg-gradient-to-br from-amber-400 to-yellow-500 text-white"
+                                                  : "bg-gradient-to-br from-blue-500 to-indigo-500 text-white"
+                                              }`}
+                                            >
+                                              {csIdx + 1}
+                                            </div>
+
+                                            {/* Class Info */}
+                                            <div className="flex-1 min-w-0">
+                                              <div className="text-base sm:text-lg font-bold text-gray-800">
+                                                {className}
+                                              </div>
+                                              <div className="text-sm text-gray-500">
+                                                Section {sectionName}
+                                              </div>
+                                            </div>
                                           </div>
-                                          <div className="text-sm text-gray-500">
-                                            Section {sectionName}
-                                          </div>
                                         </div>
-                                      </div>
+                                      );
+                                    },
+                                  )}
+                                </div>
+
+                                {/* Hint */}
+                                <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-blue-500 text-lg">
+                                      💡
+                                    </span>
+                                    <div className="text-sm text-blue-700">
+                                      <span className="font-semibold">
+                                        How to select:
+                                      </span>
+                                      <ul className="mt-1 space-y-0.5 text-blue-600">
+                                        <li>
+                                          • Say the class name: "
+                                          <span className="font-medium">
+                                            {(msg as any)
+                                              .classSectionsOptions[0]?.class
+                                              ?.name || "III"}{" "}
+                                            {(msg as any)
+                                              .classSectionsOptions[0]?.section
+                                              ?.name || "A"}
+                                          </span>
+                                          "
+                                        </li>
+                                        <li>
+                                          • Or say: "
+                                          <span className="font-medium">
+                                            first one
+                                          </span>
+                                          ", "
+                                          <span className="font-medium">
+                                            second
+                                          </span>
+                                          ", etc.
+                                        </li>
+                                        <li>
+                                          • Or type: "
+                                          <span className="font-medium">
+                                            Class 3 A
+                                          </span>
+                                          " or "
+                                          <span className="font-medium">
+                                            3 A
+                                          </span>
+                                          "
+                                        </li>
+                                      </ul>
                                     </div>
-                                  );
-                                })}
-                              </div>
-                              
-                              {/* Hint */}
-                              <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
-                                <div className="flex items-start gap-2">
-                                  <span className="text-blue-500 text-lg">💡</span>
-                                  <div className="text-sm text-blue-700">
-                                    <span className="font-semibold">How to select:</span>
-                                    <ul className="mt-1 space-y-0.5 text-blue-600">
-                                      <li>• Say the class name: "<span className="font-medium">{(msg as any).classSectionsOptions[0]?.class?.name || 'III'} {(msg as any).classSectionsOptions[0]?.section?.name || 'A'}</span>"</li>
-                                      <li>• Or say: "<span className="font-medium">first one</span>", "<span className="font-medium">second</span>", etc.</li>
-                                      <li>• Or type: "<span className="font-medium">Class 3 A</span>" or "<span className="font-medium">3 A</span>"</li>
-                                    </ul>
                                   </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        )}
+                          )}
 
                         {/* Only show text if no special UI components are displayed */}
-                        {msg.text && 
-                          !(msg as any).classSectionsOptions && 
-                          !(msg.courseProgress && (msg as any).classSection) && (
-                          <div className="text-gray-800 leading-relaxed">{msg.text}</div>
-                        )}
-                        
+                        {msg.text &&
+                          !(msg as any).classSectionsOptions &&
+                          !(
+                            msg.courseProgress && (msg as any).classSection
+                          ) && (
+                            <div className="text-gray-800 leading-relaxed">
+                              {msg.text}
+                            </div>
+                          )}
+
                         {!msg.text && (
                           <>
                             {/* Only show answer, no tabs */}
@@ -4841,10 +4876,10 @@ const AudioStreamerChatBot = ({
                                             {leaveApprovalRequests.map(
                                               (request, reqIdx) => {
                                                 const startDate = new Date(
-                                                  request.start_date
+                                                  request.start_date,
                                                 );
                                                 const endDate = new Date(
-                                                  request.end_date
+                                                  request.end_date,
                                                 );
                                                 const startDateStr =
                                                   startDate.toLocaleDateString(
@@ -4853,7 +4888,7 @@ const AudioStreamerChatBot = ({
                                                       month: "short",
                                                       day: "numeric",
                                                       year: "numeric",
-                                                    }
+                                                    },
                                                   );
                                                 const endDateStr =
                                                   endDate.toLocaleDateString(
@@ -4862,7 +4897,7 @@ const AudioStreamerChatBot = ({
                                                       month: "short",
                                                       day: "numeric",
                                                       year: "numeric",
-                                                    }
+                                                    },
                                                   );
                                                 const isSingleDay =
                                                   startDateStr === endDateStr;
@@ -4870,7 +4905,7 @@ const AudioStreamerChatBot = ({
                                                   Math.ceil(
                                                     (endDate.getTime() -
                                                       startDate.getTime()) /
-                                                      (1000 * 60 * 60 * 24)
+                                                      (1000 * 60 * 60 * 24),
                                                   ) + 1;
 
                                                 const employeeName =
@@ -4999,7 +5034,7 @@ const AudioStreamerChatBot = ({
                                                             try {
                                                               const authToken =
                                                                 localStorage.getItem(
-                                                                  "token"
+                                                                  "token",
                                                                 );
                                                               const {
                                                                 academic_session,
@@ -5015,15 +5050,15 @@ const AudioStreamerChatBot = ({
                                                                     undefined,
                                                                   academic_session,
                                                                   branch_token,
-                                                                }
+                                                                },
                                                               );
                                                               setLeaveApprovalRequests(
                                                                 (prev) =>
                                                                   prev.filter(
                                                                     (r) =>
                                                                       r.uuid !==
-                                                                      request.uuid
-                                                                  )
+                                                                      request.uuid,
+                                                                  ),
                                                               );
                                                               setChatHistory(
                                                                 (prev) => [
@@ -5032,7 +5067,7 @@ const AudioStreamerChatBot = ({
                                                                     type: "bot",
                                                                     text: `✅ Leave request for **${employeeName}** has been approved successfully!`,
                                                                   },
-                                                                ]
+                                                                ],
                                                               );
                                                             } catch (err: any) {
                                                               setChatHistory(
@@ -5045,7 +5080,7 @@ const AudioStreamerChatBot = ({
                                                                       "Unknown error"
                                                                     }`,
                                                                   },
-                                                                ]
+                                                                ],
                                                               );
                                                             }
                                                           }}
@@ -5074,7 +5109,7 @@ const AudioStreamerChatBot = ({
                                                                   [request.uuid]:
                                                                     e.target
                                                                       .value,
-                                                                })
+                                                                }),
                                                               )
                                                             }
                                                             className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200 transition-all"
@@ -5084,7 +5119,7 @@ const AudioStreamerChatBot = ({
                                                               try {
                                                                 const authToken =
                                                                   localStorage.getItem(
-                                                                    "token"
+                                                                    "token",
                                                                   );
                                                                 const reason =
                                                                   rejectReason[
@@ -5107,15 +5142,15 @@ const AudioStreamerChatBot = ({
                                                                       undefined,
                                                                     academic_session,
                                                                     branch_token,
-                                                                  }
+                                                                  },
                                                                 );
                                                                 setLeaveApprovalRequests(
                                                                   (prev) =>
                                                                     prev.filter(
                                                                       (r) =>
                                                                         r.uuid !==
-                                                                        request.uuid
-                                                                    )
+                                                                        request.uuid,
+                                                                    ),
                                                                 );
                                                                 setRejectReason(
                                                                   (prev) => {
@@ -5128,7 +5163,7 @@ const AudioStreamerChatBot = ({
                                                                         .uuid
                                                                     ];
                                                                     return newReasons;
-                                                                  }
+                                                                  },
                                                                 );
                                                                 setChatHistory(
                                                                   (prev) => [
@@ -5137,7 +5172,7 @@ const AudioStreamerChatBot = ({
                                                                       type: "bot",
                                                                       text: `❌ Leave request for **${employeeName}** has been rejected. Reason: ${reason}`,
                                                                     },
-                                                                  ]
+                                                                  ],
                                                                 );
                                                               } catch (err: any) {
                                                                 setChatHistory(
@@ -5150,7 +5185,7 @@ const AudioStreamerChatBot = ({
                                                                         "Unknown error"
                                                                       }`,
                                                                     },
-                                                                  ]
+                                                                  ],
                                                                 );
                                                               }
                                                             }}
@@ -5166,7 +5201,7 @@ const AudioStreamerChatBot = ({
                                                     </div>
                                                   </div>
                                                 );
-                                              }
+                                              },
                                             )}
                                           </div>
                                         ) : (
@@ -5202,7 +5237,7 @@ const AudioStreamerChatBot = ({
                                           msg.attendance_summary,
                                         messageType: msg.type,
                                         hasButtons: !!(msg as any).buttons,
-                                      }
+                                      },
                                     );
                                     return (
                                       msg.attendance_summary &&
@@ -5213,46 +5248,46 @@ const AudioStreamerChatBot = ({
                                       console.log(
                                         `Rendering table for message ${idx}, editingMessageIndex: ${editingMessageIndex}, isEditing: ${
                                           editingMessageIndex === idx
-                                        }`
+                                        }`,
                                       );
                                       console.log(
                                         `Message ${idx} attendance_summary length:`,
-                                        msg.attendance_summary?.length || 0
+                                        msg.attendance_summary?.length || 0,
                                       );
                                       console.log(
                                         `Global attendanceData length:`,
-                                        attendanceData.length
+                                        attendanceData.length,
                                       );
                                       console.log(`Message type:`, msg.type);
                                       console.log(
                                         `Message has attendance_summary:`,
-                                        !!msg.attendance_summary
+                                        !!msg.attendance_summary,
                                       );
 
                                       // Add a simple test to see if the edit mode is detected
                                       if (editingMessageIndex === idx) {
                                         console.log(
-                                          `✅ EDIT MODE DETECTED for message ${idx}!`
+                                          `✅ EDIT MODE DETECTED for message ${idx}!`,
                                         );
                                         console.log(
-                                          `✅ Table should be editable now!`
+                                          `✅ Table should be editable now!`,
                                         );
                                         console.log(
-                                          `✅ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`
+                                          `✅ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
                                         );
                                         console.log(
                                           `✅ Global attendanceData:`,
-                                          attendanceData
+                                          attendanceData,
                                         );
                                       } else {
                                         console.log(
-                                          `❌ NOT in edit mode for message ${idx}. Expected: ${editingMessageIndex}, Got: ${idx}`
+                                          `❌ NOT in edit mode for message ${idx}. Expected: ${editingMessageIndex}, Got: ${idx}`,
                                         );
                                         console.log(
-                                          `❌ Table will NOT be editable`
+                                          `❌ Table will NOT be editable`,
                                         );
                                         console.log(
-                                          `❌ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`
+                                          `❌ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
                                         );
                                       }
 
@@ -5292,7 +5327,7 @@ const AudioStreamerChatBot = ({
                                                   onClick={() => {
                                                     // Cancel editing - exit edit mode without saving
                                                     setEditingMessageIndex(
-                                                      null
+                                                      null,
                                                     );
                                                     setChatHistory((prev) => {
                                                       const updatedHistory = [
@@ -5357,7 +5392,7 @@ const AudioStreamerChatBot = ({
                                                     dataToUse.filter(
                                                       (item) =>
                                                         item.attendance_status ===
-                                                        "Present"
+                                                        "Present",
                                                     ).length
                                                   }
                                                 </div>
@@ -5367,7 +5402,7 @@ const AudioStreamerChatBot = ({
                                                     dataToUse.filter(
                                                       (item) =>
                                                         item.attendance_status ===
-                                                        "Absent"
+                                                        "Absent",
                                                     ).length
                                                   }
                                                 </div>
@@ -5414,7 +5449,7 @@ const AudioStreamerChatBot = ({
                                                     msgAttendanceSummary:
                                                       msg.attendance_summary,
                                                     usingGlobalState: isEditing,
-                                                  }
+                                                  },
                                                 );
 
                                                 // Show empty state if no data
@@ -5452,7 +5487,7 @@ const AudioStreamerChatBot = ({
                                                             `Student name field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, idx=${idx}, isBeingEdited=${
                                                               (msg as any)
                                                                 .isBeingEdited
-                                                            }`
+                                                            }`,
                                                           );
                                                           console.log(
                                                             `Student name field - isEditing check: ${editingMessageIndex} === ${idx} = ${
@@ -5461,7 +5496,7 @@ const AudioStreamerChatBot = ({
                                                             } OR isBeingEdited=${
                                                               (msg as any)
                                                                 .isBeingEdited
-                                                            }`
+                                                            }`,
                                                           );
                                                           return isEditing ? (
                                                             <input
@@ -5473,7 +5508,8 @@ const AudioStreamerChatBot = ({
                                                                 handleAttendanceDataChange(
                                                                   index,
                                                                   "student_name",
-                                                                  e.target.value
+                                                                  e.target
+                                                                    .value,
                                                                 )
                                                               }
                                                               className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -5496,7 +5532,7 @@ const AudioStreamerChatBot = ({
                                                             `Attendance status field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, isBeingEdited=${
                                                               (msg as any)
                                                                 .isBeingEdited
-                                                            }`
+                                                            }`,
                                                           );
                                                           return isEditing ? (
                                                             <select
@@ -5507,7 +5543,8 @@ const AudioStreamerChatBot = ({
                                                                 handleAttendanceDataChange(
                                                                   index,
                                                                   "attendance_status",
-                                                                  e.target.value
+                                                                  e.target
+                                                                    .value,
                                                                 )
                                                               }
                                                               className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -5526,9 +5563,9 @@ const AudioStreamerChatBot = ({
                                                                 "Present"
                                                                   ? "text-green-500"
                                                                   : item.attendance_status ===
-                                                                    "Absent"
-                                                                  ? "text-red-500"
-                                                                  : "text-gray-500"
+                                                                      "Absent"
+                                                                    ? "text-red-500"
+                                                                    : "text-gray-500"
                                                               }`}
                                                             >
                                                               {
@@ -5544,7 +5581,7 @@ const AudioStreamerChatBot = ({
                                                           <button
                                                             onClick={() =>
                                                               handleRemoveStudent(
-                                                                index
+                                                                index,
                                                               )
                                                             }
                                                             className="px-1 py-1 border-none bg-red-500 text-white rounded cursor-pointer flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
@@ -5555,7 +5592,7 @@ const AudioStreamerChatBot = ({
                                                         )}
                                                       </td>
                                                     </tr>
-                                                  )
+                                                  ),
                                                 );
                                               })()}
                                             </tbody>
@@ -5647,7 +5684,7 @@ const AudioStreamerChatBot = ({
                                           setShowCorrectionBox(
                                             showCorrectionBox === idx
                                               ? null
-                                              : idx
+                                              : idx,
                                           );
                                         }}
                                       >
@@ -5685,7 +5722,7 @@ const AudioStreamerChatBot = ({
                                                 handleSendFeedback(
                                                   idx,
                                                   "Rejected",
-                                                  feedbackComment[idx] || ""
+                                                  feedbackComment[idx] || "",
                                                 )
                                               }
                                               disabled={!feedbackComment[idx]}
@@ -5710,7 +5747,7 @@ const AudioStreamerChatBot = ({
                                         buttonsLength:
                                           (msg as any).buttons?.length || 0,
                                         buttons: (msg as any).buttons,
-                                      }
+                                      },
                                     );
                                     return (
                                       (msg as any).buttons &&
@@ -5727,7 +5764,7 @@ const AudioStreamerChatBot = ({
                                           >
                                             {btn.label}
                                           </button>
-                                        )
+                                        ),
                                       )}
                                     </div>
                                   )}
@@ -5816,8 +5853,11 @@ const AudioStreamerChatBot = ({
                     try {
                       if (file.type.startsWith("image/")) {
                         // For images, use existing class info if available, otherwise show modal
-                        const existingClassInfo = classInfo || pendingClassInfo || attendanceFlowState.classInfo;
-                        
+                        const existingClassInfo =
+                          classInfo ||
+                          pendingClassInfo ||
+                          attendanceFlowState.classInfo;
+
                         if (existingClassInfo) {
                           // Class info already provided - process image directly without modal
                           await handleAttendanceImageUpload({
@@ -5900,8 +5940,8 @@ const AudioStreamerChatBot = ({
                   activeFlow === "attendance"
                     ? "Upload Excel or Image"
                     : activeFlow === "assignment"
-                    ? "Upload Assignment File (PDF, DOCX, Image)"
-                    : "Enable assignment or attendance flow to upload"
+                      ? "Upload Assignment File (PDF, DOCX, Image)"
+                      : "Enable assignment or attendance flow to upload"
                 }
                 onClick={(e) => {
                   if (
@@ -5987,7 +6027,9 @@ const AudioStreamerChatBot = ({
             </button>
             {!fullVoiceMode && (
               <button
-                onClick={() => (isRecording ? stopStreaming() : startStreaming())}
+                onClick={() =>
+                  isRecording ? stopStreaming() : startStreaming()
+                }
                 className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
                   isRecording ? " recording" : ""
                 }`}
@@ -6003,7 +6045,9 @@ const AudioStreamerChatBot = ({
               >
                 <span
                   className={`inline-block w-2 h-2 rounded-full ${
-                    isVoiceActive ? "animate-pulse bg-red-500" : "bg-emerald-400"
+                    isVoiceActive
+                      ? "animate-pulse bg-red-500"
+                      : "bg-emerald-400"
                   }`}
                 />
                 {isVoiceActive ? "Speaking…" : "Listening…"}
