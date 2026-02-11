@@ -202,7 +202,7 @@ export async function handleAssignmentFileUpload(
 
     appendBotMessage({
       type: "bot",
-      text: `✅ File uploaded successfully: ${filename}\n\nThe file has been attached to your assignment. Type 'done' to proceed or upload more files.`,
+      text: `✅ File uploaded successfully: ${filename}\n\nType 'skip' to proceed or upload more files.`,
     });
 
     const fileMessage = `Add file ${fileUuid} to attachments`;
