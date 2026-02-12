@@ -1344,7 +1344,13 @@ const AudioStreamerChatBot = ({
     setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
-      const reader = await aiAPI.textToSpeech({ text });
+      // Generate unique ID to prevent backend cache from returning wrong audio
+      const uniqueId = `tts_${Date.now()}_${thisRequestId}`;
+      const reader = await aiAPI.textToSpeech({
+        text,
+        uuid_question: uniqueId,
+        skip_insight: true,
+      });
 
       // Check if this request is still the latest (not cancelled by a newer request)
       if (ttsRequestIdRef.current !== thisRequestId) {
