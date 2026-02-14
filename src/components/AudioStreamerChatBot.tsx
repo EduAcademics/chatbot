@@ -37,10 +37,6 @@ import {
   INITIAL_ATTENDANCE_STATE,
   generateAttendanceTTSSummary,
 } from "./flows/attendanceFlow";
-import {
-  handleLeaveChat,
-  generateLeaveTTSSummary,
-} from "./flows/leaveFlow";
 import type {
   AttendanceState,
   AttendanceFlowCallbacks,
@@ -1096,7 +1092,6 @@ const AudioStreamerChatBot = ({
         sessionId,
         userId,
         isVoiceTriggered: leaveMessageViaVoice,
-        voiceInitiatedFlow: leaveVoiceInitiatedRef.current,
         getErpContext,
         appendBotMessage: (msg) =>
           setChatHistory((prev) => [...prev, msg]),
@@ -1107,7 +1102,7 @@ const AudioStreamerChatBot = ({
         },
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
-        setActiveFlow: (flow) => setActiveFlow(flow as FlowType),
+        setActiveFlow: (flow: string) => setActiveFlow(flow as FlowType),
       });
     } else if (targetFlow === "assignment") {
       await handleAssignmentChat({
@@ -1347,7 +1342,7 @@ const AudioStreamerChatBot = ({
   // `isQuery` marks whether this is a query-flow TTS (true) or an
   // action-flow / system message TTS (false). Backend uses this flag
   // to decide whether to generate a summarized TTS or speak raw text.
-  const handlePlayTTS = async (idx: number, text: string, isQuery: boolean = false) => {
+  const handlePlayTTS = async (idx: number, text: string, _isQuery: boolean = false) => {
     // Interrupt any currently playing TTS before starting new one
     interruptTTS();
 
