@@ -1,3 +1,45 @@
+/**
+ * Detects if a backend response indicates an exit
+ * Checks both explicit exit flags and message content
+ */
+const isExitResponse = (response: any): boolean => {
+  // Handle both nested and flat response formats
+  const actualData = response?.data || response;
+
+  // Check for explicit exit flags from backend
+  if (
+    actualData.state_cleared === true ||
+    actualData.exit_type === "user_initiated" ||
+    actualData.exited === true
+  ) {
+    return true;
+  }
+
+  // Check message content for exit indicators (handle both answer and message fields)
+  const message =
+    actualData.answer ||
+    actualData.message ||
+    response.answer ||
+    response.message ||
+    "";
+  const exitPatterns = [
+    "✅ Exited",
+    "exited from",
+    "You've exited",
+    "Exited from",
+    "Welcome back",
+  ];
+
+  return exitPatterns.some((pattern) =>
+    message.toLowerCase().includes(pattern.toLowerCase()),
+  );
+};
+
+/**
+ * Clears all frontend flow and session state
+ * Called when exit is detected
+ */
+// Moved handleFrontendExit inside component so setActiveFlow/setSessionId are in scope
 import { useEffect, useRef, useState } from "react";
 import { memo } from "react";
 import { motion } from "framer-motion";
@@ -81,7 +123,27 @@ const AudioStreamerChatBot = ({
   // Flag to remember that the current Course Progress flow was initiated
   // via the microphone. This persists across the selection click so we can
   // play the second-step TTS when the user clicks a class-section.
-  const courseProgressVoiceInitiatedRef = useRef<boolean>(false);
+  // Removed unused: const courseProgressVoiceInitiatedRef = useRef<boolean>(false);
+
+  /**
+   * Clears all frontend flow and session state
+   * Called when exit is detected
+   */
+  const handleFrontendExit = () => {
+    console.log("🔄 Frontend exit - clearing state");
+    setActiveFlow("none");
+    // Generate NEW session ID instead of null
+    const newSessionId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(newSessionId);
+    localStorage.setItem("sessionId", newSessionId); // Keep localStorage in sync
+    console.log("✅ New session ID generated:", newSessionId);
+    console.log("✅ Active flow cleared");
+    // Optionally clear chat history (uncomment if you want history cleared)
+    // setChatHistory([welcomeMessage]);
+  };
   // Flag to remember that the current Leave flow was initiated
   // via the microphone. This persists so we can play TTS for leave responses.
   const leaveVoiceInitiatedRef = useRef<boolean>(false);
@@ -93,6 +155,8 @@ const AudioStreamerChatBot = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hoveredMenuItem, setHoveredMenuItem] = useState<string | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Step 1: Add voice mode tracker ref (fixes state timing issue)
+  const activeVoiceButtonRef = useRef<"audio" | "mic" | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -134,7 +198,12 @@ const AudioStreamerChatBot = ({
     null,
   );
   const [activeFlow, setActiveFlow] = useState<FlowType>("none"); // <-- add
-  const [sessionId, setSessionId] = useState<string | null>(null); // <-- add
+  // Initialize sessionId from localStorage if available
+  const [sessionId, setSessionId] = useState<string>(
+    () =>
+      localStorage.getItem("sessionId") ||
+      `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  );
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]); // <-- add for editable attendance
   const attendanceDataRef = useRef<AttendanceRecord[]>([]); // Ref to access current attendanceData in closures
   const [attendanceStep, setAttendanceStep] = useState<
@@ -317,6 +386,9 @@ const AudioStreamerChatBot = ({
   };
 
   const startStreaming = async (useFullVoice = false) => {
+    // Step 2: AUDIO BUTTON click handler should set ref for immediate access
+    activeVoiceButtonRef.current = "audio";
+    console.log("🎙️ Audio button - set mode to audio");
     try {
       // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
@@ -330,64 +402,82 @@ const AudioStreamerChatBot = ({
       await webrtcService.connect(
         selectedLanguage,
         {
-          onTranscript: (text: string, isFinal: boolean) => {
-            const trimmed = text.trim();
-            if (!trimmed) return;
+          onTranscript: (() => {
+            // Track last submitted input to prevent duplicates
+            let lastSubmittedInput = "";
+            return (text: string, isFinal: boolean) => {
+              const trimmed = text.trim();
+              if (!trimmed) return;
+              // Step 5: Debug log for transcript mode (use ref for immediate value)
+              console.log(
+                "Transcript in mode:",
+                activeVoiceButtonRef.current,
+                text,
+              );
 
-            // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
-            if (useFullVoice) {
-              interruptTTS();
-            }
-
-            if (isFinal) {
-              // Final result: add to accumulated final text and clear interim
-              finalTextRef.current = finalTextRef.current
-                ? finalTextRef.current + " " + trimmed
-                : trimmed;
-              lastInterimTextRef.current = "";
-
-              // Update input with final text only (no interim)
-              setInputText(finalTextRef.current);
-            } else {
-              // Interim result: show final text + current interim
-              lastInterimTextRef.current = trimmed;
-              const displayText = finalTextRef.current
-                ? finalTextRef.current + " " + trimmed
-                : trimmed;
-
-              // Update input in real-time with interim
-              setInputText(displayText);
-            }
-
-            // Full-voice flows (attendance, assignment): 3-second auto-submit
-            const useFullVoiceTimer =
-              activeFlow === "full_voice_attendance" ||
-              (activeFlow === "assignment" && useFullVoice);
-            if (useFullVoiceTimer) {
-              setLastVoiceInputTime(Date.now());
-
-              if (fullVoiceAutoSubmitTimer) {
-                clearTimeout(fullVoiceAutoSubmitTimer);
+              // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
+              if (useFullVoice) {
+                interruptTTS();
               }
 
-              const currentText = isFinal
-                ? finalTextRef.current
-                : finalTextRef.current + " " + trimmed;
-              const timer = setTimeout(async () => {
-                const finalInput = currentText.trim();
-                if (!finalInput || isProcessing) return;
-                setFullVoiceAutoSubmitTimer(null);
-                setInputText(finalInput);
-                isVoiceTriggeredRequestRef.current = true;
-                try {
-                  await handleSubmit(finalInput);
-                } finally {
-                  isVoiceTriggeredRequestRef.current = false;
+              if (isFinal) {
+                // Final result: add to accumulated final text and clear interim
+                finalTextRef.current = finalTextRef.current
+                  ? finalTextRef.current + " " + trimmed
+                  : trimmed;
+                lastInterimTextRef.current = "";
+
+                // Update input with final text only (no interim)
+                setInputText(finalTextRef.current);
+              } else {
+                // Interim result: show final text + current interim
+                lastInterimTextRef.current = trimmed;
+                const displayText = finalTextRef.current
+                  ? finalTextRef.current + " " + trimmed
+                  : trimmed;
+
+                // Update input in real-time with interim
+                setInputText(displayText);
+              }
+
+              // Full-voice flows (attendance, assignment, leave): 3-second auto-submit
+              const useFullVoiceTimer =
+                activeFlow === "full_voice_attendance" ||
+                (activeFlow === "assignment" && useFullVoice) ||
+                (activeFlow === "leave" && useFullVoice);
+              if (useFullVoiceTimer) {
+                setLastVoiceInputTime(Date.now());
+
+                if (fullVoiceAutoSubmitTimer) {
+                  clearTimeout(fullVoiceAutoSubmitTimer);
                 }
-              }, 3000);
-              setFullVoiceAutoSubmitTimer(timer);
-            }
-          },
+
+                const currentText = isFinal
+                  ? finalTextRef.current
+                  : finalTextRef.current + " " + trimmed;
+                const timer = setTimeout(async () => {
+                  const finalInput = currentText.trim();
+                  // Prevent duplicate submission of the same input
+                  if (
+                    !finalInput ||
+                    isProcessing ||
+                    finalInput === lastSubmittedInput
+                  )
+                    return;
+                  lastSubmittedInput = finalInput;
+                  setFullVoiceAutoSubmitTimer(null);
+                  setInputText(finalInput);
+                  isVoiceTriggeredRequestRef.current = true;
+                  try {
+                    await handleSubmit(finalInput);
+                  } finally {
+                    isVoiceTriggeredRequestRef.current = false;
+                  }
+                }, 3000);
+                setFullVoiceAutoSubmitTimer(timer);
+              }
+            };
+          })(),
           onError: (error: Error) => {
             console.error("WebRTC error:", error);
             setIsRecording(false);
@@ -444,6 +534,8 @@ const AudioStreamerChatBot = ({
   };
 
   const stopStreaming = async (skipSubmit = false) => {
+    // Step 4: Reset voice mode tracker when stopping
+    activeVoiceButtonRef.current = null;
     if (turnCompleteTimerRef.current) {
       clearTimeout(turnCompleteTimerRef.current);
       turnCompleteTimerRef.current = null;
@@ -490,7 +582,7 @@ const AudioStreamerChatBot = ({
   const uploadRegularFile = async (file: File) => {
     return await aiAPI.uploadFile({
       file,
-      session_id: sessionId || userId,
+      session_id: sessionId,
     });
   };
 
@@ -503,7 +595,7 @@ const AudioStreamerChatBot = ({
     try {
       const result = await aiAPI.processAttendanceImage({
         file,
-        session_id: sessionId || userId,
+        session_id: sessionId,
         class_: classInfo.class_,
         section: classInfo.section,
         date: classInfo.date,
@@ -630,43 +722,18 @@ const AudioStreamerChatBot = ({
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
       console.log("🚪 Exit command detected, exiting flow:", activeFlow);
-      if (activeFlow === "leave") {
-        leaveVoiceInitiatedRef.current = false;
-      }
-      if (activeFlow === "course_progress") {
-        courseProgressVoiceInitiatedRef.current = false;
-      }
-      if (activeFlow === "attendance" || activeFlow === "voice_attendance") {
-        attendanceVoiceInitiatedRef.current = false;
-      }
-      if (
-        activeFlow === "full_voice_attendance" ||
-        activeFlow === "assignment"
-      ) {
-        if (fullVoiceAutoSubmitTimer) {
-          clearTimeout(fullVoiceAutoSubmitTimer);
-          setFullVoiceAutoSubmitTimer(null);
-        }
-      }
-      activeFlowRef.current = "none";
+      // Inline frontend exit logic to avoid ReferenceError
       setActiveFlow("none");
-      setAttendanceStep("class_info");
-      setPendingClassInfo(null);
-      const exitMessage = `✅ Exited from ${activeFlow} flow.\nWelcome back! You can ask me anything`;
-      setChatHistory((prev) => [
-        ...prev,
-        { type: "bot", text: exitMessage },
-      ]);
-      try {
-        if (isVoiceTriggeredRequestRef.current === true) {
-          void handlePlayTTS(-1, generateQueryTTSSummary(exitMessage));
-        }
-      } catch (ttsErr) {
-        console.error("Exit TTS playback failed:", ttsErr);
-      }
+      const newSessionId =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      setSessionId(newSessionId);
+      localStorage.setItem("sessionId", newSessionId);
+      console.log("✅ New session ID generated:", newSessionId);
+      console.log("✅ Active flow cleared");
       setIsProcessing(false);
-      setDetectedFlow(null);
-      return;
+      // (Removed return; to allow backend call and display exit message)
     }
 
     // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
@@ -902,43 +969,84 @@ const AudioStreamerChatBot = ({
         // The backend will either auto-fetch class info or ask for it
       }
 
-      // Check if this is a new flow initialization (user just switched flows)
+      // Always treat as new flow initialization if last flow was exited (activeFlow is none),
+      // Only treat as new flow initialization if last flow was exited (activeFlow is none),
+      // Only treat as new flow initialization if last flow was exited (activeFlow is none or query),
+      // or if flow type changes (from a different flow to this one)
       const isNewFlowInitialization =
-        classificationResult &&
-        (activeFlow === "none" ||
-          activeFlow === "query" ||
-          activeFlow !== targetFlow);
+        (classificationResult &&
+          (activeFlow === "none" || activeFlow === "query") &&
+          targetFlow !== "none" &&
+          targetFlow !== "query") ||
+        (classificationResult &&
+          activeFlow !== targetFlow &&
+          activeFlow !== "none" &&
+          activeFlow !== "query" &&
+          targetFlow !== activeFlow);
 
       // Initialize assignment flow
       if (targetFlow === "assignment" && isNewFlowInitialization) {
         console.log("📍 Initializing assignment flow state");
         console.log("📍 Setting activeFlow to 'assignment'");
 
-        // IMPORTANT: Set activeFlow (and ref) BEFORE processing the message
+        // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
         activeFlowRef.current = "assignment";
         setActiveFlow("assignment");
-
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        setFullVoiceMode(false);
+        setIsVoiceActive(false);
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
         console.log("📍 Processing first assignment message");
-        // Don't return here - let the user's message be processed by the API
-        // This avoids duplicate prompts for the assignment name
       }
 
       // Initialize leave flow
       if (targetFlow === "leave" && isNewFlowInitialization) {
         console.log("📍 Initializing leave flow state");
 
-        // IMPORTANT: Set activeFlow (and ref) BEFORE processing the message
+        // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
         activeFlowRef.current = "leave";
         setActiveFlow("leave");
-
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        setFullVoiceMode(false);
+        setIsVoiceActive(false);
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
         // If this leave flow was started by voice, mark it so TTS plays for all leave responses
         if (isVoiceTriggeredRequestRef.current === true) {
           leaveVoiceInitiatedRef.current = true;
-          console.log("🎤 Leave flow voice-initiated: TTS will play for leave responses");
+          console.log(
+            "🎤 Leave flow voice-initiated: TTS will play for leave responses",
+          );
         }
         // Consume trigger so it doesn't leak to later requests
         isVoiceTriggeredRequestRef.current = false;
-
         // Don't return - let the flow continue to make the API call.
         // The backend leave agent will return the initial prompt (Step 1: Half Day / Full Day / Long Leave).
         console.log("📍 Leave flow initialized, continuing to API call...");
@@ -1006,28 +1114,32 @@ const AudioStreamerChatBot = ({
               activeTab: "answer", // Set initial active tab
             },
           ]);
+          // ⭐ NEW: Check for exit response
+          if (isExitResponse(data.data)) {
+            handleFrontendExit();
+          } else if ((data.data as any)?.flow_name) {
+            setActiveFlow((data.data as any).flow_name as FlowType);
+          }
         } else if (data.status === "error" && data.message) {
           answerForTts = data.message;
           setChatHistory((prev) => [
             ...prev,
             { type: "bot", text: data.message },
           ]);
+          // ⭐ NEW: Check for exit response
+          if (isExitResponse(data)) {
+            handleFrontendExit();
+          }
         } else {
           answerForTts = "No response from AI.";
           setChatHistory((prev) => [
             ...prev,
             { type: "bot", text: "No response from AI." },
           ]);
-        }
-        // TTS when user spoke (voice-triggered) so output is also in voice
-        try {
-          if (isVoiceTriggeredRequestRef.current === true) {
-            const speech = generateQueryTTSSummary(answerForTts);
-            // Mark as QUERY flow so backend can generate/query-specific TTS
-            void handlePlayTTS(-1, speech, true);
+          // ⭐ NEW: Check for exit response
+          if (isExitResponse(data)) {
+            handleFrontendExit();
           }
-        } catch (ttsErr) {
-          console.error("Query TTS playback failed:", ttsErr);
         }
       } catch (err) {
         const errorMessage = "Sorry, there was an error processing your query.";
@@ -1059,7 +1171,7 @@ const AudioStreamerChatBot = ({
       try {
         await handleAttendanceChat({
           userMessage,
-          sessionId: sessionId || userId,
+          sessionId: sessionId,
           userId,
           isVoiceTriggered: attendanceVoiceInitiatedRef.current === true,
           callbacks: getAttendanceFlowCallbacks(),
@@ -1093,8 +1205,7 @@ const AudioStreamerChatBot = ({
         userId,
         isVoiceTriggered: leaveMessageViaVoice,
         getErpContext,
-        appendBotMessage: (msg) =>
-          setChatHistory((prev) => [...prev, msg]),
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => {
           leaveVoiceInitiatedRef.current = false;
           activeFlowRef.current = "none";
@@ -1128,7 +1239,7 @@ const AudioStreamerChatBot = ({
         const { academic_session, branch_token } = getErpContext();
 
         const response = await aiAPI.courseProgressChat({
-          session_id: sessionId || `session_${userId}`,
+          session_id: sessionId,
           query: userMessage,
           bearer_token: authToken || undefined,
           academic_session,
@@ -1342,7 +1453,11 @@ const AudioStreamerChatBot = ({
   // `isQuery` marks whether this is a query-flow TTS (true) or an
   // action-flow / system message TTS (false). Backend uses this flag
   // to decide whether to generate a summarized TTS or speak raw text.
-  const handlePlayTTS = async (idx: number, text: string, _isQuery: boolean = false) => {
+  const handlePlayTTS = async (
+    idx: number,
+    text: string,
+    _isQuery: boolean = false,
+  ) => {
     // Interrupt any currently playing TTS before starting new one
     interruptTTS();
 
@@ -6069,6 +6184,8 @@ const AudioStreamerChatBot = ({
             />
             <button
               onClick={() => {
+                activeVoiceButtonRef.current = "audio";
+                console.log("🎙️ Audio button - set mode to audio");
                 if (fullVoiceMode) {
                   setFullVoiceMode(false);
                   stopStreaming(true);
@@ -6090,9 +6207,11 @@ const AudioStreamerChatBot = ({
             </button>
             {!fullVoiceMode && (
               <button
-                onClick={() =>
-                  isRecording ? stopStreaming() : startStreaming()
-                }
+                onClick={() => {
+                  activeVoiceButtonRef.current = "mic";
+                  console.log("🎤 Mic button - set mode to mic");
+                  isRecording ? stopStreaming() : startStreaming();
+                }}
                 className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
                   isRecording ? " recording" : ""
                 }`}

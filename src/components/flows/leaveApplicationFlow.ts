@@ -526,6 +526,27 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
   } = params;
 
   try {
+    // Always call backend for exit, do not hardcode exit message
+    let exitDetected = false;
+    if (shouldExitLeaveFlow(userMessage)) {
+      exitDetected = true;
+    }
+
+    // If this is the first message in the leave flow, play the initial TTS prompt
+    if (
+      !exitDetected &&
+      isVoiceTriggered &&
+      userMessage &&
+      isLeaveApplicationIntent(userMessage)
+    ) {
+      try {
+        playTTS(-1, getLeaveWelcomeTTS());
+      } catch (ttsErr) {
+        console.error("Leave TTS playback failed:", ttsErr);
+      }
+    }
+
+    // Always call backend, even for exit
     const result = await runLeaveChat({
       sessionId,
       userId,
@@ -553,6 +574,17 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
         } catch (ttsErr) {
           console.error("Leave TTS playback failed:", ttsErr);
         }
+      }
+
+      // If backend exit message detected, exit flow
+      if (
+        answer
+          .toLowerCase()
+          .includes("you've exited the leave application flow")
+      ) {
+        exitFlow();
+        setProcessing(false);
+        return;
       }
 
       // Handle flow state based on response
