@@ -1,5 +1,24 @@
 export type TabType = "answer" | "references" | "query";
-export type FlowType = "none" | "query" | "attendance" | "voice_attendance" | "full_voice_attendance";
+
+export type FlowType =
+  | "none"
+  | "query"
+  | "attendance"
+  | "voice_attendance"
+  | "full_voice_attendance"
+  | "leave"
+  | "leave_approval"
+  | "assignment"
+  | "course_progress"
+  | "_legacy_attendance_disabled"
+  | "_legacy_voice_attendance_disabled";
+
+export interface ClassSectionOption {
+  classId: string;
+  sectionId: string;
+  className?: string;
+  sectionName?: string;
+}
 
 export interface ChatMessage {
   type: "user" | "bot";
@@ -18,6 +37,10 @@ export interface ChatMessage {
   voice_processed?: boolean;
   isProcessing?: boolean;
   isBeingEdited?: boolean;
+  classSections?: any[];
+  courseProgress?: any;
+  classSection?: ClassSectionOption;
+  classSectionsOptions?: any[];
 }
 
 export interface ClassInfo {
