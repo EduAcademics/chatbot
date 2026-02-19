@@ -165,11 +165,11 @@ export function generateAttendanceTTSSummary(
     return `Attendance summary ready. ${total} students total. ${presentCount} present, ${absentCount} absent. You can say edit attendance to change any student, approve to save, or reject to start over.`;
   }
 
-  // Success message (backend: "Attendance marked successfully.")
+  // Success message (backend: "Attendance saved.")
   if (
     lowerAnswer.includes("attendance marked successfully") ||
-    lowerAnswer.includes("successfully") ||
-    lowerAnswer.includes("attendance saved")
+    lowerAnswer.includes("attendance saved") ||
+    lowerAnswer.includes("successfully")
   ) {
     return "Attendance marked successfully.";
   }
@@ -185,6 +185,26 @@ export function generateAttendanceTTSSummary(
     lowerAnswer.includes("student")
   ) {
     return "Please provide student names and attendance status. You can say mark all present or list individual students.";
+  }
+
+  // Edit mode: "Tell me the student name and status"
+  if (lowerAnswer.includes("tell me the student name and status")) {
+    return "Tell me the student name and status.";
+  }
+
+  // Edit mode: "X marked absent/present. Anyone else?"
+  if (lowerAnswer.includes("marked") && lowerAnswer.includes("anyone else")) {
+    return answer;
+  }
+
+  // Edit mode: "Did you mean X or Y?"
+  if (lowerAnswer.includes("did you mean")) {
+    return answer;
+  }
+
+  // Edit mode: "40 present, 3 absent. Confirm?"
+  if (lowerAnswer.includes("present") && lowerAnswer.includes("absent") && lowerAnswer.includes("confirm")) {
+    return answer;
   }
 
   // Default: return truncated answer
