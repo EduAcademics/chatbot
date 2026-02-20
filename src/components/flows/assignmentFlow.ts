@@ -37,6 +37,14 @@ export interface AssignmentFileUploadParams {
 }
 
 export function shouldExitAssignmentOnError(answer: string): boolean {
+  // Don't exit when bot is re-asking with available options (e.g. after "Could not find class section")
+  if (
+    answer.includes("Available:") ||
+    answer.includes("Options:") ||
+    /Which (class|subject|type)/i.test(answer)
+  ) {
+    return false;
+  }
   return (
     answer.includes("❌") ||
     answer.includes("error") ||
@@ -119,13 +127,17 @@ export async function handleAssignmentChat(params: AssignmentChatParams): Promis
 
     if (result.success && result.data) {
       const answer = result.data.answer || "";
+      const ttsText = result.data.tts_text;
       const assignmentData = result.data.assignment_data;
 
       appendBotMessage({ type: "bot", answer, activeTab: "answer" });
 
       if (isVoiceTriggered) {
         try {
-          playTTS(-1, getTTSSummary(answer));
+          // Use backend tts_text (short, user-friendly) when provided; else summarize full answer
+          const textToSpeak =
+            ttsText != null && ttsText !== "" ? ttsText : getTTSSummary(answer);
+          playTTS(-1, textToSpeak);
         } catch (ttsErr) {
           console.error("Assignment TTS playback failed:", ttsErr);
         }

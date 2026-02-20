@@ -37,6 +37,7 @@ export interface LeaveFlowCallbacks {
   exitFlow: () => void;
   setProcessing: (v: boolean) => void;
   playTTS: (index: number, text: string) => void;
+  getTTSSummary: (text: string) => string;
   setActiveFlow: (flow: string) => void;
 }
 
@@ -365,7 +366,7 @@ function generateSpokenSummary(text: string): string {
  * Generate concise TTS summary for leave messages
  * Converts verbose bot responses into speakable summaries
  */
-function generateLeaveTTSSummary(answer: string): string {
+export function generateLeaveTTSSummary(answer: string): string {
   // First try to get a specific voice message
   const voiceMessage = getVoiceMessageForResponse(answer);
   if (voiceMessage) {
@@ -522,6 +523,7 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
     exitFlow,
     setProcessing,
     playTTS,
+    getTTSSummary,
     setActiveFlow,
   } = params;
 
@@ -532,19 +534,8 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
       exitDetected = true;
     }
 
-    // If this is the first message in the leave flow, play the initial TTS prompt
-    if (
-      !exitDetected &&
-      isVoiceTriggered &&
-      userMessage &&
-      isLeaveApplicationIntent(userMessage)
-    ) {
-      try {
-        playTTS(-1, getLeaveWelcomeTTS());
-      } catch (ttsErr) {
-        console.error("Leave TTS playback failed:", ttsErr);
-      }
-    }
+    // TTS for leave flow is handled from the API response only (same as assignment flow).
+    // No separate welcome TTS here to avoid double-speaking the same prompt.
 
     // Always call backend, even for exit
     const result = await runLeaveChat({
@@ -566,11 +557,13 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
         console.log("Leave application data:", leaveData);
       }
 
-      // TTS: voice-only, strictly gated
+      // TTS: voice-only, same as assignment flow — use backend tts_text when provided, else getTTSSummary
       if (isVoiceTriggered) {
         try {
-          const speech = generateLeaveTTSSummary(answer);
-          playTTS(-1, speech);
+          const ttsText = result.data.tts_text;
+          const textToSpeak =
+            ttsText != null && ttsText !== "" ? ttsText : getTTSSummary(answer);
+          playTTS(-1, textToSpeak);
         } catch (ttsErr) {
           console.error("Leave TTS playback failed:", ttsErr);
         }
@@ -604,11 +597,10 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
       const errorMessage = result.error || LEAVE_ERR;
       appendBotMessage({ type: "bot", text: errorMessage });
 
-      // TTS for error messages if voice-initiated
+      // TTS for error messages if voice-initiated (use getTTSSummary for errors)
       if (isVoiceTriggered) {
         try {
-          const speech = generateLeaveTTSSummary(errorMessage);
-          playTTS(-1, speech);
+          playTTS(-1, getTTSSummary(errorMessage));
         } catch (ttsErr) {
           console.error("Leave TTS playback failed:", ttsErr);
         }
@@ -625,8 +617,7 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
     // TTS for error messages if voice-initiated
     if (isVoiceTriggered) {
       try {
-        const speech = generateLeaveTTSSummary(errorMessage);
-        playTTS(-1, speech);
+        playTTS(-1, getTTSSummary(errorMessage));
       } catch (ttsErr) {
         console.error("Leave TTS playback failed:", ttsErr);
       }

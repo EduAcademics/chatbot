@@ -138,6 +138,7 @@ interface LeaveChatResponse {
   status: string;
   data?: {
     answer?: string;
+    tts_text?: string;
     leave_data?: {
       employee: string;
       start_date: string;
@@ -170,6 +171,7 @@ interface AssignmentChatResponse {
   status: string;
   data?: {
     answer?: string;
+    tts_text?: string;
     assignment_data?: {
       title: string;
       classSection: string;

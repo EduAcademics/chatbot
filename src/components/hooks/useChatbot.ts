@@ -22,7 +22,10 @@ import type {
   ClassInfo,
   AttendanceRecord,
 } from "../flows/attendanceFlow";
-import { handleLeaveChat } from "../flows/leaveApplicationFlow";
+import {
+  handleLeaveChat,
+  generateLeaveTTSSummary,
+} from "../flows/leaveApplicationFlow";
 import type { RefObject } from "react";
 
 export interface UseChatbotReturn {
@@ -1254,16 +1257,19 @@ export function useChatbot({
         leaveVoiceInitiatedRef.current = true;
         isVoiceTriggeredRequestRef.current = false;
       }
+      // Use leaveVoiceInitiatedRef so first response TTS plays (ref is set above before we consume isVoiceTriggeredRequestRef)
+      const shouldPlayTTSForLeave = leaveMessageViaVoice || leaveVoiceInitiatedRef.current;
       await handleLeaveChat({
         userMessage,
         sessionId,
         userId,
-        isVoiceTriggered: leaveMessageViaVoice,
+        isVoiceTriggered: shouldPlayTTSForLeave,
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateLeaveTTSSummary,
         setActiveFlow: (flow: string) => setActiveFlow(flow as FlowType),
       });
     } else if (targetFlow === "assignment") {
