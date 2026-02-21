@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { TabType, FlowType } from "../types";
 import { isExitResponse, generateQueryTTSSummary } from "../utils/chatbotUtils";
 import {
@@ -45,7 +45,9 @@ export interface UseChatbotReturn {
   activeFlow: FlowType;
   setActiveFlow: (v: FlowType) => void;
   attendanceStep: "class_info" | "student_details" | "completed";
-  setAttendanceStep: (v: "class_info" | "student_details" | "completed") => void;
+  setAttendanceStep: (
+    v: "class_info" | "student_details" | "completed",
+  ) => void;
   setPendingClassInfo: (v: ClassInfo | null) => void;
   hoveredMenuItem: string | null;
   setHoveredMenuItem: (v: string | null) => void;
@@ -55,8 +57,6 @@ export interface UseChatbotReturn {
   userId: string;
   activeFlowRef: RefObject<FlowType>;
   setIsProcessing: (v: boolean) => void;
-  setLeaveApprovalRequests: (v: any[]) => void;
-  setRejectReason: (v: { [key: string]: string }) => void;
   setLoadingLeaveRequests: (v: boolean) => void;
   devices: MediaDeviceInfo[];
   selectedDeviceId: string;
@@ -77,9 +77,15 @@ export interface UseChatbotReturn {
   showCorrectionBox: number | null;
   setShowCorrectionBox: (v: number | null) => void;
   feedbackComment: { [idx: number]: string };
-  setFeedbackComment: React.Dispatch<React.SetStateAction<{ [idx: number]: string }>>;
+  setFeedbackComment: React.Dispatch<
+    React.SetStateAction<{ [idx: number]: string }>
+  >;
   correctionBoxRef: RefObject<HTMLDivElement | null>;
-  handlePlayTTS: (idx: number, text: string, isQuery?: boolean) => Promise<void>;
+  handlePlayTTS: (
+    idx: number,
+    text: string,
+    isQuery?: boolean,
+  ) => Promise<void>;
   handleSendFeedback: (
     idx: number,
     type: "Approved" | "Rejected",
@@ -133,39 +139,31 @@ export function useChatbot({
   email: string;
 }): UseChatbotReturn {
   const webrtcServiceRef = useRef<WebRTCAudioService | null>(null);
-  const lastInterimTextRef = useRef<string>(""); // Track last interim text to replace it with final
-  const finalTextRef = useRef<string>(""); // Track accumulated final text (completed sentences)
+  const lastInterimTextRef = useRef<string>("");
+  const finalTextRef = useRef<string>("");
 
-  // Local lifecycle-scoped flag to mark a single request as voice-triggered.
-  // This is intentionally a request-scoped ref (not global/shared) and will
-  // only be set immediately before submitting a mic-originated request
-  // and reset right after that request completes. It is used only to gate
-  // TTS playback inside the leave-approval success handler.
   const isVoiceTriggeredRequestRef = useRef<boolean>(false);
-  // Flag to remember that the current Course Progress flow was initiated
-  // via the microphone. This persists across the selection click so we can
-  // play the second-step TTS when the user clicks a class-section.
-  // Removed unused: const courseProgressVoiceInitiatedRef = useRef<boolean>(false);
+
+  // ── suppressNextTTS: set true before handleFlowExit on user-triggered exit
+  //    so the exit-confirmation TTS message is skipped.
+  //    Used by leaveApplicationFlow's exitFlow callback.
+  let suppressNextTTS = false;
 
   /**
-   * Clears all frontend flow and session state (TTS interrupted, flow state cleared, new session).
+   * Clears all frontend flow and session state.
    * Called when exit is detected from backend or query errors.
    */
   const handleFrontendExit = () => {
     handleFlowExit({ newSession: true });
   };
-  // Flag to remember that the current Leave flow was initiated
-  // via the microphone. This persists so we can play TTS for leave responses.
+
   const leaveVoiceInitiatedRef = useRef<boolean>(false);
-  // Flag to remember that the current Attendance flow was initiated
-  // via the microphone. This persists so we can play TTS for attendance responses.
   const attendanceVoiceInitiatedRef = useRef<boolean>(false);
 
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [hoveredMenuItem, setHoveredMenuItem] = useState<string | null>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Step 1: Add voice mode tracker ref (fixes state timing issue)
   const activeVoiceButtonRef = useRef<"audio" | "mic" | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
@@ -176,7 +174,7 @@ export function useChatbot({
       type: "user" | "bot";
       text?: string;
       answer?: string;
-      references?: any[]; // Accept any structure for references
+      references?: any[];
       mongodbquery?: string[];
       activeTab?: TabType;
       feedback?: "Approved" | "Rejected";
@@ -186,14 +184,14 @@ export function useChatbot({
       buttons?: { label: string; action: () => void }[];
       bulkattandance?: boolean;
       finish_collecting?: boolean;
-      classSections?: any[]; // For course progress flow
-      courseProgress?: any; // For course progress data
+      classSections?: any[];
+      courseProgress?: any;
       classSection?: {
         classId: string;
         sectionId: string;
         className?: string;
         sectionName?: string;
-      }; // Selected class/section
+      };
     }[]
   >([]);
 
@@ -207,43 +205,36 @@ export function useChatbot({
   const [showCorrectionBox, setShowCorrectionBox] = useState<number | null>(
     null,
   );
-  const [activeFlow, setActiveFlow] = useState<FlowType>("none"); // <-- add
-  // Initialize sessionId from localStorage if available
+  const [activeFlow, setActiveFlow] = useState<FlowType>("none");
   const [sessionId, setSessionId] = useState<string>(
     () =>
       localStorage.getItem("sessionId") ||
       `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
   );
-  const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]); // <-- add for editable attendance
-  const attendanceDataRef = useRef<AttendanceRecord[]>([]); // Ref to access current attendanceData in closures
+  const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
+  const attendanceDataRef = useRef<AttendanceRecord[]>([]);
   const [attendanceStep, setAttendanceStep] = useState<
     "class_info" | "student_details" | "completed"
   >("class_info");
   const [pendingClassInfo, setPendingClassInfo] = useState<ClassInfo | null>(
     null,
-  ); // <-- add for pending class info
-  // Unified attendance flow state
+  );
   const [attendanceFlowState, setAttendanceFlowState] =
     useState<AttendanceState>(INITIAL_ATTENDANCE_STATE);
-  const [, _setIsProcessingImage] = useState(false); // <-- add for image processing state
-  // Debug wrapper for setAttendanceData
+  const [, _setIsProcessingImage] = useState(false);
 
-  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null); // <-- add for class info
-  const classInfoRef = useRef<ClassInfo | null>(null); // Ref to access current classInfo in closures
+  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
+  const classInfoRef = useRef<ClassInfo | null>(null);
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(
     null,
-  ); // Track which message is being edited
-  const [showClassInfoModal, setShowClassInfoModal] = useState(false); // <-- add for class info modal
-  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null); // <-- add for pending image
-  const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]); // <-- add for leave approval requests
-  const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false); // <-- add for loading state
+  );
+  const [showClassInfoModal, setShowClassInfoModal] = useState(false);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [leaveApprovalRequests, setLeaveApprovalRequests] = useState<any[]>([]);
+  const [loadingLeaveRequests, setLoadingLeaveRequests] = useState(false);
   const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>(
     {},
-  ); // <-- add for reject reasons
-  // Course progress is now fully backend-driven - no frontend state needed
-  // The backend returns course_progress data in the response which is stored in chat messages
-
-  // Auto-routing states merge on 17-12-2025 manvi + lakshmi
+  );
 
   const [autoRouting, setAutoRouting] = useState<boolean>(true);
   const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
@@ -253,44 +244,23 @@ export function useChatbot({
   const [_classificationConfidence, setClassificationConfidence] =
     useState<number>(0);
   const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] =
-    useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
-  const [fullVoiceMode, setFullVoiceMode] = useState<boolean>(false); // Full Voice Mode (Hands-Free)
-  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
-  const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
-  const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
+    useState<ReturnType<typeof setTimeout> | null>(null);
+  const [fullVoiceMode, setFullVoiceMode] = useState<boolean>(false);
+  const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false);
+  const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsRequestIdRef = useRef<number>(0);
   const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
-  ); // Debounce turn-complete
+  );
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0);
-  const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voiceÃ‚Â inputÃ‚Â time
+  const activeFlowRef = useRef<FlowType>("none");
 
-  // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
     const academic_session =
       localStorage.getItem("academic_session") || "2025-26";
     const branch_token = localStorage.getItem("branch_token") || "demo";
     return { academic_session, branch_token };
   };
-
-  // const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
-  // const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
-  // const [_classificationConfidence, setClassificationConfidence] =useState<number>(0);
-  // const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] = useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
-  // const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0); // <-- add for tracking last voiceÃ‚Â inputÃ‚Â time
-  // // Shared helper: get academic session and branch token dynamically
-  // const getErpContext = () => {
-  //   const academic_session =
-  //     localStorage.getItem("academic_session") || "2025-26";
-  //   const branch_token = localStorage.getItem("branch_token") || "demo";
-  //   return { academic_session, branch_token };
-  // };
-  // const [autoRouting, setAutoRouting] = useState<boolean>(true);
-  // const [routerMode, setRouterMode] = useState<"manual" | "auto" | "llm">(
-  //   "auto"
-  // );
-  // const [detectedFlow, setDetectedFlow] = useState<string | null>(null);
-  // const [classificationConfidence, setClassificationConfidence] =
-  //   useState<number>(0);
 
   const languages = [
     { label: "Auto Detect", value: "auto" },
@@ -310,13 +280,9 @@ export function useChatbot({
         references: undefined,
         mongodbquery: undefined,
       };
-
-      setChatHistory([welcomeMessage]); // replace instead of append
-      // Don't set default flow or userOptionSelected - let auto-routing handle it
-      // setActiveFlow("query");
-      // setUserOptionSelected(true);
+      setChatHistory([welcomeMessage]);
     }
-  }, []); // run only once
+  }, []);
 
   useEffect(() => {
     const fetchMicrophones = async () => {
@@ -324,12 +290,11 @@ export function useChatbot({
       const devices = await navigator.mediaDevices.enumerateDevices();
       const mics = devices.filter((d) => d.kind === "audioinput");
       setDevices(mics);
-      stream.getTracks().forEach((track) => track.stop()); // Cleanup
+      stream.getTracks().forEach((track) => track.stop());
     };
     fetchMicrophones();
   }, []);
 
-  // Fetch user info and session id on mount (or when userId changes)
   useEffect(() => {
     const fetchUserSession = async () => {
       try {
@@ -341,7 +306,6 @@ export function useChatbot({
         // ignore
       }
     };
-
     fetchUserSession();
   }, [userId]);
 
@@ -349,7 +313,6 @@ export function useChatbot({
     activeFlowRef.current = activeFlow;
   }, [activeFlow]);
 
-  // Keep refs in sync with state for closure access
   useEffect(() => {
     attendanceDataRef.current = attendanceData;
   }, [attendanceData]);
@@ -358,18 +321,13 @@ export function useChatbot({
     classInfoRef.current = classInfo;
   }, [classInfo]);
 
-  // Helper function to interrupt any playing TTS and cancel in-flight requests
   const interruptTTS = () => {
-    // Increment request ID to cancel any in-flight TTS requests
     ttsRequestIdRef.current += 1;
-    console.log(
-      `Ã°Å¸â€ºâ€˜ TTS interrupted - new request ID: ${ttsRequestIdRef.current}`,
-    );
+    console.log(`TTS interrupted - new request ID: ${ttsRequestIdRef.current}`);
 
     if (currentTTSAudioRef.current) {
       const audio = currentTTSAudioRef.current;
-      // Always interrupt if audio exists - pause and reset
-      console.log("Ã°Å¸â€ºâ€˜ Interrupting TTS playback", {
+      console.log("Interrupting TTS playback", {
         paused: audio.paused,
         currentTime: audio.currentTime,
         readyState: audio.readyState,
@@ -379,30 +337,26 @@ export function useChatbot({
       audio.pause();
       audio.currentTime = 0;
 
-      // Clean up URL if stored on audio element
       const url = (audio as any)._ttsUrl;
       if (url) {
         URL.revokeObjectURL(url);
         (audio as any)._ttsUrl = null;
       }
 
-      // Clear the ref so we know TTS was interrupted
       currentTTSAudioRef.current = null;
       webrtcServiceRef.current?.interruptBotAudio();
     }
 
-    // Clear loading state
     setTtsLoading(null);
   };
 
   /**
    * Centralized flow exit: interrupt TTS, clear flow-specific state, set activeFlow to none.
-   * Call on user manual exit (e.g. "exit"/"quit") or when a flow completes.
-   * @param options.newSession - if true, generate new sessionId (use for manual exit)
+   * @param options.newSession - if true, generate new sessionId
    */
   const handleFlowExit = (options?: { newSession?: boolean }) => {
     const flow = activeFlowRef.current;
-    console.log("Ã°Å¸Å¡Âª handleFlowExit:", { flow, newSession: options?.newSession });
+    console.log("handleFlowExit:", { flow, newSession: options?.newSession });
 
     interruptTTS();
 
@@ -424,7 +378,6 @@ export function useChatbot({
     } else if (flow === "leave_approval") {
       setLeaveApprovalRequests([]);
     }
-    // assignment, course_progress, query, none: no extra state to clear
 
     activeFlowRef.current = "none";
     setActiveFlow("none");
@@ -437,66 +390,74 @@ export function useChatbot({
           : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       setSessionId(newSessionId);
       localStorage.setItem("sessionId", newSessionId);
-      console.log("Ã¢Å“â€¦ New session ID on exit:", newSessionId);
+      console.log("New session ID on exit:", newSessionId);
     }
   };
 
+  // ── UNIFIED EXIT COMMAND HANDLER ─────────────────────────────────────────
+  // Called from BOTH manual text and voice paths when an exit keyword is detected.
+  // Generates a new session ID synchronously, resets flow state, adds the
+  // standard exit message to chat. Does NOT call the backend.
+  const handleExitCommand = useCallback(() => {
+    const newSessionId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(newSessionId);
+    localStorage.setItem("sessionId", newSessionId);
+    handleFlowExit({ newSession: false });
+    setChatHistory((prev) => [
+      ...prev,
+      {
+        type: "bot",
+        text: "✅ Exited. How can I help you next?",
+      },
+    ]);
+    console.log("Exit handled. New session ID:", newSessionId);
+  }, [handleFlowExit, setChatHistory, setSessionId]);
+
   const startStreaming = async (useFullVoice = false) => {
-    // Step 2: AUDIO BUTTON click handler should set ref for immediate access
     activeVoiceButtonRef.current = "audio";
-    console.log("Ã°Å¸Å½â„¢Ã¯Â¸Â Audio button - set mode to audio");
+    console.log("Audio button - set mode to audio");
     try {
-      // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
       finalTextRef.current = "";
 
-      // Create WebRTC service instance
       const webrtcService = new WebRTCAudioService();
       webrtcServiceRef.current = webrtcService;
 
-      // Connect with callbacks; pass useFullVoice for Full Voice Mode
       await webrtcService.connect(
         selectedLanguage,
         {
           onTranscript: (() => {
-            // Track last submitted input to prevent duplicates
             let lastSubmittedInput = "";
             return (text: string, isFinal: boolean) => {
               const trimmed = text.trim();
               if (!trimmed) return;
-              // Step 5: Debug log for transcript mode (use ref for immediate value)
               console.log(
                 "Transcript in mode:",
                 activeVoiceButtonRef.current,
                 text,
               );
 
-              // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
               if (useFullVoice) {
                 interruptTTS();
               }
 
               if (isFinal) {
-                // Final result: add to accumulated final text and clear interim
                 finalTextRef.current = finalTextRef.current
                   ? finalTextRef.current + " " + trimmed
                   : trimmed;
                 lastInterimTextRef.current = "";
-
-                // Update input with final text only (no interim)
                 setInputText(finalTextRef.current);
               } else {
-                // Interim result: show final text + current interim
                 lastInterimTextRef.current = trimmed;
                 const displayText = finalTextRef.current
                   ? finalTextRef.current + " " + trimmed
                   : trimmed;
-
-                // Update input in real-time with interim
                 setInputText(displayText);
               }
 
-              // Full-voice flows (attendance, assignment, leave): 3-second auto-submit
               const useFullVoiceTimer =
                 activeFlow === "full_voice_attendance" ||
                 (activeFlow === "assignment" && useFullVoice) ||
@@ -513,7 +474,6 @@ export function useChatbot({
                   : finalTextRef.current + " " + trimmed;
                 const timer = setTimeout(async () => {
                   const finalInput = currentText.trim();
-                  // Prevent duplicate submission of the same input
                   if (
                     !finalInput ||
                     isProcessing ||
@@ -550,7 +510,6 @@ export function useChatbot({
           onTurnComplete: () => {
             if (!useFullVoice || !finalTextRef.current.trim() || isProcessing)
               return;
-            // These flows use 3s timer only; skip turn-complete to avoid double submit
             const useFullVoiceTimer =
               activeFlow === "full_voice_attendance" ||
               (activeFlow === "assignment" && useFullVoice);
@@ -564,6 +523,38 @@ export function useChatbot({
               lastInterimTextRef.current = "";
               finalTextRef.current = "";
               setInputText(finalInput);
+
+              // ── VOICE EXIT CHECK ──────────────────────────────────────────
+              // Intercept exit keywords BEFORE sending to backend.
+              // Uses activeFlowRef (not activeFlow state) for current value in closure.
+              const exitKw = [
+                "exit",
+                "quit",
+                "stop",
+                "cancel",
+                "back",
+                "close",
+                "restart",
+                "done",
+              ];
+              const normVoice = finalInput
+                .toLowerCase()
+                .replace(/^[.!?,;:'"]+|[.!?,;:'"]+$/g, "")
+                .trim();
+              if (
+                exitKw.includes(normVoice) &&
+                activeFlowRef.current !== "none" &&
+                activeFlowRef.current !== "query"
+              ) {
+                console.log(
+                  "Exit command detected in voice flow:",
+                  activeFlowRef.current,
+                );
+                handleExitCommand();
+                return;
+              }
+              // ── END VOICE EXIT CHECK ──────────────────────────────────────
+
               isVoiceTriggeredRequestRef.current = true;
               try {
                 await handleSubmit(finalInput);
@@ -574,7 +565,6 @@ export function useChatbot({
           },
           onVoiceActivity: (isActive: boolean) => {
             setIsVoiceActive(isActive);
-            // Interrupt TTS when voice activity is detected
             if (isActive && useFullVoice) {
               interruptTTS();
             }
@@ -590,7 +580,6 @@ export function useChatbot({
   };
 
   const stopStreaming = async (skipSubmit = false) => {
-    // Step 4: Reset voice mode tracker when stopping
     activeVoiceButtonRef.current = null;
     if (turnCompleteTimerRef.current) {
       clearTimeout(turnCompleteTimerRef.current);
@@ -620,21 +609,16 @@ export function useChatbot({
     }
   };
 
-  // --- Upload file handler for attendance flow ---
   const uploadFile = async (file: File) => {
     if (activeFlow !== "attendance") throw new Error("Upload not allowed");
 
-    // Check if it's an image file for OCR processing
     if (file.type.startsWith("image/")) {
-      // For images, we need class info first, so this shouldn't be called directly
       throw new Error("Image processing requires class information");
     } else {
-      // Handle other file types (Excel, CSV, etc.)
       return await uploadRegularFile(file);
     }
   };
 
-  // Upload regular files (Excel, CSV, etc.)
   const uploadRegularFile = async (file: File) => {
     return await aiAPI.uploadFile({
       file,
@@ -642,7 +626,6 @@ export function useChatbot({
     });
   };
 
-  // Upload attendance image through OCR processing
   // @ts-expect-error - Kept for future use
   const _uploadAttendanceImage = async (
     file: File,
@@ -659,7 +642,7 @@ export function useChatbot({
 
       if (result.status === "success" && result.data) {
         return {
-          message: result.data.message, // Use the backend message which contains the markdown table
+          message: result.data.message,
           data: {
             attendance_summary: result.data.attendance_summary,
             class_info: result.data.class_info,
@@ -669,7 +652,6 @@ export function useChatbot({
           },
         };
       } else {
-        // Handle the case where vision model is not available
         if (result.message && result.message.includes("vision-capable model")) {
           return {
             message:
@@ -689,7 +671,6 @@ export function useChatbot({
       }
     } catch (err) {
       console.error("Error processing attendance image:", err);
-      // Provide helpful fallback message
       return {
         message:
           "Image processing failed. Please provide attendance data as text instead.",
@@ -706,9 +687,6 @@ export function useChatbot({
     }
   };
 
-  /**
-   * Classify user query to determine appropriate flow
-   */
   const classifyQuery = async (
     message: string,
   ): Promise<{
@@ -732,7 +710,7 @@ export function useChatbot({
       if (data.status === "success") {
         const { flow, confidence, entities } = data.data;
 
-        console.log("Ã°Å¸â€Â Query Classification:", {
+        console.log("Query Classification:", {
           query: message,
           detectedFlow: flow,
           confidence: `${(confidence * 100).toFixed(0)}%`,
@@ -742,10 +720,9 @@ export function useChatbot({
         return { flow, confidence, entities };
       }
 
-      // Fallback
       return { flow: "query", confidence: 0.8, entities: {} };
     } catch (error) {
-      console.error("Ã¢ÂÅ’ Classification error:", error);
+      console.error("Classification error:", error);
       return { flow: "query", confidence: 0.8, entities: {} };
     }
   };
@@ -754,7 +731,7 @@ export function useChatbot({
     const userMessage = (overrideMessage ?? inputText).trim();
     if (!userMessage) return;
 
-    console.log("Ã°Å¸Å¡â‚¬ handleSubmit START:", {
+    console.log("handleSubmit START:", {
       userMessage,
       activeFlow,
       userOptionSelected,
@@ -765,9 +742,9 @@ export function useChatbot({
     setInputText("");
     setIsProcessing(true);
 
-    // CHECK FOR EXIT KEYWORDS - Exit current flow immediately (same behavior as text mode)
-    // Normalize like backend: trim, collapse whitespace, lowercase, strip leading/trailing punctuation
-    // so voice "Exit", "Exit.", ". Exit" etc. are treated the same as typing "exit"
+    // ── MANUAL EXIT CHECK ─────────────────────────────────────────────────────
+    // Intercept exit keywords BEFORE any API call.
+    // Normalize: trim, collapse whitespace, lowercase, strip punctuation edges.
     const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
     const normalizedForExit = userMessage
       .trim()
@@ -780,16 +757,16 @@ export function useChatbot({
     );
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
-      console.log("Ã°Å¸Å¡Âª Exit command detected, exiting flow:", activeFlow);
-      handleFlowExit({ newSession: true });
-      // Continue so backend can return exit message; state already cleared
+      console.log("Exit command detected, exiting flow:", activeFlow);
+      handleExitCommand();
+      setIsProcessing(false);
+      return;
     }
+    // ── END MANUAL EXIT CHECK ─────────────────────────────────────────────────
 
-    // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
     let targetFlow = activeFlow;
     let classificationResult = null;
 
-    // Don't re-classify if we're in the middle of a multi-step flow
     const inAttendanceFlow =
       activeFlow === "attendance" &&
       attendanceStep === "student_details" &&
@@ -799,8 +776,6 @@ export function useChatbot({
       attendanceStep === "student_details" &&
       pendingClassInfo;
 
-    // For leave/assignment, check if message looks like a NEW request (indicates flow switch)
-    // Keywords that DEFINITELY indicate starting a NEW flow
     const newFlowKeywords = [
       "mark attendance",
       "take attendance",
@@ -825,16 +800,13 @@ export function useChatbot({
       userMessage.toLowerCase().includes(keyword),
     );
 
-    // Stay in active flow if user is responding (not starting new request)
-    // If already in leave/assignment and message doesn't look like a new request, stay in flow
-    // Don't check userOptionSelected - if activeFlow is set, we're in that flow
     const inLeave = activeFlowRef.current === "leave" || activeFlow === "leave";
     const inAssignment =
       activeFlowRef.current === "assignment" || activeFlow === "assignment";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
 
-    console.log("Ã°Å¸â€Â§ Auto-routing check:", {
+    console.log("Auto-routing check:", {
       autoRouting,
       activeFlow,
       userOptionSelected,
@@ -854,13 +826,10 @@ export function useChatbot({
       inLeaveFlow ||
       inAssignmentFlow
     ) {
-      // Stay in current flow if we're in the middle of a multi-step process
-      console.log("Ã°Å¸â€œÂ Staying in current flow (multi-step process active)");
+      console.log("Staying in current flow (multi-step process active)");
       targetFlow = activeFlowRef.current;
-      // Don't show old detection when in multi-step flow
       setDetectedFlow(null);
     } else if (autoRouting) {
-      // Skip classification for short confirmation words and common flow responses (save API call)
       const simpleResponses = [
         "yes",
         "no",
@@ -898,9 +867,8 @@ export function useChatbot({
         activeFlowRef.current !== "none" &&
         activeFlowRef.current !== "query"
       ) {
-        // Keep current flow for simple confirmation words
         console.log(
-          "Ã°Å¸â€œÂ Simple response detected, keeping current flow:",
+          "Simple response detected, keeping current flow:",
           activeFlowRef.current,
         );
         targetFlow = activeFlowRef.current;
@@ -910,20 +878,14 @@ export function useChatbot({
         userMessage.length < 50 &&
         !looksLikeNewRequest
       ) {
-        // Short message in an active flow (likely a response to a question) - stay in current flow
         console.log(
-          "Ã°Å¸â€œÂ Short response in active flow, staying in:",
+          "Short response in active flow, staying in:",
           activeFlowRef.current,
         );
         targetFlow = activeFlowRef.current;
       } else {
-        // Run classification for every new query when auto-routing is enabled
-        console.log("Ã°Å¸â€œÂ Running classification...");
+        console.log("Running classification...");
         try {
-          // Deterministic lexical override: if the normalized tokens contain
-          // the token 'leave' (or 'leaves') AND at least one explicit
-          // approval token, force the leave_approval flow and skip the
-          // classifier. This prevents STT artifacts from misrouting.
           const normalized = userMessage
             .toLowerCase()
             .replace(/[^a-z0-9\s]/g, " ")
@@ -938,12 +900,9 @@ export function useChatbot({
 
           if (hasLeaveToken && hasApprovalToken) {
             console.log(
-              "Ã°Å¸â€œÂ Lexical override: forcing leave_approval based on tokens",
+              "Lexical override: forcing leave_approval based on tokens",
               { tokens },
             );
-            // Mark classificationResult so downstream logic treats this as a
-            // detected/new flow (same shape as classifier result). We set a
-            // high confidence to avoid low-confidence overrides later.
             classificationResult = {
               flow: "leave_approval",
               confidence: 1,
@@ -951,56 +910,45 @@ export function useChatbot({
             targetFlow = "leave_approval" as FlowType;
           } else {
             classificationResult = await classifyQuery(userMessage);
-            console.log("Ã¢Å“â€¦ Classification complete:", classificationResult);
+            console.log("Classification complete:", classificationResult);
             targetFlow = classificationResult.flow as FlowType;
           }
 
-          // Map backend flow names to frontend flow types
           if (targetFlow === ("assignment_create" as any)) {
             targetFlow = "assignment";
           } else if (targetFlow === ("assignment_submit" as any)) {
-            targetFlow = "assignment"; // For now, both map to same flow
+            targetFlow = "assignment";
           }
         } catch (error) {
-          console.error("Ã¢ÂÅ’ Classification error:", error);
-          targetFlow = "query"; // Fallback to query on error
-        }
-      }
-
-      console.log("Ã°Å¸â€œÂ Target flow determined:", targetFlow);
-
-      // Update UI to show detected flow
-      setDetectedFlow(targetFlow);
-
-      // Only update confidence if we actually ran classification
-      if (classificationResult) {
-        setClassificationConfidence(classificationResult.confidence);
-
-        // Low confidence warning (but still proceed)
-        if (classificationResult.confidence < 0.25) {
-          console.warn("Ã¢Å¡Â Ã¯Â¸Â Low classification confidence, defaulting to query");
+          console.error("Classification error:", error);
           targetFlow = "query";
         }
       }
 
-      // Set userOptionSelected to true when auto-routing detects a flow
+      console.log("Target flow determined:", targetFlow);
+      setDetectedFlow(targetFlow);
+
+      if (classificationResult) {
+        setClassificationConfidence(classificationResult.confidence);
+
+        if (classificationResult.confidence < 0.25) {
+          console.warn("Low classification confidence, defaulting to query");
+          targetFlow = "query";
+        }
+      }
+
       setUserOptionSelected(true);
 
-      // IMPORTANT: Initialize flow state when detected (same as manual mode)
       if (
         targetFlow === "attendance" ||
         targetFlow === "voice_attendance" ||
         targetFlow === "full_voice_attendance"
       ) {
-        console.log("Ã°Å¸â€œÂ Initializing unified attendance flow state");
+        console.log("Initializing unified attendance flow state");
         setAttendanceStep("class_info");
         setPendingClassInfo(null);
-        // Initialize unified attendance flow state
         setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
 
-        // If this Attendance request was initiated via microphone,
-        // mark that the attendance flow was voice-initiated so the
-        // subsequent responses can also trigger TTS.
         try {
           if (
             isVoiceTriggeredRequestRef.current === true &&
@@ -1013,15 +961,8 @@ export function useChatbot({
         } catch (ttsErr) {
           console.error("TTS initialization failed:", ttsErr);
         }
-
-        // Don't show welcome message here - let the backend response handle it
-        // The backend will either auto-fetch class info or ask for it
       }
 
-      // Always treat as new flow initialization if last flow was exited (activeFlow is none),
-      // Only treat as new flow initialization if last flow was exited (activeFlow is none),
-      // Only treat as new flow initialization if last flow was exited (activeFlow is none or query),
-      // or if flow type changes (from a different flow to this one)
       const isNewFlowInitialization =
         (classificationResult &&
           (activeFlow === "none" || activeFlow === "query") &&
@@ -1033,12 +974,8 @@ export function useChatbot({
           activeFlow !== "query" &&
           targetFlow !== activeFlow);
 
-      // Initialize assignment flow
       if (targetFlow === "assignment" && isNewFlowInitialization) {
-        console.log("Ã°Å¸â€œÂ Initializing assignment flow state");
-        console.log("Ã°Å¸â€œÂ Setting activeFlow to 'assignment'");
-
-        // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
+        console.log("Initializing assignment flow state");
         activeFlowRef.current = "assignment";
         setActiveFlow("assignment");
         setAttendanceData([]);
@@ -1051,7 +988,6 @@ export function useChatbot({
         setLeaveApprovalRequests([]);
         setLoadingLeaveRequests(false);
         setRejectReason({});
-        // Do not switch to push-to-talk if user started this flow by voice (full voice mode stays on)
         if (!isVoiceTriggeredRequestRef.current) {
           setFullVoiceMode(false);
           setIsVoiceActive(false);
@@ -1062,14 +998,11 @@ export function useChatbot({
         setDetectedFlow(null);
         setRouterMode("llm");
         setAutoRouting(true);
-        console.log("Ã°Å¸â€œÂ Processing first assignment message");
+        console.log("Processing first assignment message");
       }
 
-      // Initialize leave flow
       if (targetFlow === "leave" && isNewFlowInitialization) {
-        console.log("Ã°Å¸â€œÂ Initializing leave flow state");
-
-        // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
+        console.log("Initializing leave flow state");
         activeFlowRef.current = "leave";
         setActiveFlow("leave");
         setAttendanceData([]);
@@ -1082,7 +1015,6 @@ export function useChatbot({
         setLeaveApprovalRequests([]);
         setLoadingLeaveRequests(false);
         setRejectReason({});
-        // Do not switch to push-to-talk if user started this flow by voice (full voice mode stays on)
         if (!isVoiceTriggeredRequestRef.current) {
           setFullVoiceMode(false);
           setIsVoiceActive(false);
@@ -1093,24 +1025,19 @@ export function useChatbot({
         setDetectedFlow(null);
         setRouterMode("llm");
         setAutoRouting(true);
-        // If this leave flow was started by voice, mark it so TTS plays for all leave responses
         if (isVoiceTriggeredRequestRef.current === true) {
           leaveVoiceInitiatedRef.current = true;
           console.log(
-            "Ã°Å¸Å½Â¤ Leave flow voice-initiated: TTS will play for leave responses",
+            "Leave flow voice-initiated: TTS will play for leave responses",
           );
         }
-        // Consume trigger so it doesn't leak to later requests
         isVoiceTriggeredRequestRef.current = false;
-        // Don't return - let the flow continue to make the API call.
-        // The backend leave agent will return the initial prompt (Step 1: Half Day / Full Day / Long Leave).
-        console.log("Ã°Å¸â€œÂ Leave flow initialized, continuing to API call...");
+        console.log("Leave flow initialized, continuing to API call...");
       }
     } else {
-      console.log("Ã°Å¸â€œÂ Using current activeFlow:", activeFlow);
+      console.log("Using current activeFlow:", activeFlow);
     }
 
-    // If still no flow selected after classification, prompt user
     if (!userOptionSelected && targetFlow === "none") {
       const promptText =
         "Please select an option from the menu, or I'll try to detect what you need automatically. Try asking something like 'Mark attendance for class 6A' or 'Apply for leave tomorrow'.";
@@ -1126,39 +1053,33 @@ export function useChatbot({
       return;
     }
 
-    console.log("Ã°Å¸â€œÂ Routing to flow:", targetFlow);
-    console.log("Ã°Å¸â€œÂ Current attendance step:", attendanceStep);
-    console.log("Ã°Å¸â€œÂ Pending class info:", pendingClassInfo);
+    console.log("Routing to flow:", targetFlow);
+    console.log("Current attendance step:", attendanceStep);
+    console.log("Pending class info:", pendingClassInfo);
 
-    // Update active flow for next message (unless manually overridden)
     if (autoRouting) {
       activeFlowRef.current = targetFlow;
       setActiveFlow(targetFlow);
     }
 
-    // If we're already in attendance flow at student_details step, stay there
-    // Don't reset to class_info when user is providing student attendance data
     if (
       targetFlow === "attendance" &&
       attendanceStep === "student_details" &&
       pendingClassInfo
     ) {
-      console.log("Ã°Å¸â€œÂ Continuing attendance at student_details step");
-      // Keep the current step - don't reset
+      console.log("Continuing attendance at student_details step");
     }
 
     if (targetFlow === "query") {
-      // Query handler API
+      let answerForTts = "";
       try {
         const data = await aiAPI.queryHandler({
           user_id: userId,
           user_roles: roles,
           query: userMessage,
         });
-        let answerForTts = "";
         if (data.status === "success" && data.data) {
-          const answer = data.data?.answer ?? "";
-          answerForTts = answer;
+          answerForTts = data.data?.answer ?? "";
           setChatHistory((prev) => [
             ...prev,
             {
@@ -1166,10 +1087,9 @@ export function useChatbot({
               answer: data.data?.answer,
               references: data.data?.references,
               mongodbquery: data.data?.mongodbquery,
-              activeTab: "answer", // Set initial active tab
+              activeTab: "answer",
             },
           ]);
-          // Ã¢Â­Â NEW: Check for exit response
           if (isExitResponse(data.data)) {
             handleFrontendExit();
           } else if ((data.data as any)?.flow_name) {
@@ -1181,7 +1101,6 @@ export function useChatbot({
             ...prev,
             { type: "bot", text: data.message },
           ]);
-          // Ã¢Â­Â NEW: Check for exit response
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
@@ -1191,23 +1110,25 @@ export function useChatbot({
             ...prev,
             { type: "bot", text: "No response from AI." },
           ]);
-          // Ã¢Â­Â NEW: Check for exit response
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
+        }
+        try {
+          if (isVoiceTriggeredRequestRef.current === true && answerForTts) {
+            void handlePlayTTS(-1, generateQueryTTSSummary(answerForTts), true);
+          }
+        } catch (ttsErr) {
+          console.error("Query TTS playback failed:", ttsErr);
         }
       } catch (err) {
         const errorMessage = "Sorry, there was an error processing your query.";
         setChatHistory((prev) => [
           ...prev,
-          {
-            type: "bot",
-            text: errorMessage,
-          },
+          { type: "bot", text: errorMessage },
         ]);
         try {
           if (isVoiceTriggeredRequestRef.current === true) {
-            // Treat query error as QUERY flow for TTS
             void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage), true);
           }
         } catch (ttsErr) {
@@ -1221,8 +1142,6 @@ export function useChatbot({
       targetFlow === "voice_attendance" ||
       targetFlow === "full_voice_attendance"
     ) {
-      // ============= UNIFIED ATTENDANCE FLOW =============
-      // Handles text, voice, and image-based attendance in a single unified flow
       try {
         await handleAttendanceChat({
           userMessage,
@@ -1249,8 +1168,12 @@ export function useChatbot({
         setIsProcessing(false);
       }
     } else if (targetFlow === "leave") {
-      const leaveMessageViaVoice = isVoiceTriggeredRequestRef.current === true;
-      if (leaveMessageViaVoice) {
+      let leaveMessageViaVoice = false;
+      if (
+        isVoiceTriggeredRequestRef.current === true ||
+        leaveVoiceInitiatedRef.current === true
+      ) {
+        leaveMessageViaVoice = true;
         leaveVoiceInitiatedRef.current = true;
         isVoiceTriggeredRequestRef.current = false;
       }
@@ -1261,9 +1184,12 @@ export function useChatbot({
         isVoiceTriggered: leaveMessageViaVoice,
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
-        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlow: () => {
+          suppressNextTTS = true;
+          handleFlowExit({ newSession: false });
+        },
         setProcessing: setIsProcessing,
-        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        playTTS: (idx, text, onEnd) => handlePlayTTS(idx, text, false, onEnd),
         setActiveFlow: (flow: string) => setActiveFlow(flow as FlowType),
       });
     } else if (targetFlow === "assignment") {
@@ -1280,8 +1206,6 @@ export function useChatbot({
         getTTSSummary: generateQueryTTSSummary,
       });
     } else if (targetFlow === "course_progress") {
-      // Course progress flow - fully backend-driven
-      // Send user message to backend and render the response
       try {
         const authToken = localStorage.getItem("token");
         const { academic_session, branch_token } = getErpContext();
@@ -1301,13 +1225,11 @@ export function useChatbot({
               response.data.answer || "How can I help with course progress?",
           };
 
-          // If backend returns course progress data, include it for rendering
           if (response.data.course_progress) {
             botMessage.courseProgress = response.data.course_progress;
             botMessage.classSection = response.data.class_section;
           }
 
-          // If backend returns class sections list, include it for rendering
           if (
             response.data.class_sections &&
             response.data.class_sections.length > 0
@@ -1317,7 +1239,6 @@ export function useChatbot({
 
           setChatHistory((prev) => [...prev, botMessage]);
 
-          // Play TTS if voice-initiated
           if (
             isVoiceTriggeredRequestRef.current === true &&
             response.data.tts_text
@@ -1345,15 +1266,13 @@ export function useChatbot({
           ...prev,
           {
             type: "bot",
-            text: `Ã¢ÂÅ’ Error: ${err.message || "Unknown error occurred"}`,
+            text: `Error: ${err.message || "Unknown error occurred"}`,
           },
         ]);
       } finally {
         setIsProcessing(false);
       }
     } else if (targetFlow === "leave_approval") {
-      // Leave approval flow - only fetch if we don't have requests already
-      // The fetch should happen when flow is activated from dropdown, not on every message
       if (leaveApprovalRequests.length === 0 && !loadingLeaveRequests) {
         try {
           setLoadingLeaveRequests(true);
@@ -1375,14 +1294,11 @@ export function useChatbot({
               ...prev,
               {
                 type: "bot",
-                answer: `Ã°Å¸â€œâ€¹ **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- Ã¢Å“â€¦ **Approve** - Click the green "Approve" button\n- Ã¢ÂÅ’ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                answer: `📋 **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
                 activeTab: "answer" as const,
               },
             ]);
 
-            // TTS: voice-only, strictly gated. Do NOT speak when input was typed
-            // or for any other flow. This uses the request-scoped ref that is set
-            // only when the microphone-based submission finalizes.
             try {
               if (
                 isVoiceTriggeredRequestRef.current === true &&
@@ -1391,14 +1307,12 @@ export function useChatbot({
                 const count = (response.data.leaveRequests || []).length || 0;
                 let speech = "";
                 if (count > 0) {
-                  speech = `Ã°Å¸â€œâ€¹ Leave Approval Dashboard. Found ${count} pending leave request${
+                  speech = `Leave Approval Dashboard. Found ${count} pending leave request${
                     count === 1 ? "" : "s"
-                  } for your approval. Please review each request below and take action by either: Ã¢Å“â€¦ Approve - Click the green \"Approve\" button. Ã¢ÂÅ’ Reject - Enter a rejection reason and click the red \"Reject\" button`;
+                  } for your approval. Please review each request and take action.`;
                 } else {
-                  speech = `Leave Approval Dashboard. Found 0 pending leave request(s) for your approval.`;
+                  speech = `Leave Approval Dashboard. Found 0 pending leave requests for your approval.`;
                 }
-
-                // Use the component's TTS helper to play speech. Pass a non-disruptive index.
                 void handlePlayTTS(-1, speech);
               }
             } catch (ttsErr) {
@@ -1409,7 +1323,7 @@ export function useChatbot({
               ...prev,
               {
                 type: "bot",
-                answer: `Ã¢Å“â€¦ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
                 activeTab: "answer" as const,
               },
             ]);
@@ -1424,7 +1338,7 @@ export function useChatbot({
             ...prev,
             {
               type: "bot",
-              text: `Ã¢ÂÅ’ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+              text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
             },
           ]);
         } finally {
@@ -1432,7 +1346,6 @@ export function useChatbot({
           setIsProcessing(false);
         }
       } else {
-        // If requests are already loaded, just acknowledge the message
         setChatHistory((prev) => [
           ...prev,
           {
@@ -1445,31 +1358,29 @@ export function useChatbot({
     }
   };
 
-  // TTS playback function - supports interruption in Full Voice Mode
-  // Uses request ID to ensure only the latest TTS request plays
-  // `isQuery` marks whether this is a query-flow TTS (true) or an
-  // action-flow / system message TTS (false). Backend uses this flag
-  // to decide whether to generate a summarized TTS or speak raw text.
   const handlePlayTTS = async (
     idx: number,
     text: string,
     _isQuery: boolean = false,
+    onEnd?: () => void,
   ) => {
-    // Interrupt any currently playing TTS before starting new one
+    if (suppressNextTTS) {
+      suppressNextTTS = false;
+      if (onEnd) onEnd();
+      return;
+    }
     interruptTTS();
 
-    // Increment request ID - this marks any previous in-flight requests as stale
     ttsRequestIdRef.current += 1;
     const thisRequestId = ttsRequestIdRef.current;
 
     console.log(
-      `Ã°Å¸â€Å  TTS Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`,
+      `TTS Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`,
     );
 
     setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
-      // Generate unique ID to prevent backend cache from returning wrong audio
       const uniqueId = `tts_${Date.now()}_${thisRequestId}`;
       const reader = await aiAPI.textToSpeech({
         text,
@@ -1477,10 +1388,9 @@ export function useChatbot({
         skip_insight: true,
       });
 
-      // Check if this request is still the latest (not cancelled by a newer request)
       if (ttsRequestIdRef.current !== thisRequestId) {
         console.log(
-          `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`,
+          `TTS Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`,
         );
         setTtsLoading(null);
         return;
@@ -1494,21 +1404,17 @@ export function useChatbot({
         if (value) audioChunks.push(value);
         done = streamDone;
 
-        // Check again during streaming if request is still valid
         if (ttsRequestIdRef.current !== thisRequestId) {
           console.log(
-            `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled during streaming`,
+            `TTS Request #${thisRequestId} cancelled during streaming`,
           );
           setTtsLoading(null);
           return;
         }
       }
 
-      // Final check before creating audio
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(
-          `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled before playback`,
-        );
+        console.log(`TTS Request #${thisRequestId} cancelled before playback`);
         setTtsLoading(null);
         return;
       }
@@ -1519,14 +1425,11 @@ export function useChatbot({
       audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
-      // Store URL and request ID on audio element for cleanup
       (audio as any)._ttsUrl = audioUrl;
       (audio as any)._requestId = thisRequestId;
 
-      // Store audio reference for interruption
       currentTTSAudioRef.current = audio;
 
-      // Handle cleanup when audio ends naturally
       audio.onended = () => {
         if (currentTTSAudioRef.current === audio) {
           currentTTSAudioRef.current = null;
@@ -1537,9 +1440,9 @@ export function useChatbot({
           (audio as any)._ttsUrl = null;
         }
         setTtsLoading(null);
+        if (onEnd) onEnd();
       };
 
-      // Handle errors during playback
       audio.onerror = (error) => {
         console.error("TTS audio error:", error);
         if (currentTTSAudioRef.current === audio) {
@@ -1553,18 +1456,16 @@ export function useChatbot({
         setTtsLoading(null);
       };
 
-      // Final check right before playing
       if (ttsRequestIdRef.current !== thisRequestId) {
         console.log(
-          `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled right before play`,
+          `TTS Request #${thisRequestId} cancelled right before play`,
         );
         URL.revokeObjectURL(audioUrl);
         setTtsLoading(null);
         return;
       }
 
-      // Play audio and handle play promise rejection
-      console.log(`Ã°Å¸â€Å  TTS Request #${thisRequestId} playing`);
+      console.log(`TTS Request #${thisRequestId} playing`);
       try {
         await audio.play();
       } catch (playError) {
@@ -1584,14 +1485,12 @@ export function useChatbot({
       }
       currentTTSAudioRef.current = null;
       setTtsLoading(null);
-      // Don't show alert for cancelled requests
       if (ttsRequestIdRef.current === thisRequestId) {
         console.error("Failed to play audio:", err);
       }
     }
   };
 
-  // Feedback handler: update feedback in chatHistory for the correct bot message
   const handleSendFeedback = async (
     idx: number,
     type: "Approved" | "Rejected",
@@ -1624,9 +1523,6 @@ export function useChatbot({
     }
   };
 
-  // Removed unused inline editing functions - using main approval buttons instead
-
-  // ============= UNIFIED ATTENDANCE FLOW CALLBACKS =============
   const getAttendanceFlowCallbacks = (): AttendanceFlowCallbacks => ({
     appendBotMessage: (msg) => {
       setChatHistory((prev) => [...prev, { ...msg, type: "bot" }]);
@@ -1648,8 +1544,8 @@ export function useChatbot({
     getAttendanceState: () => attendanceFlowState,
     setGlobalAttendanceData: (data) => setAttendanceData(data),
     setGlobalClassInfo: (info) => setClassInfo(info),
-    getGlobalAttendanceData: () => attendanceDataRef.current, // Use ref for current value in closures
-    getGlobalClassInfo: () => classInfoRef.current, // Use ref for current value in closures
+    getGlobalAttendanceData: () => attendanceDataRef.current,
+    getGlobalClassInfo: () => classInfoRef.current,
     setEditingMessageIndex: (index) => setEditingMessageIndex(index),
     getChatHistoryLength: () => chatHistory.length,
     exitFlow: () => handleFlowExit({ newSession: false }),
@@ -1680,7 +1576,6 @@ export function useChatbot({
     setAttendanceData(updatedData);
   };
 
-  // Handle class info modal confirmation Ã¢â‚¬â€ delegates to unified attendance flow
   const handleClassInfoConfirm = async (classInfo: {
     class_: string;
     section: string;
@@ -1710,7 +1605,6 @@ export function useChatbot({
     setPendingImageFile(null);
   };
 
-  // Unified attendance data manager
   const getAttendanceDataForApproval = (
     messageIndex?: number,
     fallbackAttendanceData?: any[],
@@ -1726,7 +1620,6 @@ export function useChatbot({
     console.log("Global classInfo:", classInfo);
     console.log("editingMessageIndex:", editingMessageIndex);
 
-    // Debug: Show all messages in chat history
     console.log("=== CHAT HISTORY DEBUG ===");
     chatHistory.forEach((msg, idx) => {
       console.log(`Message ${idx}:`, {
@@ -1739,7 +1632,6 @@ export function useChatbot({
       });
     });
 
-    // Priority 0: If messageIndex is provided, check that specific message FIRST (highest priority for saved/edited data)
     if (
       messageIndex !== undefined &&
       messageIndex >= 0 &&
@@ -1747,7 +1639,7 @@ export function useChatbot({
     ) {
       const targetMessage = chatHistory[messageIndex];
       console.log(
-        `Ã°Å¸â€Â Priority 0: Checking provided message index ${messageIndex} first (highest priority for saved/edited data):`,
+        `Priority 0: Checking provided message index ${messageIndex} first:`,
         {
           type: targetMessage?.type,
           hasAttendanceSummary: !!targetMessage?.attendance_summary,
@@ -1763,7 +1655,7 @@ export function useChatbot({
         targetMessage.attendance_summary.length > 0
       ) {
         console.log(
-          `Ã¢Å“â€¦ Priority 0: Found attendance data in provided message index ${messageIndex} (saved/edited data):`,
+          `Priority 0: Found attendance data in provided message index ${messageIndex}:`,
           targetMessage.attendance_summary.length,
           "records",
         );
@@ -1775,9 +1667,8 @@ export function useChatbot({
       }
     }
 
-    // Priority 1: If we're currently editing, use the global state (edited data)
     if (editingMessageIndex !== null && attendanceData.length > 0) {
-      console.log("Ã¢Å“â€¦ Priority 1: Using edited data from global state");
+      console.log("Priority 1: Using edited data from global state");
       return {
         attendanceData: attendanceData,
         classInfo: classInfo,
@@ -1785,12 +1676,10 @@ export function useChatbot({
       };
     }
 
-    // Priority 2: Search chat history from most recent to oldest for messages with attendance_summary
     console.log(
-      "Ã°Å¸â€Â Priority 2: Searching for attendance data in chat history (from most recent)...",
+      "Priority 2: Searching for attendance data in chat history (from most recent)...",
     );
     for (let i = chatHistory.length - 1; i >= 0; i--) {
-      // Skip the message at messageIndex if it was already checked in Priority 0
       if (messageIndex !== undefined && i === messageIndex) {
         continue;
       }
@@ -1811,7 +1700,7 @@ export function useChatbot({
         msg.attendance_summary.length > 0
       ) {
         console.log(
-          `Ã¢Å“â€¦ Priority 2: Found attendance data in message ${i}:`,
+          `Priority 2: Found attendance data in message ${i}:`,
           msg.attendance_summary.length,
           "records",
         );
@@ -1823,10 +1712,8 @@ export function useChatbot({
       }
     }
 
-    // Priority 3: Try to find any message with buttons (attendance message)
-    console.log("Ã°Å¸â€Â Priority 3: Searching for messages with buttons...");
+    console.log("Priority 3: Searching for messages with buttons...");
     for (let i = chatHistory.length - 1; i >= 0; i--) {
-      // Skip the message at messageIndex if it was already checked in Priority 0
       if (messageIndex !== undefined && i === messageIndex) {
         continue;
       }
@@ -1841,10 +1728,9 @@ export function useChatbot({
           `Found message with buttons at index ${i}:`,
           (msg as any).buttons,
         );
-        // Try to get data from this message or use global state
         if (msg.attendance_summary && msg.attendance_summary.length > 0) {
           console.log(
-            `Ã¢Å“â€¦ Priority 3: Using attendance data from button message ${i}:`,
+            `Priority 3: Using attendance data from button message ${i}:`,
             msg.attendance_summary.length,
             "records",
           );
@@ -1855,7 +1741,7 @@ export function useChatbot({
           };
         } else if (attendanceData.length > 0) {
           console.log(
-            `Ã¢Å“â€¦ Priority 3: Using global state for button message ${i}:`,
+            `Priority 3: Using global state for button message ${i}:`,
             attendanceData.length,
             "records",
           );
@@ -1868,9 +1754,8 @@ export function useChatbot({
       }
     }
 
-    // Priority 4: Use global state as fallback (if not editing)
     if (attendanceData.length > 0) {
-      console.log("Ã¢Å“â€¦ Priority 4: Using global state as fallback");
+      console.log("Priority 4: Using global state as fallback");
       return {
         attendanceData: attendanceData,
         classInfo: classInfo || fallbackClassInfo,
@@ -1878,10 +1763,9 @@ export function useChatbot({
       };
     }
 
-    // Priority 5: Use fallbackAttendanceData and fallbackClassInfo if provided (captured from button closure)
     if (fallbackAttendanceData && fallbackAttendanceData.length > 0) {
       console.log(
-        "Ã¢Å“â€¦ Priority 5: Using fallback attendance data (captured from button closure):",
+        "Priority 5: Using fallback attendance data:",
         fallbackAttendanceData.length,
         "records",
       );
@@ -1892,7 +1776,6 @@ export function useChatbot({
       };
     }
 
-    // Priority 6: Last resort - try to get data from session storage
     try {
       const sessionAttendanceData = sessionStorage.getItem(
         "pendingAttendanceData",
@@ -1905,7 +1788,7 @@ export function useChatbot({
           ? JSON.parse(sessionClassInfo)
           : null;
 
-        console.log("Ã¢Å“â€¦ Priority 6: Using session storage data:", {
+        console.log("Priority 6: Using session storage data:", {
           attendanceData: parsedAttendanceData.length,
           classInfo: parsedClassInfo,
         });
@@ -1920,11 +1803,10 @@ export function useChatbot({
       console.log("Error reading from session storage:", err);
     }
 
-    console.log("Ã¢ÂÅ’ No attendance data found in any priority");
+    console.log("No attendance data found in any priority");
     return null;
   };
 
-  // Unified attendance approval handler
   const handleUnifiedAttendanceApproval = async (
     messageIndex?: number,
     attendanceType: "text" | "image" | "voice" = "text",
@@ -1932,10 +1814,10 @@ export function useChatbot({
     fallbackClassInfo?: any,
   ) => {
     console.log(
-      `Ã°Å¸Å¡â‚¬ ${attendanceType.toUpperCase()} Attendance Approval clicked for message:`,
+      `${attendanceType.toUpperCase()} Attendance Approval clicked for message:`,
       messageIndex,
     );
-    console.log(`Ã°Å¸Å¡â‚¬ Current global state:`, {
+    console.log(`Current global state:`, {
       attendanceData: attendanceData,
       attendanceDataLength: attendanceData.length,
       classInfo: classInfo,
@@ -1945,34 +1827,32 @@ export function useChatbot({
       fallbackClassInfo: fallbackClassInfo,
     });
 
-    // Add loading state to prevent multiple clicks
     setChatHistory((prev) => [
       ...prev,
       {
         type: "bot",
-        text: `Ã¢ÂÂ³ Processing ${attendanceType} attendance approval...`,
+        text: `⏳ Processing ${attendanceType} attendance approval...`,
       },
     ]);
 
     try {
-      // Get attendance data using unified method with fallback data
       const dataToSave = getAttendanceDataForApproval(
         messageIndex,
         fallbackAttendanceData,
         fallbackClassInfo,
       );
 
-      console.log(`Ã°Å¸Å¡â‚¬ Data to save result:`, dataToSave);
+      console.log(`Data to save result:`, dataToSave);
 
       if (!dataToSave) {
         console.error(
-          `Ã¢ÂÅ’ No attendance data found for ${attendanceType} approval`,
+          `No attendance data found for ${attendanceType} approval`,
         );
         setChatHistory((prev) => [
           ...prev,
           {
             type: "bot",
-            text: `Ã¢ÂÅ’ No attendance data found. Please try ${
+            text: `❌ No attendance data found. Please try ${
               attendanceType === "text" ? "entering" : "uploading"
             } the attendance information again.`,
           },
@@ -1988,25 +1868,24 @@ export function useChatbot({
       });
 
       console.log(
-        `Ã°Å¸Å½Â¯ Date being sent to backend: '${dataToSave.classInfo?.date}'`,
+        `Date being sent to backend: '${dataToSave.classInfo?.date}'`,
       );
 
-      // Send approval message to backend with the current data
       const data = await aiAPI.chat({
         session_id: sessionId || userId,
         query: `approve_attendance: ${JSON.stringify({
           attendance_summary: dataToSave.attendanceData,
           class_info: dataToSave.classInfo,
-        })}`, // Send the current attendance data
-        user_id: userId, // Pass user_id for context
+        })}`,
+        user_id: userId,
       });
+
       if (data.status === "success") {
-        // Remove the loading message and show success message
         setChatHistory((prev) => {
           const filtered = prev.filter(
-            (msg) => !(msg.text && msg.text.includes("Ã¢ÂÂ³ Processing")),
+            (msg) => !(msg.text && msg.text.includes("⏳ Processing")),
           );
-          const successMessage = `Ã¢Å“â€¦ ${
+          const successMessage = `✅ ${
             attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
           } attendance saved successfully! ${
             data.data?.message || "Data has been saved to MongoDB."
@@ -2021,26 +1900,22 @@ export function useChatbot({
           ];
         });
 
-        // TTS for success message if voice-initiated
         try {
           if (attendanceVoiceInitiatedRef.current === true) {
             const speech = generateAttendanceTTSSummary(
               "Attendance marked successfully",
             );
             void handlePlayTTS(-1, speech);
-            // Clear the ref after successful completion
             attendanceVoiceInitiatedRef.current = false;
           }
         } catch (ttsErr) {
           console.error("TTS playback failed:", ttsErr);
         }
 
-        // Clear the editing state
         setEditingMessageIndex(null);
         setAttendanceData([]);
         setClassInfo(null);
 
-        // Return to LLM routing after completion; use centralized exit to clear state + TTS
         setTimeout(() => {
           handleFlowExit({ newSession: false });
           setChatHistory((prev) => [
@@ -2056,23 +1931,14 @@ export function useChatbot({
       }
     } catch (err) {
       console.error(`Error saving ${attendanceType} attendance:`, err);
-      const errorMessage = `Ã¢ÂÅ’ Failed to save ${attendanceType} attendance: ${
-        (err as Error).message
-      }`;
+      const errorMessage = `❌ Failed to save ${attendanceType} attendance: ${(err as Error).message}`;
       setChatHistory((prev) => {
         const filtered = prev.filter(
-          (msg) => !(msg.text && msg.text.includes("Ã¢ÂÂ³ Processing")),
+          (msg) => !(msg.text && msg.text.includes("⏳ Processing")),
         );
-        return [
-          ...filtered,
-          {
-            type: "bot",
-            text: errorMessage,
-          },
-        ];
+        return [...filtered, { type: "bot", text: errorMessage }];
       });
 
-      // TTS for error message if voice-initiated
       try {
         if (attendanceVoiceInitiatedRef.current === true) {
           const speech = generateAttendanceTTSSummary(errorMessage);
@@ -2084,7 +1950,6 @@ export function useChatbot({
     }
   };
 
-  // Handle text-based attendance approval - save to MongoDB
   // @ts-expect-error - Kept for future use
   const _handleTextAttendanceApproval = async (
     messageIndex: number,
@@ -2099,26 +1964,22 @@ export function useChatbot({
     );
   };
 
-  // Handle text-based attendance rejection - clear data and show options
   const handleTextAttendanceRejection = () => {
     console.log("Text Attendance Rejection clicked");
 
-    // Clear the attendance data
     setAttendanceData([]);
     setClassInfo(null);
     setEditingMessageIndex(null);
 
-    // Show rejection message with options
     setChatHistory((prev) => [
       ...prev,
       {
         type: "bot",
-        text: "Ã¢ÂÅ’ Attendance rejected. You can provide new attendance data or try a different approach.",
+        text: "❌ Attendance rejected. You can provide new attendance data or try a different approach.",
         buttons: [
           {
             label: "Try Again",
             action: () => {
-              // Clear the message and let user type manually
               setChatHistory((prev) => [
                 ...prev,
                 {
@@ -2131,7 +1992,6 @@ export function useChatbot({
           {
             label: "Upload Image",
             action: () => {
-              // Trigger file input click
               const fileInput = document.querySelector(
                 'input[type="file"]',
               ) as HTMLInputElement;
@@ -2145,7 +2005,6 @@ export function useChatbot({
     ]);
   };
 
-  // Handle voice-based attendance approval - save to MongoDB
   // @ts-expect-error - Kept for future use
   const _handleVoiceAttendanceApproval = async (
     messageIndex: number,
@@ -2160,22 +2019,19 @@ export function useChatbot({
     );
   };
 
-  // Handle voice-based attendance rejection - clear data and show options
   // @ts-expect-error - Kept for future use
   const _handleVoiceAttendanceRejection = () => {
     console.log("Voice Attendance Rejection clicked");
 
-    // Clear the attendance data
     setAttendanceData([]);
     setClassInfo(null);
     setEditingMessageIndex(null);
 
-    // Show rejection message with options
     setChatHistory((prev) => [
       ...prev,
       {
         type: "bot",
-        text: "Ã¢ÂÅ’ Voice attendance rejected. You can provide new attendance data via voice or try a different approach.",
+        text: "❌ Voice attendance rejected. You can provide new attendance data via voice or try a different approach.",
         buttons: [
           {
             label: "Try Voice Again",
@@ -2219,7 +2075,6 @@ export function useChatbot({
     ]);
   };
 
-  // Handle save attendance - save edited information and update the table
   const handleSaveAttendance = async (messageIndex: number) => {
     console.log("Save Attendance clicked for message:", messageIndex);
     console.log("Current global attendanceData:", attendanceData);
@@ -2227,7 +2082,6 @@ export function useChatbot({
     console.log("Editing message index:", editingMessageIndex);
 
     try {
-      // Get the current message to check if it has data
       const currentMessage = chatHistory[messageIndex];
       console.log("Current message:", currentMessage);
       console.log(
@@ -2235,7 +2089,6 @@ export function useChatbot({
         currentMessage?.attendance_summary,
       );
 
-      // Use global state if we're editing, otherwise use message data
       const currentAttendanceData =
         attendanceData.length > 0
           ? attendanceData
@@ -2250,15 +2103,13 @@ export function useChatbot({
       });
 
       if (currentAttendanceData && currentAttendanceData.length > 0) {
-        // Update the specific message's attendance_summary with the edited data
         setChatHistory((prev) => {
           const updatedHistory = prev.map((msg, idx) => {
             if (idx === messageIndex && msg.type === "bot") {
               return {
                 ...msg,
-                attendance_summary: [...currentAttendanceData], // Update with edited data
+                attendance_summary: [...currentAttendanceData],
                 class_info: currentClassInfo,
-                // Update the answer text to reflect the changes
                 answer: `Attendance Summary Updated:\n\n| Student Name | Attendance Status |\n|--------------|------------------|\n${currentAttendanceData
                   .map(
                     (item) =>
@@ -2274,11 +2125,9 @@ export function useChatbot({
           return updatedHistory;
         });
 
-        // Update global state with the edited data so it's available for approval
         setAttendanceData([...currentAttendanceData]);
         setClassInfo(currentClassInfo);
 
-        // Store in session storage for persistence
         sessionStorage.setItem(
           "pendingAttendanceData",
           JSON.stringify(currentAttendanceData),
@@ -2288,11 +2137,8 @@ export function useChatbot({
           JSON.stringify(currentClassInfo),
         );
 
-        // Exit edit mode AFTER updating global state
-        // This ensures that when user clicks Approve, Priority 1.5 will use the updated global state
         setEditingMessageIndex(null);
 
-        // Clear the isBeingEdited flag from the message
         setChatHistory((prev) => {
           const updatedHistory = [...prev];
           if (
@@ -2308,24 +2154,20 @@ export function useChatbot({
           return updatedHistory;
         });
 
-        // Capture the edited data at the time of save to pass to approval button
-        // This ensures the button closure has the most current edited data
         const capturedSavedAttendanceData = [...currentAttendanceData];
         const capturedSavedClassInfo = currentClassInfo
           ? { ...currentClassInfo }
           : null;
 
-        // Show success message with updated buttons (no Save button since we're now in read-only mode)
         setChatHistory((prev) => [
           ...prev,
           {
             type: "bot",
-            text: `Ã¢Å“â€¦ Attendance data saved successfully! The table has been updated with your changes. Current data: ${currentAttendanceData.length} students recorded. You can now review the final attendance summary before approving.`,
+            text: `✅ Attendance data saved successfully! The table has been updated with your changes. Current data: ${currentAttendanceData.length} students recorded. You can now review the final attendance summary before approving.`,
             buttons: [
               {
                 label: "Edit Attendance",
                 action: () => {
-                  // Use the captured data or load from the message
                   setChatHistory((prev) => {
                     const updatedHistory = [...prev];
                     const message = updatedHistory[messageIndex];
@@ -2334,12 +2176,10 @@ export function useChatbot({
                       message.type === "bot" &&
                       message.attendance_summary
                     ) {
-                      // Load the updated data from the message back into global state for editing
                       setAttendanceData(message.attendance_summary);
                       setClassInfo(message.class_info);
                       setEditingMessageIndex(messageIndex);
 
-                      // Mark message as being edited
                       if (updatedHistory[messageIndex]) {
                         (updatedHistory[messageIndex] as any).isBeingEdited =
                           true;
@@ -2349,12 +2189,11 @@ export function useChatbot({
                     return prev;
                   });
 
-                  // Add edit mode message
                   setChatHistory((prev) => [
                     ...prev,
                     {
                       type: "bot",
-                      text: "Ã¢Å“â€¦ Edit mode activated! You can now modify the attendance data.",
+                      text: "✅ Edit mode activated! You can now modify the attendance data.",
                     },
                   ]);
                 },
@@ -2363,7 +2202,7 @@ export function useChatbot({
                 label: "Approve",
                 action: () => {
                   console.log(
-                    "Ã¢Å“â€¦ Approve button clicked after save - using captured data:",
+                    "Approve button clicked after save - using captured data:",
                     {
                       capturedSavedAttendanceData:
                         capturedSavedAttendanceData.length,
@@ -2372,11 +2211,8 @@ export function useChatbot({
                     },
                   );
 
-                  // Determine attendance type based on the source (default to text)
                   let attendanceType: "text" | "image" | "voice" = "text";
 
-                  // Pass the captured edited data as fallback parameters
-                  // This ensures the edited data is used even if chatHistory hasn't updated yet
                   handleUnifiedAttendanceApproval(
                     messageIndex,
                     attendanceType,
@@ -2399,7 +2235,7 @@ export function useChatbot({
           ...prev,
           {
             type: "bot",
-            text: 'âŒ No attendance data to save. Please click "Edit Attendance" first to load the data, then make your changes and save again.',
+            text: '❌ No attendance data to save. Please click "Edit Attendance" first to load the data, then make your changes and save again.',
           },
         ]);
       }
@@ -2409,13 +2245,12 @@ export function useChatbot({
         ...prev,
         {
           type: "bot",
-          text: `âŒ Failed to save attendance: ${(err as Error).message}`,
+          text: `❌ Failed to save attendance: ${(err as Error).message}`,
         },
       ]);
     }
   };
 
-  // Scroll chat to bottom on new message
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const correctionBoxRef = useRef<HTMLDivElement | null>(null);
@@ -2426,7 +2261,6 @@ export function useChatbot({
     }
   }, [chatHistory]);
 
-  // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -2452,7 +2286,6 @@ export function useChatbot({
     };
   }, [isMenuOpen]);
 
-  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) {
@@ -2461,18 +2294,11 @@ export function useChatbot({
     };
   }, []);
 
-  // Close correction box when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-
-      // Check if click is inside a correction box
       const isInsideCorrectionBox = target.closest(".correction-box");
-
-      // Check if click is on any action button (to allow toggling)
       const isActionButton = target.closest(".bot-action-btn");
-
-      // If click is outside correction box and not on an action button, close it
       if (
         showCorrectionBox !== null &&
         !isInsideCorrectionBox &&
@@ -2517,9 +2343,11 @@ export function useChatbot({
     userId,
     activeFlowRef,
     setIsProcessing,
-    setLeaveApprovalRequests,
-    setRejectReason,
     setLoadingLeaveRequests,
+    loadingLeaveRequests,
+    rejectReason,
+    setRejectReason,
+    setLeaveApprovalRequests,
     devices,
     selectedDeviceId,
     setSelectedDeviceId,
@@ -2550,10 +2378,6 @@ export function useChatbot({
     handleUnifiedAttendanceApproval,
     handleTextAttendanceRejection,
     leaveApprovalRequests,
-    setLeaveApprovalRequests,
-    loadingLeaveRequests,
-    rejectReason,
-    setRejectReason,
     inputText,
     setInputText,
     isRecording,
