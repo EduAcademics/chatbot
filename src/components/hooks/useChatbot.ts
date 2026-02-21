@@ -398,23 +398,30 @@ export function useChatbot({
   // Called from BOTH manual text and voice paths when an exit keyword is detected.
   // Generates a new session ID synchronously, resets flow state, adds the
   // standard exit message to chat. Does NOT call the backend.
-  const handleExitCommand = useCallback(() => {
-    const newSessionId =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    setSessionId(newSessionId);
-    localStorage.setItem("sessionId", newSessionId);
-    handleFlowExit({ newSession: false });
-    setChatHistory((prev) => [
-      ...prev,
-      {
-        type: "bot",
-        text: "✅ Exited. How can I help you next?",
-      },
-    ]);
-    console.log("Exit handled. New session ID:", newSessionId);
-  }, [handleFlowExit, setChatHistory, setSessionId]);
+  const handleExitCommand = useCallback(
+    (userText?: string) => {
+      if (userText) {
+        setChatHistory((prev) => [...prev, { type: "user", text: userText }]);
+      }
+      setInputText("");
+      const newSessionId =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      setSessionId(newSessionId);
+      localStorage.setItem("sessionId", newSessionId);
+      handleFlowExit({ newSession: false });
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "bot",
+          text: "✅ Exited. How can I help you next?",
+        },
+      ]);
+      console.log("Exit handled. New session ID:", newSessionId);
+    },
+    [handleFlowExit, setChatHistory, setSessionId],
+  );
 
   const startStreaming = async (useFullVoice = false) => {
     activeVoiceButtonRef.current = "audio";
@@ -550,7 +557,7 @@ export function useChatbot({
                   "Exit command detected in voice flow:",
                   activeFlowRef.current,
                 );
-                handleExitCommand();
+                handleExitCommand(finalInput);
                 return;
               }
               // ── END VOICE EXIT CHECK ──────────────────────────────────────
@@ -758,7 +765,7 @@ export function useChatbot({
 
     if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
       console.log("Exit command detected, exiting flow:", activeFlow);
-      handleExitCommand();
+      handleExitCommand(userMessage);
       setIsProcessing(false);
       return;
     }
