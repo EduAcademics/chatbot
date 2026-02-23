@@ -438,6 +438,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                     </div>
                     <div
                       onClick={async () => {
+                        activeFlowRef.current = "leave_approval";
                         setActiveFlow("leave_approval");
                         setUserOptionSelected(true);
                         setIsMenuOpen(false);
@@ -468,7 +469,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                                 ...prev,
                                 {
                                   type: "bot",
-                                  answer: `ðŸ“‹ **Leave Approval Dashboard**\n\nFound **${pendingRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- âœ… **Approve** - Click the green "Approve" button\n- âŒ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                                  answer: `📋 **Leave Approval Dashboard**\n\nFound **${pendingRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
                                   activeTab: "answer" as const,
                                 },
                               ]);
@@ -477,7 +478,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                                 ...prev,
                                 {
                                   type: "bot",
-                                  answer: `âœ… **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                                  answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
                                   activeTab: "answer" as const,
                                 },
                               ]);
@@ -487,7 +488,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                               ...prev,
                               {
                                 type: "bot",
-                                text: `âš ï¸ ${
+                                text: `⚠️ ${
                                   response.message ||
                                   "No pending leave requests found."
                                 }`,
@@ -507,7 +508,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                             ...prev,
                             {
                               type: "bot",
-                              text: `âŒ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+                              text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
                             },
                           ]);
                         } finally {
@@ -575,6 +576,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                         // Course progress is now backend-driven
                         // Simply activate the flow and send initial message
                         setAutoRouting(false);
+                        activeFlowRef.current = "course_progress";
                         setActiveFlow("course_progress");
                         setUserOptionSelected(true);
                         setIsMenuOpen(false);
@@ -642,7 +644,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
                             ...prev,
                             {
                               type: "bot",
-                              text: `âŒ Error: ${err.message || "Unknown error"}`,
+                              text: `❌ Error: ${err.message || "Unknown error"}`,
                             },
                           ]);
                         } finally {

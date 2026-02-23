@@ -15,6 +15,8 @@ export type AssignmentBotMessage =
 export interface AssignmentFlowCallbacks {
   appendBotMessage: (msg: AssignmentBotMessage) => void;
   exitFlow: () => void;
+  /** When provided, used for manual exit (user said "exit") - creates new session */
+  exitFlowForManualExit?: () => void;
   setProcessing: (v: boolean) => void;
   playTTS: (index: number, text: string) => void;
   getTTSSummary: (text: string) => string;
@@ -111,6 +113,7 @@ export async function handleAssignmentChat(params: AssignmentChatParams): Promis
     getErpContext,
     appendBotMessage,
     exitFlow,
+    exitFlowForManualExit,
     setProcessing,
     playTTS,
     getTTSSummary,
@@ -145,6 +148,16 @@ export async function handleAssignmentChat(params: AssignmentChatParams): Promis
 
       if (assignmentData) {
         console.log("Assignment data:", assignmentData);
+      }
+
+      // If backend exit message detected, exit flow and create new session
+      const isExitResponse =
+        answer.toLowerCase().includes("you've exited the assignment") ||
+        (answer.includes("✅") && answer.toLowerCase().includes("exited"));
+      if (isExitResponse) {
+        (exitFlowForManualExit ?? exitFlow)();
+        setProcessing(false);
+        return;
       }
 
       if (shouldExitAssignmentOnError(answer)) {

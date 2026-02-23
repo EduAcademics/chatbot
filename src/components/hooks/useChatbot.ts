@@ -440,7 +440,7 @@ export function useChatbot({
           : `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       setSessionId(newSessionId);
       localStorage.setItem("sessionId", newSessionId);
-      console.log("Ã¢Å“â€¦ New session ID on exit:", newSessionId);
+      console.log("✅ New session ID on exit:", newSessionId);
     }
   };
 
@@ -748,7 +748,7 @@ export function useChatbot({
       // Fallback
       return { flow: "query", confidence: 0.8, entities: {} };
     } catch (error) {
-      console.error("Ã¢ÂÅ’ Classification error:", error);
+      console.error("❌ Classification error:", error);
       return { flow: "query", confidence: 0.8, entities: {} };
     }
   };
@@ -768,7 +768,7 @@ export function useChatbot({
     setInputText("");
     setIsProcessing(true);
 
-    // CHECK FOR EXIT KEYWORDS - Exit current flow immediately (same behavior as text mode)
+    // CHECK FOR EXIT KEYWORDS - Route to current flow's backend (same behavior as text mode)
     // Normalize like backend: trim, collapse whitespace, lowercase, strip leading/trailing punctuation
     // so voice "Exit", "Exit.", ". Exit" etc. are treated the same as typing "exit"
     const exitKeywords = ["exit", "cancel", "restart", "quit", "stop", "done"];
@@ -782,10 +782,22 @@ export function useChatbot({
       (keyword) => normalizedForExit === keyword,
     );
 
-    if (isExitCommand && activeFlow !== "none" && activeFlow !== "query") {
-      console.log("Ã°Å¸Å¡Âª Exit command detected, exiting flow:", activeFlow);
-      handleFlowExit({ newSession: true });
-      // Continue so backend can return exit message; state already cleared
+    // When exit command: capture current flow and route message to that flow's backend.
+    // Do NOT call handleFlowExit here - it clears activeFlowRef and causes wrong routing
+    // (e.g. "exit" in leave flow would get classified as course_progress and show wrong message).
+    // Use activeFlow as fallback when activeFlowRef is stale (e.g. in leave_approval voice mode)
+    const flowToExitOnCommand =
+      isExitCommand && activeFlow !== "none" && activeFlow !== "query"
+        ? (activeFlowRef.current !== "none" && activeFlowRef.current !== "query"
+            ? activeFlowRef.current
+            : activeFlow)
+        : null;
+
+    if (flowToExitOnCommand) {
+      console.log(
+        "🪟 Exit command detected, routing to current flow:",
+        flowToExitOnCommand,
+      );
     }
 
     // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
@@ -834,8 +846,12 @@ export function useChatbot({
     const inLeave = activeFlowRef.current === "leave" || activeFlow === "leave";
     const inAssignment =
       activeFlowRef.current === "assignment" || activeFlow === "assignment";
+    const inLeaveApproval =
+      activeFlowRef.current === "leave_approval" ||
+      activeFlow === "leave_approval";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
+    const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
 
     console.log("Ã°Å¸â€Â§ Auto-routing check:", {
       autoRouting,
@@ -847,19 +863,29 @@ export function useChatbot({
       inVoiceAttendanceFlow,
       inLeaveFlow,
       inAssignmentFlow,
+      inLeaveApprovalFlow,
       looksLikeNewRequest,
       message: userMessage,
     });
 
-    if (
+    if (flowToExitOnCommand) {
+      // Exit command: route to current flow's backend (leave-chat, course-progress-chat, etc.)
+      // so we get the correct exit message and flow state is cleared by the backend
+      targetFlow = flowToExitOnCommand;
+      setDetectedFlow(null);
+    } else if (
       inAttendanceFlow ||
       inVoiceAttendanceFlow ||
       inLeaveFlow ||
-      inAssignmentFlow
+      inAssignmentFlow ||
+      inLeaveApprovalFlow
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log("Ã°Å¸â€œÂ Staying in current flow (multi-step process active)");
-      targetFlow = activeFlowRef.current;
+      targetFlow =
+        activeFlowRef.current !== "none" && activeFlowRef.current !== "query"
+          ? activeFlowRef.current
+          : activeFlow;
       // Don't show old detection when in multi-step flow
       setDetectedFlow(null);
     } else if (autoRouting) {
@@ -954,7 +980,7 @@ export function useChatbot({
             targetFlow = "leave_approval" as FlowType;
           } else {
             classificationResult = await classifyQuery(userMessage);
-            console.log("Ã¢Å“â€¦ Classification complete:", classificationResult);
+            console.log("✅ Classification complete:", classificationResult);
             targetFlow = classificationResult.flow as FlowType;
           }
 
@@ -965,7 +991,7 @@ export function useChatbot({
             targetFlow = "assignment"; // For now, both map to same flow
           }
         } catch (error) {
-          console.error("Ã¢ÂÅ’ Classification error:", error);
+          console.error("❌ Classification error:", error);
           targetFlow = "query"; // Fallback to query on error
         }
       }
@@ -1267,6 +1293,7 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateLeaveTTSSummary,
@@ -1281,6 +1308,7 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateQueryTTSSummary,
@@ -1301,10 +1329,10 @@ export function useChatbot({
         });
 
         if (response.status === "success" && response.data) {
+          const answer = response.data.answer || "How can I help with course progress?";
           const botMessage: any = {
             type: "bot",
-            text:
-              response.data.answer || "How can I help with course progress?",
+            text: answer,
           };
 
           // If backend returns course progress data, include it for rendering
@@ -1322,6 +1350,15 @@ export function useChatbot({
           }
 
           setChatHistory((prev) => [...prev, botMessage]);
+
+          // If backend returned exit message, exit the flow and create new session
+          const isExitResponse =
+            (answer.toLowerCase().includes("exited") &&
+              answer.toLowerCase().includes("course progress")) ||
+            (answer.includes("✅") && answer.toLowerCase().includes("exited"));
+          if (isExitResponse) {
+            handleFlowExit({ newSession: true });
+          }
 
           // Play TTS if voice-initiated
           if (
@@ -1351,13 +1388,37 @@ export function useChatbot({
           ...prev,
           {
             type: "bot",
-            text: `Ã¢ÂÅ’ Error: ${err.message || "Unknown error occurred"}`,
+            text: `❌ Error: ${err.message || "Unknown error occurred"}`,
           },
         ]);
       } finally {
         setIsProcessing(false);
       }
     } else if (targetFlow === "leave_approval") {
+      // Exit command: handle exit immediately (no backend for leave approval)
+      if (flowToExitOnCommand === "leave_approval" || (isExitCommand && targetFlow === "leave_approval")) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "✅ Exited. How can I help you next?",
+          },
+        ]);
+        handleFlowExit({ newSession: true });
+        setIsProcessing(false);
+        try {
+          if (isVoiceTriggeredRequestRef.current === true) {
+            void handlePlayTTS(
+              -1,
+              "You've exited the leave approval flow. How can I help you next?"
+            );
+          }
+        } catch (ttsErr) {
+          console.error("TTS playback failed:", ttsErr);
+        }
+        return;
+      }
+
       // Leave approval flow - only fetch if we don't have requests already
       // The fetch should happen when flow is activated from dropdown, not on every message
       if (leaveApprovalRequests.length === 0 && !loadingLeaveRequests) {
@@ -1381,7 +1442,7 @@ export function useChatbot({
               ...prev,
               {
                 type: "bot",
-                answer: `Ã°Å¸â€œâ€¹ **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- Ã¢Å“â€¦ **Approve** - Click the green "Approve" button\n- Ã¢ÂÅ’ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                answer: `📋 **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
                 activeTab: "answer" as const,
               },
             ]);
@@ -1397,9 +1458,9 @@ export function useChatbot({
                 const count = (response.data.leaveRequests || []).length || 0;
                 let speech = "";
                 if (count > 0) {
-                  speech = `Ã°Å¸â€œâ€¹ Leave Approval Dashboard. Found ${count} pending leave request${
+                  speech = `📋 Leave Approval Dashboard. Found ${count} pending leave request${
                     count === 1 ? "" : "s"
-                  } for your approval. Please review each request below and take action by either: Ã¢Å“â€¦ Approve - Click the green \"Approve\" button. Ã¢ÂÅ’ Reject - Enter a rejection reason and click the red \"Reject\" button`;
+                  } for your approval. Please review each request below and take action by either: ✅ Approve - Click the green \"Approve\" button. ❌ Reject - Enter a rejection reason and click the red \"Reject\" button`;
                 } else {
                   speech = `Leave Approval Dashboard. Found 0 pending leave request(s) for your approval.`;
                 }
@@ -1415,7 +1476,7 @@ export function useChatbot({
               ...prev,
               {
                 type: "bot",
-                answer: `Ã¢Å“â€¦ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
+                answer: `✅ **No Pending Requests**\n\nThere are currently no pending leave requests requiring your approval.\n\nAll leave requests have been processed or there are no new requests at this time.`,
                 activeTab: "answer" as const,
               },
             ]);
@@ -1430,7 +1491,7 @@ export function useChatbot({
             ...prev,
             {
               type: "bot",
-              text: `Ã¢ÂÅ’ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+              text: `❌ **Error Loading Leave Requests**\n\nSorry, there was an error fetching leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
             },
           ]);
         } finally {
@@ -1769,7 +1830,7 @@ export function useChatbot({
         targetMessage.attendance_summary.length > 0
       ) {
         console.log(
-          `Ã¢Å“â€¦ Priority 0: Found attendance data in provided message index ${messageIndex} (saved/edited data):`,
+          `✅ Priority 0: Found attendance data in provided message index ${messageIndex} (saved/edited data):`,
           targetMessage.attendance_summary.length,
           "records",
         );
@@ -1783,7 +1844,7 @@ export function useChatbot({
 
     // Priority 1: If we're currently editing, use the global state (edited data)
     if (editingMessageIndex !== null && attendanceData.length > 0) {
-      console.log("Ã¢Å“â€¦ Priority 1: Using edited data from global state");
+      console.log("✅ Priority 1: Using edited data from global state");
       return {
         attendanceData: attendanceData,
         classInfo: classInfo,
@@ -1817,7 +1878,7 @@ export function useChatbot({
         msg.attendance_summary.length > 0
       ) {
         console.log(
-          `Ã¢Å“â€¦ Priority 2: Found attendance data in message ${i}:`,
+          `✅ Priority 2: Found attendance data in message ${i}:`,
           msg.attendance_summary.length,
           "records",
         );
@@ -1850,7 +1911,7 @@ export function useChatbot({
         // Try to get data from this message or use global state
         if (msg.attendance_summary && msg.attendance_summary.length > 0) {
           console.log(
-            `Ã¢Å“â€¦ Priority 3: Using attendance data from button message ${i}:`,
+            `✅ Priority 3: Using attendance data from button message ${i}:`,
             msg.attendance_summary.length,
             "records",
           );
@@ -1861,7 +1922,7 @@ export function useChatbot({
           };
         } else if (attendanceData.length > 0) {
           console.log(
-            `Ã¢Å“â€¦ Priority 3: Using global state for button message ${i}:`,
+            `✅ Priority 3: Using global state for button message ${i}:`,
             attendanceData.length,
             "records",
           );
@@ -1876,7 +1937,7 @@ export function useChatbot({
 
     // Priority 4: Use global state as fallback (if not editing)
     if (attendanceData.length > 0) {
-      console.log("Ã¢Å“â€¦ Priority 4: Using global state as fallback");
+      console.log("✅ Priority 4: Using global state as fallback");
       return {
         attendanceData: attendanceData,
         classInfo: classInfo || fallbackClassInfo,
@@ -1887,7 +1948,7 @@ export function useChatbot({
     // Priority 5: Use fallbackAttendanceData and fallbackClassInfo if provided (captured from button closure)
     if (fallbackAttendanceData && fallbackAttendanceData.length > 0) {
       console.log(
-        "Ã¢Å“â€¦ Priority 5: Using fallback attendance data (captured from button closure):",
+        "✅ Priority 5: Using fallback attendance data (captured from button closure):",
         fallbackAttendanceData.length,
         "records",
       );
@@ -1911,7 +1972,7 @@ export function useChatbot({
           ? JSON.parse(sessionClassInfo)
           : null;
 
-        console.log("Ã¢Å“â€¦ Priority 6: Using session storage data:", {
+        console.log("✅ Priority 6: Using session storage data:", {
           attendanceData: parsedAttendanceData.length,
           classInfo: parsedClassInfo,
         });
@@ -1926,7 +1987,7 @@ export function useChatbot({
       console.log("Error reading from session storage:", err);
     }
 
-    console.log("Ã¢ÂÅ’ No attendance data found in any priority");
+    console.log("❌ No attendance data found in any priority");
     return null;
   };
 
@@ -1972,13 +2033,13 @@ export function useChatbot({
 
       if (!dataToSave) {
         console.error(
-          `Ã¢ÂÅ’ No attendance data found for ${attendanceType} approval`,
+          `❌ No attendance data found for ${attendanceType} approval`,
         );
         setChatHistory((prev) => [
           ...prev,
           {
             type: "bot",
-            text: `Ã¢ÂÅ’ No attendance data found. Please try ${
+            text: `❌ No attendance data found. Please try ${
               attendanceType === "text" ? "entering" : "uploading"
             } the attendance information again.`,
           },
@@ -2012,7 +2073,7 @@ export function useChatbot({
           const filtered = prev.filter(
             (msg) => !(msg.text && msg.text.includes("Ã¢ÂÂ³ Processing")),
           );
-          const successMessage = `Ã¢Å“â€¦ ${
+          const successMessage = `✅ ${
             attendanceType.charAt(0).toUpperCase() + attendanceType.slice(1)
           } attendance saved successfully! ${
             data.data?.message || "Data has been saved to MongoDB."
@@ -2062,7 +2123,7 @@ export function useChatbot({
       }
     } catch (err) {
       console.error(`Error saving ${attendanceType} attendance:`, err);
-      const errorMessage = `Ã¢ÂÅ’ Failed to save ${attendanceType} attendance: ${
+      const errorMessage = `❌ Failed to save ${attendanceType} attendance: ${
         (err as Error).message
       }`;
       setChatHistory((prev) => {
@@ -2119,7 +2180,7 @@ export function useChatbot({
       ...prev,
       {
         type: "bot",
-        text: "Ã¢ÂÅ’ Attendance rejected. You can provide new attendance data or try a different approach.",
+        text: "❌ Attendance rejected. You can provide new attendance data or try a different approach.",
         buttons: [
           {
             label: "Try Again",
@@ -2181,7 +2242,7 @@ export function useChatbot({
       ...prev,
       {
         type: "bot",
-        text: "Ã¢ÂÅ’ Voice attendance rejected. You can provide new attendance data via voice or try a different approach.",
+        text: "❌ Voice attendance rejected. You can provide new attendance data via voice or try a different approach.",
         buttons: [
           {
             label: "Try Voice Again",
@@ -2326,7 +2387,7 @@ export function useChatbot({
           ...prev,
           {
             type: "bot",
-            text: `Ã¢Å“â€¦ Attendance data saved successfully! The table has been updated with your changes. Current data: ${currentAttendanceData.length} students recorded. You can now review the final attendance summary before approving.`,
+            text: `✅ Attendance data saved successfully! The table has been updated with your changes. Current data: ${currentAttendanceData.length} students recorded. You can now review the final attendance summary before approving.`,
             buttons: [
               {
                 label: "Edit Attendance",
@@ -2360,7 +2421,7 @@ export function useChatbot({
                     ...prev,
                     {
                       type: "bot",
-                      text: "Ã¢Å“â€¦ Edit mode activated! You can now modify the attendance data.",
+                      text: "✅ Edit mode activated! You can now modify the attendance data.",
                     },
                   ]);
                 },
@@ -2369,7 +2430,7 @@ export function useChatbot({
                 label: "Approve",
                 action: () => {
                   console.log(
-                    "Ã¢Å“â€¦ Approve button clicked after save - using captured data:",
+                    "✅ Approve button clicked after save - using captured data:",
                     {
                       capturedSavedAttendanceData:
                         capturedSavedAttendanceData.length,
@@ -2405,7 +2466,7 @@ export function useChatbot({
           ...prev,
           {
             type: "bot",
-            text: 'âŒ No attendance data to save. Please click "Edit Attendance" first to load the data, then make your changes and save again.',
+            text: '❌ No attendance data to save. Please click "Edit Attendance" first to load the data, then make your changes and save again.',
           },
         ]);
       }
@@ -2415,7 +2476,7 @@ export function useChatbot({
         ...prev,
         {
           type: "bot",
-          text: `âŒ Failed to save attendance: ${(err as Error).message}`,
+          text: `❌ Failed to save attendance: ${(err as Error).message}`,
         },
       ]);
     }

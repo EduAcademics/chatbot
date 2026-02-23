@@ -35,6 +35,8 @@ export type LeaveBotMessage =
 export interface LeaveFlowCallbacks {
   appendBotMessage: (msg: LeaveBotMessage) => void;
   exitFlow: () => void;
+  /** When provided, used for manual exit (user said "exit") - creates new session */
+  exitFlowForManualExit?: () => void;
   setProcessing: (v: boolean) => void;
   playTTS: (index: number, text: string) => void;
   getTTSSummary: (text: string) => string;
@@ -521,6 +523,7 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
     getErpContext,
     appendBotMessage,
     exitFlow,
+    exitFlowForManualExit,
     setProcessing,
     playTTS,
     getTTSSummary,
@@ -569,13 +572,12 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
         }
       }
 
-      // If backend exit message detected, exit flow
+      // If backend exit message detected, exit flow and create new session
       if (
-        answer
-          .toLowerCase()
-          .includes("you've exited the leave application flow")
+        answer.toLowerCase().includes("you've exited the leave application flow") ||
+        (answer.includes("✅") && answer.toLowerCase().includes("exited"))
       ) {
-        exitFlow();
+        (exitFlowForManualExit ?? exitFlow)();
         setProcessing(false);
         return;
       }
