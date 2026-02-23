@@ -90,69 +90,75 @@ export default function ChatMessageList(props: ChatMessageListProps) {
 
   return (
     <div className="chatbot-chatbox" ref={chatBoxRef}>
-      {/* Attendance Flow Step Indicator */}
+      {/* Attendance Flow Step Indicator - Mobile-friendly */}
       {(activeFlow === "attendance" ||
         activeFlow === "voice_attendance") && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-4">
-          <div
-            className={`flex items-center gap-2 ${
-              attendanceStep === "class_info"
-                ? "text-blue-600 font-semibold"
-                : "text-gray-600 font-normal"
-            }`}
-          >
-            <span
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
+        <div className="attendance-step-indicator bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-3 sm:mb-4 overflow-x-auto">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-wrap sm:flex-nowrap">
+            <div
+              className={`flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ${
                 attendanceStep === "class_info"
-                  ? "bg-blue-600 text-white"
-                  : "bg-blue-100 text-gray-600"
+                  ? "text-blue-600 font-semibold"
+                  : "text-gray-600 font-normal"
               }`}
             >
-              {attendanceStep === "class_info" ? "1" : "✓"}
-            </span>
-            {activeFlow === "voice_attendance"
-              ? "Class Info (Voice)"
-              : "Class Information"}
-          </div>
-          <div className="w-0.5 h-5 bg-blue-200"></div>
-          <div
-            className={`flex items-center gap-2 ${
-              attendanceStep === "student_details"
-                ? "text-blue-600 font-semibold"
-                : "text-gray-600 font-normal"
-            }`}
-          >
-            <span
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
+              <span
+                className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold flex-shrink-0 ${
+                  attendanceStep === "class_info"
+                    ? "bg-blue-600 text-white"
+                    : "bg-blue-100 text-gray-600"
+                }`}
+              >
+                {attendanceStep === "class_info" ? "1" : "✓"}
+              </span>
+              <span className="text-xs sm:text-sm truncate">
+                {activeFlow === "voice_attendance"
+                  ? "Class (Voice)"
+                  : "Class Info"}
+              </span>
+            </div>
+            <div className="w-0.5 h-4 sm:h-5 bg-blue-200 flex-shrink-0 hidden sm:block"></div>
+            <div
+              className={`flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ${
                 attendanceStep === "student_details"
-                  ? "bg-blue-600 text-white"
-                  : "bg-blue-100 text-gray-600"
+                  ? "text-blue-600 font-semibold"
+                  : "text-gray-600 font-normal"
               }`}
             >
-              {attendanceStep === "completed" ? "✓" : "2"}
-            </span>
-            {activeFlow === "voice_attendance"
-              ? "Student Details (Voice)"
-              : "Student Details"}
-          </div>
-          <div className="w-0.5 h-5 bg-blue-200"></div>
-          <div
-            className={`flex items-center gap-2 ${
-              attendanceStep === "completed"
-                ? "text-green-600 font-semibold"
-                : "text-gray-600 font-normal"
-            }`}
-          >
-            <span
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold ${
+              <span
+                className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold flex-shrink-0 ${
+                  attendanceStep === "student_details"
+                    ? "bg-blue-600 text-white"
+                    : "bg-blue-100 text-gray-600"
+                }`}
+              >
+                {attendanceStep === "completed" ? "✓" : "2"}
+              </span>
+              <span className="text-xs sm:text-sm truncate">
+                {activeFlow === "voice_attendance"
+                  ? "Students (Voice)"
+                  : "Students"}
+              </span>
+            </div>
+            <div className="w-0.5 h-4 sm:h-5 bg-blue-200 flex-shrink-0 hidden sm:block"></div>
+            <div
+              className={`flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ${
                 attendanceStep === "completed"
-                  ? "bg-green-600 text-white"
-                  : "bg-blue-100 text-gray-600"
+                  ? "text-green-600 font-semibold"
+                  : "text-gray-600 font-normal"
               }`}
             >
-              {attendanceStep === "completed" ? "✓" : "3"}
-            </span>
-            Complete
+              <span
+                className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold flex-shrink-0 ${
+                  attendanceStep === "completed"
+                    ? "bg-green-600 text-white"
+                    : "bg-blue-100 text-gray-600"
+                }`}
+              >
+                {attendanceStep === "completed" ? "✓" : "3"}
+              </span>
+              <span className="text-xs sm:text-sm truncate">Complete</span>
+            </div>
           </div>
         </div>
       )}
@@ -1109,31 +1115,29 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                               })() && (
                                 <div
                                   id={`attendance-summary-${idx}`}
-                                  className="bg-white border border-gray-200 rounded-lg p-4 my-4 shadow-sm"
+                                  className="attendance-summary-card bg-white border border-gray-200 rounded-lg p-3 sm:p-4 my-3 sm:my-4 shadow-sm"
                                 >
                                   {/* Header */}
-                                  <div className="flex justify-between items-center mb-4 pb-2 border-b border-gray-300">
-                                    <div>
-                                      <h3 className="text-gray-900 m-0 mb-1 text-lg font-semibold">
+                                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-3 sm:mb-4 pb-2 border-b border-gray-300">
+                                    <div className="min-w-0">
+                                      <h3 className="text-gray-900 m-0 mb-1 text-base sm:text-lg font-semibold truncate">
                                         {editingMessageIndex !== null
                                           ? "✏️ Edit Attendance Summary"
                                           : "📋 Attendance Summary"}
                                       </h3>
                                       {editingMessageIndex !== null && (
-                                        <div className="bg-blue-100 text-blue-900 p-2 rounded-md text-sm mb-4 font-medium">
-                                          ✏️ Edit mode active - You can
-                                          modify student names and
-                                          attendance status below
+                                        <div className="bg-blue-100 text-blue-900 p-2 rounded-md text-xs sm:text-sm mb-3 sm:mb-4 font-medium">
+                                          ✏️ Edit mode active - Modify names/status below
                                         </div>
                                       )}
                                       {/* Edit Mode Buttons - Show Save/Cancel when in edit mode */}
                                       {editingMessageIndex !== null && (
-                                        <div className="flex gap-2 mb-4 p-2 rounded-md bg-gray-50 border border-gray-200">
+                                        <div className="flex flex-wrap gap-2 mb-3 sm:mb-4 p-2 rounded-md bg-gray-50 border border-gray-200">
                                           <button
                                             onClick={() =>
                                               handleSaveAttendance(idx)
                                             }
-                                            className="px-4 py-2 rounded-md border-none bg-green-500 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-green-600"
+                                            className="px-3 py-2 sm:px-4 sm:py-2 rounded-md border-none bg-green-500 text-white cursor-pointer text-xs sm:text-sm font-medium transition-colors hover:bg-green-600 min-h-[44px] touch-manipulation"
                                           >
                                             💾 Save
                                           </button>
@@ -1168,14 +1172,14 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                 },
                                               ]);
                                             }}
-                                            className="px-4 py-2 rounded-md border-none bg-red-500 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-red-600"
+                                            className="px-3 py-2 sm:px-4 sm:py-2 rounded-md border-none bg-red-500 text-white cursor-pointer text-xs sm:text-sm font-medium transition-colors hover:bg-red-600 min-h-[44px] touch-manipulation"
                                           >
                                             ❌ Cancel
                                           </button>
                                         </div>
                                       )}
                                       {classInfo && (
-                                        <p className="text-gray-500 m-0 text-sm">
+                                        <p className="text-gray-500 m-0 text-xs sm:text-sm truncate">
                                           Class {classInfo.class_}{" "}
                                           {classInfo.section} •{" "}
                                           {classInfo.date}
@@ -1186,8 +1190,8 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                     {/* Inline editing buttons removed - using main approval buttons instead */}
                                   </div>
 
-                                  {/* Statistics */}
-                                  <div className="flex gap-4 mb-4 p-3 rounded-md bg-gray-50 text-sm">
+                                  {/* Statistics - Mobile: wrap, smaller text */}
+                                  <div className="flex flex-wrap gap-2 sm:gap-4 mb-3 sm:mb-4 p-2 sm:p-3 rounded-md bg-gray-50 text-xs sm:text-sm">
                                     {(() => {
                                       const isEditing =
                                         editingMessageIndex !== null;
@@ -1225,18 +1229,18 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                     })()}
                                   </div>
 
-                                  {/* Editable Table */}
-                                  <div className="overflow-auto border border-gray-200 rounded-md">
-                                    <table className="w-full border-collapse text-sm">
+                                  {/* Editable Table - Horizontal scroll on mobile */}
+                                  <div className="overflow-x-auto -mx-1 sm:mx-0 border border-gray-200 rounded-md touch-pan-x">
+                                    <table className="w-full border-collapse text-xs sm:text-sm min-w-[280px]">
                                       <thead>
                                         <tr className="bg-gray-50 border-b border-gray-200">
-                                          <th className="px-3 py-3 text-left text-gray-900 font-semibold border-r border-gray-200">
+                                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-left text-gray-900 font-semibold border-r border-gray-200 whitespace-nowrap">
                                             Student Name
                                           </th>
-                                          <th className="px-3 py-3 text-left text-gray-900 font-semibold border-r border-gray-200">
+                                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-left text-gray-900 font-semibold border-r border-gray-200 whitespace-nowrap">
                                             Status
                                           </th>
-                                          <th className="px-3 py-3 text-center text-gray-900 font-semibold w-[100px]">
+                                          <th className="px-2 sm:px-3 py-2 sm:py-3 text-center text-gray-900 font-semibold w-[70px] sm:w-[100px] whitespace-nowrap">
                                             Actions
                                           </th>
                                         </tr>
@@ -1292,26 +1296,11 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                     : "bg-gray-50"
                                                 }`}
                                               >
-                                                <td className="px-3 py-3 border-r border-gray-200 text-gray-900">
+                                                <td className="px-2 sm:px-3 py-2 sm:py-3 border-r border-gray-200 text-gray-900">
                                                   {(() => {
                                                     const isEditing =
                                                       editingMessageIndex !==
                                                       null;
-                                                    console.log(
-                                                      `Student name field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, idx=${idx}, isBeingEdited=${
-                                                        (msg as any)
-                                                          .isBeingEdited
-                                                      }`,
-                                                    );
-                                                    console.log(
-                                                      `Student name field - isEditing check: ${editingMessageIndex} === ${idx} = ${
-                                                        editingMessageIndex ===
-                                                        idx
-                                                      } OR isBeingEdited=${
-                                                        (msg as any)
-                                                          .isBeingEdited
-                                                      }`,
-                                                    );
                                                     return isEditing ? (
                                                       <input
                                                         type="text"
@@ -1326,10 +1315,10 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                               .value,
                                                           )
                                                         }
-                                                        className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                                        className="w-full p-1.5 sm:p-2 border border-gray-300 rounded bg-white text-gray-900 text-xs sm:text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 min-w-0"
                                                       />
                                                     ) : (
-                                                      <span className="text-sm">
+                                                      <span className="text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none block">
                                                         {
                                                           item.student_name
                                                         }
@@ -1337,17 +1326,11 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                     );
                                                   })()}
                                                 </td>
-                                                <td className="px-3 py-3 border-r border-gray-200 text-gray-900">
+                                                <td className="px-2 sm:px-3 py-2 sm:py-3 border-r border-gray-200 text-gray-900">
                                                   {(() => {
                                                     const isEditing =
                                                       editingMessageIndex !==
                                                       null;
-                                                    console.log(
-                                                      `Attendance status field for message ${idx}: isEditing=${isEditing}, editingMessageIndex=${editingMessageIndex}, isBeingEdited=${
-                                                        (msg as any)
-                                                          .isBeingEdited
-                                                      }`,
-                                                    );
                                                     return isEditing ? (
                                                       <select
                                                         value={
@@ -1361,7 +1344,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                               .value,
                                                           )
                                                         }
-                                                        className="w-full p-2 border border-gray-300 rounded bg-white text-gray-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                                        className="w-full p-1.5 sm:p-2 border border-gray-300 rounded bg-white text-gray-900 text-xs sm:text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 min-w-0"
                                                       >
                                                         <option value="Present">
                                                           Present
@@ -1372,7 +1355,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                       </select>
                                                     ) : (
                                                       <span
-                                                        className={`text-sm ${
+                                                        className={`text-xs sm:text-sm whitespace-nowrap ${
                                                           item.attendance_status ===
                                                           "Present"
                                                             ? "text-green-500"
@@ -1389,7 +1372,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                     );
                                                   })()}
                                                 </td>
-                                                <td className="px-3 py-3 text-center">
+                                                <td className="px-2 sm:px-3 py-2 sm:py-3 text-center">
                                                   {editingMessageIndex !==
                                                     null && (
                                                     <button
@@ -1398,7 +1381,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                           index,
                                                         )
                                                       }
-                                                      className="px-1 py-1 border-none bg-red-500 text-white rounded cursor-pointer flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                                                      className="px-1.5 py-1.5 sm:px-2 sm:py-2 min-w-[36px] min-h-[36px] border-none bg-red-500 text-white rounded cursor-pointer flex items-center justify-center text-xs hover:bg-red-600 active:scale-95 transition-colors touch-manipulation"
                                                       title="Remove Student"
                                                     >
                                                       🗑️
@@ -1416,31 +1399,10 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   {/* Add New Student - only show in edit mode */}
                                   {(editingMessageIndex === idx ||
                                     (msg as any).isBeingEdited) && (
-                                    <div
-                                      style={{
-                                        marginTop: "1rem",
-                                        padding: "1rem",
-                                        background: "#f8fafc",
-                                        borderRadius: "6px",
-                                        border: "1px solid #e5e7eb",
-                                      }}
-                                    >
+                                    <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-slate-50 rounded-lg border border-gray-200">
                                       <button
                                         onClick={handleAddStudent}
-                                        style={{
-                                          display: "flex",
-                                          alignItems: "center",
-                                          gap: "0.5rem",
-                                          padding: "0.5rem 1rem",
-                                          borderRadius: "6px",
-                                          border: "none",
-                                          background: "#2563eb",
-                                          color: "white",
-                                          cursor: "pointer",
-                                          fontSize: "0.875rem",
-                                          fontWeight: "500",
-                                          transition: "background 0.2s",
-                                        }}
+                                        className="flex items-center justify-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border-none bg-blue-600 text-white cursor-pointer text-sm font-medium transition-colors hover:bg-blue-700 active:scale-[0.98] min-h-[44px] touch-manipulation"
                                       >
                                         ➕ Add New Student
                                       </button>

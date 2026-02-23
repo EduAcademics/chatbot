@@ -25,6 +25,7 @@
   font-weight: 500;
   font-size: 0.95rem;
   box-shadow: 0 2px 8px rgba(212, 165, 116, 0.25);
+  touch-action: manipulation;
 }
 
 .bot-text-btn:hover {
@@ -303,6 +304,15 @@
   box-shadow: 0 -2px 10px rgba(212, 165, 116, 0.08);
   width: 100%;
   flex-shrink: 0;
+}
+
+/* Attendance flow: tighter gap on mobile, ensure input flexes */
+.chatbot-input-area-attendance {
+  gap: 0.5rem;
+}
+.chatbot-input-area-attendance .chatbot-input {
+  flex: 1 1 120px;
+  min-width: 0;
 }
 .chatbot-input {
   flex: 1;

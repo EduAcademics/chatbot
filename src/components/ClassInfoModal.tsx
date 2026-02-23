@@ -31,8 +31,8 @@ const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
   console.log("ClassInfoModal is rendering, isOpen:", isOpen);
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]">
-      <div className="bg-white border border-gray-200 rounded-xl p-8 max-w-[400px] w-[90%] shadow-[0_10px_25px_rgba(0,0,0,0.2)]">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4 sm:p-0 overflow-y-auto">
+      <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-8 max-w-[400px] w-full sm:w-[90%] shadow-[0_10px_25px_rgba(0,0,0,0.2)] my-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-gray-900 m-0 text-xl font-semibold">
             Class Information
@@ -87,22 +87,22 @@ const ClassInfoModal: React.FC<ClassInfoModalProps> = ({
               value={date}
               onChange={(e) => setDate(e.target.value)}
               required
-              className="w-full px-3 py-3 rounded-lg text-sm outline-none transition-all bg-white text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              className="w-full px-3 py-3 rounded-lg text-sm outline-none transition-all bg-white text-gray-900 border border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 min-h-[44px] touch-manipulation"
             />
           </div>
 
-          <div className="flex gap-3 justify-end">
+          <div className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-3 rounded-lg text-sm font-medium transition-all border border-gray-300 bg-transparent text-gray-900 hover:bg-gray-50"
+              className="px-5 py-3 sm:px-6 sm:py-3 rounded-lg text-sm font-medium transition-all border border-gray-300 bg-transparent text-gray-900 hover:bg-gray-50 min-h-[44px] touch-manipulation"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!class_ || !section || !date}
-              className={`px-6 py-3 rounded-lg text-sm font-medium transition-all ${
+              className={`px-5 py-3 sm:px-6 sm:py-3 rounded-lg text-sm font-medium transition-all min-h-[44px] touch-manipulation ${
                 class_ && section && date
                   ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
                   : 'bg-blue-400 text-white cursor-not-allowed opacity-50'

@@ -60,8 +60,9 @@ export default function ChatInputArea({
   getErpContext,
   activeVoiceButtonRef,
 }: ChatInputAreaProps) {
+  const isAttendanceFlow = activeFlow === "attendance" || activeFlow === "voice_attendance";
   return (
-    <div className="chatbot-input-area">
+    <div className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}>
       <div className="relative">
         <input
           type="file"
@@ -197,7 +198,9 @@ export default function ChatInputArea({
         placeholder={
           fullVoiceMode
             ? "Speak naturally — I'll respond when you finish..."
-            : "Ask me anything!"
+            : isAttendanceFlow
+              ? "Class info, student names, or type here..."
+              : "Ask me anything!"
         }
         value={inputText}
         onChange={(e) => setInputText(e.target.value)}
@@ -245,17 +248,19 @@ export default function ChatInputArea({
       )}
       {fullVoiceMode && isRecording && (
         <div
-          className="flex items-center justify-center gap-1.5 px-2 text-sm text-emerald-600 font-medium"
+          className="flex items-center justify-center gap-1.5 px-1.5 sm:px-2 text-xs sm:text-sm text-emerald-600 font-medium flex-shrink-0"
           title="Listening — speak naturally"
         >
           <span
-            className={`inline-block w-2 h-2 rounded-full ${
+            className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
               isVoiceActive
                 ? "animate-pulse bg-red-500"
                 : "bg-emerald-400"
             }`}
           />
-          {isVoiceActive ? "Speaking…" : "Listening…"}
+          <span className="hidden sm:inline">
+            {isVoiceActive ? "Speaking…" : "Listening…"}
+          </span>
         </div>
       )}
       <button
