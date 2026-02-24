@@ -8,7 +8,7 @@ import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
 import type { FlowType } from "./types";
 import { getThumbsUpClass, getThumbsDownClass } from "./utils/chatbotUtils";
-import { aiAPI, leaveApprovalAPI } from "../services/api";
+import { leaveApprovalAPI } from "../services/api";
 import type { ClassInfo, AttendanceRecord } from "./flows/attendanceFlow";
 
 export interface ChatMessageListProps {
@@ -41,10 +41,10 @@ export interface ChatMessageListProps {
   setAttendanceStep: (v: "class_info" | "student_details" | "completed") => void;
   setChatHistory: React.Dispatch<React.SetStateAction<any[]>>;
   leaveApprovalRequests: any[];
-  setLeaveApprovalRequests: (v: any[]) => void;
+  setLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
   loadingLeaveRequests: boolean;
   rejectReason: { [key: string]: string };
-  setRejectReason: (v: { [key: string]: string }) => void;
+  setRejectReason: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
   userId: string;
   getErpContext: () => { academic_session: string; branch_token: string };
 }
@@ -60,9 +60,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     editingMessageIndex,
     setEditingMessageIndex,
     attendanceData,
-    setAttendanceData,
     classInfo,
-    setClassInfo,
     showCorrectionBox,
     setShowCorrectionBox,
     feedbackComment,
@@ -74,17 +72,12 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     handleAddStudent,
     handleRemoveStudent,
     handleSaveAttendance,
-    handleUnifiedAttendanceApproval,
-    handleTextAttendanceRejection,
-    setActiveFlow,
-    setAttendanceStep,
     setChatHistory,
     leaveApprovalRequests,
     setLeaveApprovalRequests,
     loadingLeaveRequests,
     rejectReason,
     setRejectReason,
-    userId,
     getErpContext,
   } = props;
 
@@ -873,9 +866,9 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                           },
                                                         );
                                                         setLeaveApprovalRequests(
-                                                          (prev) =>
+                                                          (prev: any[]) =>
                                                             prev.filter(
-                                                              (r) =>
+                                                              (r: any) =>
                                                                 r.uuid !==
                                                                 request.uuid,
                                                             ),
@@ -924,7 +917,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                       }
                                                       onChange={(e) =>
                                                         setRejectReason(
-                                                          (prev) => ({
+                                                          (prev: { [key: string]: string }) => ({
                                                             ...prev,
                                                             [request.uuid]:
                                                               e.target
@@ -965,15 +958,15 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                             },
                                                           );
                                                           setLeaveApprovalRequests(
-                                                            (prev) =>
+                                                            (prev: any[]) =>
                                                               prev.filter(
-                                                                (r) =>
+                                                                (r: any) =>
                                                                   r.uuid !==
                                                                   request.uuid,
                                                               ),
                                                           );
                                                           setRejectReason(
-                                                            (prev) => {
+                                                            (prev: { [key: string]: string }) => {
                                                               const newReasons =
                                                                 {
                                                                   ...prev,
@@ -1208,7 +1201,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                             <strong>Present:</strong>{" "}
                                             {
                                               dataToUse.filter(
-                                                (item) =>
+                                                (item: AttendanceRecord) =>
                                                   item.attendance_status ===
                                                   "Present",
                                               ).length
@@ -1218,7 +1211,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                             <strong>Absent:</strong>{" "}
                                             {
                                               dataToUse.filter(
-                                                (item) =>
+                                                (item: AttendanceRecord) =>
                                                   item.attendance_status ===
                                                   "Absent",
                                               ).length
@@ -1287,7 +1280,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                           }
 
                                           return dataToUse.map(
-                                            (item, index) => (
+                                            (item: AttendanceRecord, index: number) => (
                                               <tr
                                                 key={index}
                                                 className={`border-b border-gray-200 ${

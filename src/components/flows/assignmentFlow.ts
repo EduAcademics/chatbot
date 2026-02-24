@@ -73,7 +73,7 @@ export async function runAssignmentChat(params: {
   getErpContext: () => { academic_session: string; branch_token: string };
 }): Promise<{
   success: boolean;
-  data?: { answer?: string; assignment_data?: unknown };
+  data?: { answer?: string; assignment_data?: unknown; tts_text?: string };
   error?: string;
 }> {
   const authToken = localStorage.getItem("token");

@@ -472,7 +472,7 @@ export async function runLeaveChat(params: {
   getErpContext: () => { academic_session: string; branch_token: string };
 }): Promise<{
   success: boolean;
-  data?: { answer?: string; leave_data?: any };
+  data?: { answer?: string; leave_data?: any; tts_text?: string };
   error?: string;
 }> {
   const authToken = localStorage.getItem("token");
@@ -531,11 +531,7 @@ export async function handleLeaveChat(params: LeaveChatParams): Promise<void> {
   } = params;
 
   try {
-    // Always call backend for exit, do not hardcode exit message
-    let exitDetected = false;
-    if (shouldExitLeaveFlow(userMessage)) {
-      exitDetected = true;
-    }
+    // Always call backend for exit, do not hardcode exit message (exit handled via backend response below).
 
     // TTS for leave flow is handled from the API response only (same as assignment flow).
     // No separate welcome TTS here to avoid double-speaking the same prompt.

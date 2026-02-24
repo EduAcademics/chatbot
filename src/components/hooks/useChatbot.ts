@@ -58,8 +58,8 @@ export interface UseChatbotReturn {
   userId: string;
   activeFlowRef: RefObject<FlowType>;
   setIsProcessing: (v: boolean) => void;
-  setLeaveApprovalRequests: (v: any[]) => void;
-  setRejectReason: (v: { [key: string]: string }) => void;
+  setLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
+  setRejectReason: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
   setLoadingLeaveRequests: (v: boolean) => void;
   devices: MediaDeviceInfo[];
   selectedDeviceId: string;
@@ -74,7 +74,7 @@ export interface UseChatbotReturn {
   editingMessageIndex: number | null;
   setEditingMessageIndex: (v: number | null) => void;
   attendanceData: AttendanceRecord[];
-  setAttendanceData: (v: AttendanceRecord[]) => void;
+  setAttendanceData: React.Dispatch<React.SetStateAction<AttendanceRecord[]>>;
   classInfo: ClassInfo | null;
   setClassInfo: (v: ClassInfo | null) => void;
   showCorrectionBox: number | null;
@@ -95,7 +95,7 @@ export interface UseChatbotReturn {
   ) => void;
   handleAddStudent: () => void;
   handleRemoveStudent: (index: number) => void;
-  handleSaveAttendance: (messageIndex: number) => void;
+  handleSaveAttendance: (messageIndex: number) => Promise<void>;
   handleUnifiedAttendanceApproval: (
     messageIndex?: number,
     attendanceType?: "text" | "image" | "voice",
@@ -104,12 +104,10 @@ export interface UseChatbotReturn {
   ) => Promise<void>;
   handleTextAttendanceRejection: () => void;
   leaveApprovalRequests: any[];
-  setLeaveApprovalRequests: (v: any[]) => void;
   loadingLeaveRequests: boolean;
   rejectReason: { [key: string]: string };
-  setRejectReason: (v: { [key: string]: string }) => void;
   inputText: string;
-  setInputText: (v: string) => void;
+  setInputText: React.Dispatch<React.SetStateAction<string>>;
   isRecording: boolean;
   fullVoiceMode: boolean;
   setFullVoiceMode: (v: boolean) => void;
@@ -1184,10 +1182,7 @@ export function useChatbot({
           user_roles: roles,
           query: userMessage,
         });
-        let answerForTts = "";
         if (data.status === "success" && data.data) {
-          const answer = data.data?.answer ?? "";
-          answerForTts = answer;
           setChatHistory((prev) => [
             ...prev,
             {
@@ -1205,7 +1200,6 @@ export function useChatbot({
             setActiveFlow((data.data as any).flow_name as FlowType);
           }
         } else if (data.status === "error" && data.message) {
-          answerForTts = data.message;
           setChatHistory((prev) => [
             ...prev,
             { type: "bot", text: data.message },
@@ -1215,7 +1209,6 @@ export function useChatbot({
             handleFrontendExit();
           }
         } else {
-          answerForTts = "No response from AI.";
           setChatHistory((prev) => [
             ...prev,
             { type: "bot", text: "No response from AI." },
@@ -2617,10 +2610,8 @@ export function useChatbot({
     handleUnifiedAttendanceApproval,
     handleTextAttendanceRejection,
     leaveApprovalRequests,
-    setLeaveApprovalRequests,
     loadingLeaveRequests,
     rejectReason,
-    setRejectReason,
     inputText,
     setInputText,
     isRecording,

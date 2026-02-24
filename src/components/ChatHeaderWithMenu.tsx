@@ -45,7 +45,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
   const {
     menuRef, isMenuOpen, setIsMenuOpen, routerMode, setRouterMode, setAutoRouting,
     handleFlowExit, setUserOptionSelected, setChatHistory, activeFlow, setActiveFlow,
-    attendanceStep, setAttendanceStep, setPendingClassInfo, hoveredMenuItem, setHoveredMenuItem,
+    attendanceStep: _attendanceStep, setAttendanceStep, setPendingClassInfo, hoveredMenuItem, setHoveredMenuItem,
     hoverTimeoutRef, getErpContext, sessionId, userId, activeFlowRef, setIsProcessing,
     setLeaveApprovalRequests, setRejectReason, setLoadingLeaveRequests,
     devices, selectedDeviceId, setSelectedDeviceId, languages, selectedLanguage, setSelectedLanguage,
