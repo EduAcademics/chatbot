@@ -1713,8 +1713,10 @@ export function useChatbot({
     setEditingMessageIndex: (index) => setEditingMessageIndex(index),
     getChatHistoryLength: () => chatHistory.length,
     exitFlow: () => handleFlowExit({ newSession: false }),
+    exitFlowWithNewSession: () => handleFlowExit({ newSession: true }),
     setProcessing: setIsProcessing,
     playTTS: (index, text) => void handlePlayTTS(index, text),
+    submitMessage: (message: string) => handleSubmit(message),
   });
 
   const handleAttendanceDataChange = (
@@ -2159,50 +2161,14 @@ export function useChatbot({
     );
   };
 
-  // Handle text-based attendance rejection - clear data and show options
+  // Handle text-based attendance rejection - send "reject" to backend so it clears state; backend response prompts for new data
   const handleTextAttendanceRejection = () => {
     console.log("Text Attendance Rejection clicked");
-
-    // Clear the attendance data
     setAttendanceData([]);
     setClassInfo(null);
     setEditingMessageIndex(null);
-
-    // Show rejection message with options
-    setChatHistory((prev) => [
-      ...prev,
-      {
-        type: "bot",
-        text: "❌ Attendance rejected. You can provide new attendance data or try a different approach.",
-        buttons: [
-          {
-            label: "Try Again",
-            action: () => {
-              // Clear the message and let user type manually
-              setChatHistory((prev) => [
-                ...prev,
-                {
-                  type: "bot",
-                  text: 'Please provide attendance data again. For example: "Mark all present for Class 6 A on 2025-10-08" or list individual students.',
-                },
-              ]);
-            },
-          },
-          {
-            label: "Upload Image",
-            action: () => {
-              // Trigger file input click
-              const fileInput = document.querySelector(
-                'input[type="file"]',
-              ) as HTMLInputElement;
-              if (fileInput) {
-                fileInput.click();
-              }
-            },
-          },
-        ],
-      },
-    ]);
+    // Send "reject" to backend so session state is cleared; next user message will be treated as new attendance data
+    void handleSubmit("reject");
   };
 
   // Handle voice-based attendance approval - save to MongoDB

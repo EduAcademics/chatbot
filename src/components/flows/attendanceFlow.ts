@@ -71,8 +71,12 @@ export interface AttendanceFlowCallbacks {
   setEditingMessageIndex: (index: number | null) => void;
   getChatHistoryLength: () => number;
   exitFlow: () => void;
+  /** Exit flow and create new session (same as course progress / other flows) */
+  exitFlowWithNewSession?: () => void;
   setProcessing: (v: boolean) => void;
   playTTS: (index: number, text: string) => void;
+  /** Send a message to the backend (e.g. "reject" when user clicks Reject so backend clears state) */
+  submitMessage?: (message: string) => Promise<void>;
 }
 
 export interface AttendanceChatParams {
@@ -319,19 +323,6 @@ export async function handleAttendanceChat(
   const state = callbacks.getAttendanceState();
   const msg = userMessage.trim();
 
-  // Handle exit commands first
-  if (shouldExitAttendanceFlow(msg) && state.step !== "init") {
-    callbacks.appendBotMessage({
-      type: "bot",
-      text: "Attendance flow cancelled. Feel free to ask anything else!",
-    });
-    if (isVoiceTriggered) {
-      callbacks.playTTS(-1, "Attendance flow cancelled.");
-    }
-    callbacks.exitFlow();
-    return;
-  }
-
   try {
     callbacks.setProcessing(true);
     const response = await aiAPI.chat({
@@ -343,6 +334,18 @@ export async function handleAttendanceChat(
     if (response.status === "success" && response.data) {
       const { answer, class_info, attendance_summary, edit_mode } = response
         .data as any;
+      const isExitResponse =
+        answer &&
+        (answer.includes("✅ Exited") || /exited.*(attendance|flow)/i.test(answer));
+      if (isExitResponse && callbacks.exitFlowWithNewSession) {
+        callbacks.appendBotMessage({ type: "bot", text: answer });
+        if (isVoiceTriggered) {
+          const tts = (response.data as any).tts_text || answer;
+          callbacks.playTTS(-1, tts);
+        }
+        callbacks.exitFlowWithNewSession();
+        return;
+      }
       const lowerAnswer = (answer ?? "").toLowerCase();
       const isEditMode =
         edit_mode === true ||
@@ -414,7 +417,14 @@ export async function handleAttendanceChat(
 
       if (answer && /attendance marked successfully/i.test(answer)) {
         callbacks.setAttendanceState({ step: "completed" });
-        setTimeout(() => callbacks.exitFlow(), 1500);
+        // Same as exit: new session so user can start "Mark Attendance" or another flow without errors
+        setTimeout(() => {
+          if (callbacks.exitFlowWithNewSession) {
+            callbacks.exitFlowWithNewSession();
+          } else {
+            callbacks.exitFlow();
+          }
+        }, 1500);
       }
     } else {
       const errMsg = response.message || ATTENDANCE_ERR;
@@ -533,40 +543,44 @@ async function handleAttendanceApproval(params: ApprovalParams): Promise<void> {
 }
 
 // ============= REJECTION HANDLER =============
-function handleAttendanceRejection(
+async function handleAttendanceRejection(
   callbacks: AttendanceFlowCallbacks,
   isVoiceTriggered: boolean
-): void {
-  // Reset to collecting step
+): Promise<void> {
+  // Reset local state so UI and backend stay in sync
   callbacks.setAttendanceState({
     step: "collecting",
     attendanceData: [],
     isEditing: false,
   });
-
-  // Clear global state
   callbacks.setGlobalAttendanceData([]);
   callbacks.setEditingMessageIndex(null);
 
-  callbacks.appendBotMessage({
-    type: "bot",
-    text: '❌ Attendance rejected. Please provide new attendance data.\n\nYou can:\n• Say "Mark all present" or "Mark all absent"\n• Say "All present except [names]"\n• List individual students',
-    buttons: [
-      {
-        label: "📤 Upload Image",
-        action: () => {
-          // Trigger file input click
-          const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-          if (fileInput) {
-            fileInput.click();
-          }
+  // Send "reject" to backend so it clears session state; backend response will prompt for new data
+  if (callbacks.submitMessage) {
+    await callbacks.submitMessage("reject");
+    if (isVoiceTriggered) {
+      callbacks.playTTS(-1, "Attendance rejected. Please provide new attendance data.");
+    }
+  } else {
+    callbacks.appendBotMessage({
+      type: "bot",
+      text: '❌ Attendance rejected. Please provide new attendance data.\n\nYou can:\n• Say "Mark all present" or "Mark all absent"\n• Say "All present except [names]"\n• List individual students',
+      buttons: [
+        {
+          label: "📤 Upload Image",
+          action: () => {
+            const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+            if (fileInput) {
+              fileInput.click();
+            }
+          },
         },
-      },
-    ],
-  });
-
-  if (isVoiceTriggered) {
-    callbacks.playTTS(-1, "Attendance rejected. Please provide new attendance data.");
+      ],
+    });
+    if (isVoiceTriggered) {
+      callbacks.playTTS(-1, "Attendance rejected. Please provide new attendance data.");
+    }
   }
 }
 
