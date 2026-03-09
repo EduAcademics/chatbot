@@ -368,6 +368,31 @@
   background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   animation: pulse 2s ease-in-out infinite;
 }
+/* Full Voice Mode button: red when active, with cross-line indicator */
+.chatbot-btn-full-voice.full-voice-active {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.35);
+  position: relative;
+  overflow: visible;
+}
+.chatbot-btn-full-voice.full-voice-active:hover {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.45);
+}
+/* Cross line (diagonal) when Full Voice is active */
+.chatbot-btn-full-voice.full-voice-active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 130%;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  transform: translate(-50%, -50%) rotate(-45deg);
+  pointer-events: none;
+  border-radius: 1px;
+}
 @keyframes pulse {
   0%, 100% {
     box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);

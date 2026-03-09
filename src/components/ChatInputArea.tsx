@@ -221,8 +221,8 @@ export default function ChatInputArea({
             startStreaming(true);
           }
         }}
-        className={`chatbot-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center ${
-          fullVoiceMode ? " recording" : ""
+        className={`chatbot-btn chatbot-btn-full-voice w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center ${
+          fullVoiceMode ? " full-voice-active" : ""
         }`}
         title={
           fullVoiceMode
@@ -232,23 +232,6 @@ export default function ChatInputArea({
       >
         <FiHeadphones />
       </button>
-      {fullVoiceMode && isRecording && (
-        <div
-          className="flex items-center justify-center gap-1.5 px-1.5 sm:px-2 text-xs sm:text-sm text-emerald-600 font-medium flex-shrink-0"
-          title="Listening — speak naturally"
-        >
-          <span
-            className={`inline-block w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full flex-shrink-0 ${
-              isVoiceActive
-                ? "animate-pulse bg-red-500"
-                : "bg-emerald-400"
-            }`}
-          />
-          <span className="hidden sm:inline">
-            {isVoiceActive ? "Speaking…" : "Listening…"}
-          </span>
-        </div>
-      )}
       <button
         onClick={() => handleSubmit()}
         className="chatbot-btn send"
