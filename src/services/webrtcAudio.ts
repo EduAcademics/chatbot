@@ -28,7 +28,21 @@ export class WebRTCAudioService {
       this.callbacks = callbacks;
 
       // Create transport
-      this.transport = new SmallWebRTCTransport();
+      //this.transport = new SmallWebRTCTransport();
+      // Create transport WITH ICE servers
+this.transport = new SmallWebRTCTransport({
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+
+      // TURN server (replace with your real values)
+      {
+        urls: "turn:aiapi.eduacademics.com:3478",
+        username: "webrtc",
+        credential: "webrtcpass"
+      }
+    ]
+});
+
 
       // Create client
       this.client = new PipecatClient({
@@ -64,7 +78,7 @@ export class WebRTCAudioService {
         endpoint: BOT_START_URL,
         requestData: {
           createDailyRoom: false,
-          enableDefaultIceServers: true,
+          enableDefaultIceServers: false,
           transport: 'webrtc',
           language: selectedLanguage,
           full_voice_mode: fullVoiceMode,
