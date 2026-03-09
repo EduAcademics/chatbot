@@ -11,8 +11,6 @@ export interface ChatHeaderWithMenuProps {
   menuRef: React.RefObject<HTMLDivElement | null>;
   isMenuOpen: boolean;
   setIsMenuOpen: (v: boolean) => void;
-  routerMode: "manual" | "auto" | "llm";
-  setRouterMode: (v: "manual" | "auto" | "llm") => void;
   setAutoRouting: (v: boolean) => void;
   handleFlowExit: (opts?: { newSession?: boolean }) => void;
   setUserOptionSelected: (v: boolean) => void;
@@ -43,7 +41,7 @@ export interface ChatHeaderWithMenuProps {
 
 export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
   const {
-    menuRef, isMenuOpen, setIsMenuOpen, routerMode, setRouterMode, setAutoRouting,
+    menuRef, isMenuOpen, setIsMenuOpen, setAutoRouting,
     handleFlowExit, setUserOptionSelected, setChatHistory, activeFlow, setActiveFlow,
     attendanceStep: _attendanceStep, setAttendanceStep, setPendingClassInfo, hoveredMenuItem, setHoveredMenuItem,
     hoverTimeoutRef, getErpContext, sessionId, userId, activeFlowRef, setIsProcessing,
@@ -79,113 +77,6 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
             transition={{ duration: 0.2 }}
             className="three-dot-menu"
           >
-            {/* Routing Mode Selection */}
-            <div style={{ padding: "8px 0" }}>
-              <div
-                style={{
-                  fontSize: "11px",
-                  fontWeight: "bold",
-                  padding: "8px 12px",
-                  color: "#666",
-                }}
-              >
-                Routing Mode:
-              </div>
-
-              {/* Manual */}
-              <div
-                className="menu-item-option"
-                onClick={() => {
-                  setRouterMode("manual");
-                  setAutoRouting(false);
-                  handleFlowExit({ newSession: false });
-                  setUserOptionSelected(false);
-                  setIsMenuOpen(false);
-                  setChatHistory((prev) => [
-                    ...prev,
-                    {
-                      type: "bot",
-                      text: "Manual mode activated. Select a flow from the menu.",
-                    },
-                  ]);
-                }}
-                style={{
-                  backgroundColor:
-                    routerMode === "manual" ? "#f0f0f0" : "white",
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                }}
-              >
-                Manual
-              </div>
-
-              {/* Auto Route */}
-              <div
-                className="menu-item-option"
-                onClick={() => {
-                  setRouterMode("auto");
-                  setAutoRouting(true);
-                  handleFlowExit({ newSession: false });
-                  setUserOptionSelected(false);
-                  setIsMenuOpen(false);
-                  setChatHistory((prev) => [
-                    ...prev,
-                    {
-                      type: "bot",
-                      text: "Auto-routing enabled. I'll detect the flow automatically.",
-                    },
-                  ]);
-                }}
-                style={{
-                  backgroundColor:
-                    routerMode === "auto" ? "#f0f0f0" : "white",
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                }}
-              >
-                Auto Route
-              </div>
-
-              {/* LLM Route */}
-              <div
-                className="menu-item-option"
-                onClick={() => {
-                  setRouterMode("llm");
-                  setAutoRouting(true);
-                  handleFlowExit({ newSession: false });
-                  setUserOptionSelected(false);
-                  setIsMenuOpen(false);
-                  setChatHistory((prev) => [
-                    ...prev,
-                    {
-                      type: "bot",
-                      text: "LLM routing enabled. Using AI-powered flow detection.",
-                    },
-                  ]);
-                }}
-                style={{
-                  backgroundColor:
-                    routerMode === "llm" ? "#f0f0f0" : "white",
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                  borderBottom: "1px solid #ddd",
-                }}
-              >
-                LLM Route
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div
-              style={{
-                borderTop: "1px solid #ddd",
-                margin: "5px 0",
-              }}
-            />
-
             <div
               className="menu-item-option"
               onMouseEnter={() => {

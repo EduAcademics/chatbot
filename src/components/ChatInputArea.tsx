@@ -3,7 +3,7 @@
  * Extracted from AudioStreamerChatBot to reduce main file size.
  */
 import { motion } from "framer-motion";
-import { FiHeadphones, FiMic, FiMicOff, FiSend, FiUpload } from "react-icons/fi";
+import { FiHeadphones, FiSend, FiUpload } from "react-icons/fi";
 import type { FlowType } from "./types";
 import type { AttendanceFlowCallbacks, AttendanceState, ClassInfo } from "./flows/attendanceFlow";
 import { handleAssignmentFileUpload } from "./flows/assignmentFlow";
@@ -232,20 +232,6 @@ export default function ChatInputArea({
       >
         <FiHeadphones />
       </button>
-      {!fullVoiceMode && (
-        <button
-          onClick={() => {
-            activeVoiceButtonRef.current = "mic";
-            isRecording ? stopStreaming() : startStreaming();
-          }}
-          className={`chatbot-btn mic w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl${
-            isRecording ? " recording" : ""
-          }`}
-          title={isRecording ? "Stop Recording" : "Start Recording"}
-        >
-          {isRecording ? <FiMicOff /> : <FiMic />}
-        </button>
-      )}
       {fullVoiceMode && isRecording && (
         <div
           className="flex items-center justify-center gap-1.5 px-1.5 sm:px-2 text-xs sm:text-sm text-emerald-600 font-medium flex-shrink-0"
