@@ -5,7 +5,6 @@
 import { motion } from "framer-motion";
 import { FiMoreVertical } from "react-icons/fi";
 import type { FlowType } from "./types";
-import { aiAPI, leaveApprovalAPI } from "../services/api";
 
 export interface ChatHeaderWithMenuProps {
   menuRef: React.RefObject<HTMLDivElement | null>;
@@ -42,10 +41,10 @@ export interface ChatHeaderWithMenuProps {
 export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
   const {
     menuRef, isMenuOpen, setIsMenuOpen, setAutoRouting,
-    handleFlowExit, setUserOptionSelected, setChatHistory, activeFlow, setActiveFlow,
-    attendanceStep: _attendanceStep, setAttendanceStep, setPendingClassInfo, hoveredMenuItem, setHoveredMenuItem,
-    hoverTimeoutRef, getErpContext, sessionId, userId, activeFlowRef, setIsProcessing,
-    setLeaveApprovalRequests, setRejectReason, setLoadingLeaveRequests,
+    handleFlowExit, setUserOptionSelected, setChatHistory: _setChatHistory, activeFlow, setActiveFlow: _setActiveFlow,
+    attendanceStep: _attendanceStep, setAttendanceStep: _setAttendanceStep, setPendingClassInfo: _setPendingClassInfo, hoveredMenuItem, setHoveredMenuItem,
+    hoverTimeoutRef, getErpContext: _getErpContext, sessionId: _sessionId, userId: _userId, activeFlowRef: _activeFlowRef, setIsProcessing: _setIsProcessing,
+    setLeaveApprovalRequests: _setLeaveApprovalRequests, setRejectReason: _setRejectReason, setLoadingLeaveRequests: _setLoadingLeaveRequests,
     devices, selectedDeviceId, setSelectedDeviceId, languages, selectedLanguage, setSelectedLanguage,
   } = props;
   return (

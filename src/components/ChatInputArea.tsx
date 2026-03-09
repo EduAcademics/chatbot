@@ -42,7 +42,7 @@ export default function ChatInputArea({
   isRecording,
   fullVoiceMode,
   setFullVoiceMode,
-  isVoiceActive,
+  isVoiceActive: _isVoiceActive,
   handleSubmit,
   startStreaming,
   stopStreaming,
