@@ -1199,6 +1199,15 @@ export function useChatbot({
           } else if ((data.data as any)?.flow_name) {
             setActiveFlow((data.data as any).flow_name as FlowType);
           }
+          // Information-based query: play summarized TTS (backend generates voice-friendly summary)
+          if (isVoiceTriggeredRequestRef.current === true) {
+            try {
+              const answerText = data.data?.answer ?? "";
+              void handlePlayTTS(-1, answerText, true);
+            } catch (ttsErr) {
+              console.error("Query TTS playback failed:", ttsErr);
+            }
+          }
         } else if (data.status === "error" && data.message) {
           setChatHistory((prev) => [
             ...prev,
@@ -1208,6 +1217,13 @@ export function useChatbot({
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
+          if (isVoiceTriggeredRequestRef.current === true) {
+            try {
+              void handlePlayTTS(-1, data.message, true);
+            } catch (ttsErr) {
+              console.error("Query TTS playback failed:", ttsErr);
+            }
+          }
         } else {
           setChatHistory((prev) => [
             ...prev,
@@ -1216,6 +1232,13 @@ export function useChatbot({
           // Ã¢Â­Â NEW: Check for exit response
           if (isExitResponse(data)) {
             handleFrontendExit();
+          }
+          if (isVoiceTriggeredRequestRef.current === true) {
+            try {
+              void handlePlayTTS(-1, "No response from AI.", true);
+            } catch (ttsErr) {
+              console.error("Query TTS playback failed:", ttsErr);
+            }
           }
         }
       } catch (err) {
@@ -1229,8 +1252,7 @@ export function useChatbot({
         ]);
         try {
           if (isVoiceTriggeredRequestRef.current === true) {
-            // Treat query error as QUERY flow for TTS
-            void handlePlayTTS(-1, generateQueryTTSSummary(errorMessage), true);
+            void handlePlayTTS(-1, errorMessage, true);
           }
         } catch (ttsErr) {
           console.error("Query TTS playback failed:", ttsErr);
@@ -1534,7 +1556,7 @@ export function useChatbot({
       const reader = await aiAPI.textToSpeech({
         text,
         uuid_question: uniqueId,
-        skip_insight: true,
+        skip_insight: !_isQuery,
       });
 
       // Check if this request is still the latest (not cancelled by a newer request)
