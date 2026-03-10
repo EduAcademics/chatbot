@@ -289,6 +289,22 @@ interface FeedbackResponse {
   message: string;
 }
 
+// Parse response body as JSON; handles empty or invalid body to avoid "Unexpected end of JSON input"
+async function parseJsonResponse<T = unknown>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text || text.trim() === "") {
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    throw new Error("Server returned empty response");
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Invalid response from server: ${text.slice(0, 100)}`);
+  }
+}
+
 // Helper function to get auth token
 const getAuthToken = (): string | null => {
   return localStorage.getItem("token");
@@ -331,7 +347,7 @@ export const authAPI = {
       body: JSON.stringify(credentials),
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse<LoginResponse & { message?: string }>(response);
 
     if (!response.ok) {
       throw new Error(data.message || "Login failed");
@@ -350,7 +366,7 @@ export const userAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<UserFetchResponse>(response);
   },
 };
 
@@ -366,7 +382,7 @@ export const aiAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<QueryHandlerResponse>(response);
   },
 
   // Chat endpoint (used for multiple purposes)
@@ -377,7 +393,7 @@ export const aiAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<ChatResponse>(response);
   },
 
   // Upload regular file
@@ -395,7 +411,7 @@ export const aiAPI = {
       throw new Error("Upload failed");
     }
 
-    return await response.json();
+    return await parseJsonResponse(response);
   },
 
   // Process attendance image
@@ -421,7 +437,7 @@ export const aiAPI = {
       throw new Error("Image processing failed");
     }
 
-    return await response.json();
+    return await parseJsonResponse<ProcessAttendanceImageResponse>(response);
   },
 
   // Process voice class info
@@ -437,7 +453,7 @@ export const aiAPI = {
       },
     );
 
-    return await response.json();
+    return await parseJsonResponse<ProcessVoiceClassInfoResponse>(response);
   },
 
   // Process voice attendance
@@ -453,7 +469,7 @@ export const aiAPI = {
       },
     );
 
-    return await response.json();
+    return await parseJsonResponse<ProcessVoiceAttendanceResponse>(response);
   },
 
   // Start full voice attendance flow
@@ -469,7 +485,7 @@ export const aiAPI = {
       },
     );
 
-    return await response.json();
+    return await parseJsonResponse(response);
   },
 
   // Process full voice attendance input
@@ -486,7 +502,7 @@ export const aiAPI = {
       },
     );
 
-    return await response.json();
+    return await parseJsonResponse(response);
   },
 
   // Text to speech
@@ -514,7 +530,7 @@ export const aiAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<FeedbackResponse>(response);
   },
 
   // Leave chat
@@ -525,7 +541,7 @@ export const aiAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<LeaveChatResponse>(response);
   },
 
   // Assignment chat
@@ -538,7 +554,7 @@ export const aiAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<AssignmentChatResponse>(response);
   },
 
   // Course progress chat (backend-driven flow)
@@ -551,7 +567,7 @@ export const aiAPI = {
       body: JSON.stringify(request),
     });
 
-    return await response.json();
+    return await parseJsonResponse<CourseProgressChatResponse>(response);
   },
 
   // Upload assignment file
@@ -575,7 +591,7 @@ export const aiAPI = {
       throw new Error("Assignment file upload failed");
     }
 
-    return await response.json();
+    return await parseJsonResponse(response);
   },
 };
 
@@ -617,7 +633,7 @@ export const leaveApprovalAPI = {
       throw new Error("Failed to fetch leave approval requests");
     }
 
-    return await response.json();
+    return await parseJsonResponse<LeaveApprovalResponse>(response);
   },
 
   // Approve a leave request
@@ -654,7 +670,7 @@ export const leaveApprovalAPI = {
       throw new Error("Failed to approve leave request");
     }
 
-    return await response.json();
+    return await parseJsonResponse(response);
   },
 
   // Reject a leave request
@@ -692,7 +708,7 @@ export const leaveApprovalAPI = {
       throw new Error("Failed to reject leave request");
     }
 
-    return await response.json();
+    return await parseJsonResponse(response);
   },
 };
 
@@ -800,7 +816,7 @@ export const courseProgressAPI = {
       throw new Error("Failed to fetch class sections");
     }
 
-    return await response.json();
+    return await parseJsonResponse<FetchClassSectionsResponse>(response);
   },
 
   // Get course progress for a class and section
@@ -833,6 +849,6 @@ export const courseProgressAPI = {
       throw new Error("Failed to fetch course progress");
     }
 
-    return await response.json();
+    return await parseJsonResponse<GetCourseProgressResponse>(response);
   },
 };
