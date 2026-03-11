@@ -1,8 +1,6 @@
 import { PipecatClient, RTVIEvent, type RTVIMessage, type Participant } from '@pipecat-ai/client-js';
 import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport';
-
-const BOT_START_URL = import.meta.env.VITE_BOT_START_URL || 'http://localhost:7860/start';
-const BOT_START_PUBLIC_API_KEY = import.meta.env.VITE_BOT_START_PUBLIC_API_KEY;
+import { BOT_START_URL, BOT_START_PUBLIC_API_KEY, ICE_SERVERS } from '../config/settings';
 
 export interface WebRTCAudioCallbacks {
   onTranscript: (text: string, isFinal: boolean) => void;
@@ -29,19 +27,10 @@ export class WebRTCAudioService {
 
       // Create transport
       //this.transport = new SmallWebRTCTransport();
-      // Create transport WITH ICE servers
-this.transport = new SmallWebRTCTransport({
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-
-      // TURN server (replace with your real values)
-      {
-        urls: "turn:aiapi.eduacademics.com:3478",
-        username: "webrtc",
-        credential: "webrtcpass"
-      }
-    ]
-});
+      // Create transport with ICE servers from config (.env)
+      this.transport = new SmallWebRTCTransport({
+        iceServers: ICE_SERVERS,
+      });
 
 
       // Create client

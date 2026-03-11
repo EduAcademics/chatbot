@@ -61,5 +61,6 @@ export const LANGUAGES = [
   { label: "Marathi (India)", value: "mr-IN" },
 ] as const;
 
-export const WS_BASE = import.meta.env.VITE_WS_BASE_URL;
+import { WS_BASE_URL } from "../config/settings";
+export const WS_BASE = WS_BASE_URL;
 

@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "../config/api";
+import { API_BASE_URL, ERP_API_BASE_URL } from "../config/settings";
 
 // Types
 export interface LoginCredentials {
@@ -712,8 +712,7 @@ export const leaveApprovalAPI = {
   },
 };
 
-// Course Progress API
-const ERP_API_BASE_URL = "https://api.eduacademics.com";
+// Course Progress API (ERP_API_BASE_URL from config/settings → .env)
 
 // @ts-expect-error - Kept for future use
 interface _ClassSectionOption {
