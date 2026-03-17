@@ -5,8 +5,13 @@
 import { motion } from "framer-motion";
 import { FiHeadphones, FiSend, FiUpload } from "react-icons/fi";
 import type { FlowType } from "./types";
-import type { AttendanceFlowCallbacks, AttendanceState, ClassInfo } from "./flows/attendanceFlow";
+import type {
+  AttendanceFlowCallbacks,
+  AttendanceState,
+  ClassInfo,
+} from "./flows/attendanceFlow";
 import { handleAssignmentFileUpload } from "./flows/assignmentFlow";
+import { handleSubmissionFileUpload } from "./flows/submissionFlow";
 import { handleAttendanceImageUpload } from "./flows/attendanceFlow";
 
 export interface ChatInputAreaProps {
@@ -60,21 +65,26 @@ export default function ChatInputArea({
   getErpContext,
   activeVoiceButtonRef,
 }: ChatInputAreaProps) {
-  const isAttendanceFlow = activeFlow === "attendance" || activeFlow === "voice_attendance";
+  const isAttendanceFlow =
+    activeFlow === "attendance" || activeFlow === "voice_attendance";
   return (
-    <div className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}>
+    <div
+      className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}
+    >
       <div className="relative">
         <input
           type="file"
           accept={
-            activeFlow === "assignment"
+            activeFlow === "assignment" || activeFlow === "submission"
               ? ".pdf,.doc,.docx,image/*"
               : ".xlsx,.xls,.csv,image/*"
           }
           id="file-upload-input"
           className="hidden"
           disabled={
-            activeFlow !== "attendance" && activeFlow !== "assignment"
+            activeFlow !== "attendance" &&
+            activeFlow !== "assignment" &&
+            activeFlow !== "submission"
           }
           onChange={async (e) => {
             const file = e.target.files?.[0];
@@ -147,28 +157,45 @@ export default function ChatInputArea({
                 appendBotMessage: (msg) =>
                   setChatHistory((prev) => [...prev, msg]),
               });
+            } else if (activeFlow === "submission") {
+              await handleSubmissionFileUpload({
+                file,
+                sessionId,
+                userId,
+                getErpContext,
+                appendBotMessage: (msg) =>
+                  setChatHistory((prev) => [...prev, msg]),
+              });
             }
             e.target.value = "";
           }}
         />
         <motion.label
           htmlFor={
-            activeFlow === "attendance" || activeFlow === "assignment"
+            activeFlow === "attendance" ||
+            activeFlow === "assignment" ||
+            activeFlow === "submission"
               ? "file-upload-input"
               : undefined
           }
           className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${
-            activeFlow === "attendance" || activeFlow === "assignment"
+            activeFlow === "attendance" ||
+            activeFlow === "assignment" ||
+            activeFlow === "submission"
               ? "cursor-pointer"
               : "cursor-not-allowed"
           }`}
           whileHover={
-            activeFlow === "attendance" || activeFlow === "assignment"
+            activeFlow === "attendance" ||
+            activeFlow === "assignment" ||
+            activeFlow === "submission"
               ? { scale: 1.08, y: -2 }
               : {}
           }
           whileTap={
-            activeFlow === "attendance" || activeFlow === "assignment"
+            activeFlow === "attendance" ||
+            activeFlow === "assignment" ||
+            activeFlow === "submission"
               ? { scale: 0.95 }
               : {}
           }
@@ -177,12 +204,15 @@ export default function ChatInputArea({
               ? "Upload Excel or Image"
               : activeFlow === "assignment"
                 ? "Upload Assignment File (PDF, DOCX, Image)"
-                : "Enable assignment or attendance flow to upload"
+                : activeFlow === "submission"
+                  ? "Upload Submission File"
+                  : "Enable assignment or attendance flow to upload"
           }
           onClick={(e) => {
             if (
               activeFlow !== "attendance" &&
-              activeFlow !== "assignment"
+              activeFlow !== "assignment" &&
+              activeFlow !== "submission"
             ) {
               e.preventDefault();
               e.stopPropagation();
@@ -204,9 +234,7 @@ export default function ChatInputArea({
         }
         value={inputText}
         onChange={(e) => setInputText(e.target.value)}
-        onKeyDown={(e) =>
-          e.key === "Enter" && !isRecording && handleSubmit()
-        }
+        onKeyDown={(e) => e.key === "Enter" && !isRecording && handleSubmit()}
         className="chatbot-input text-base sm:text-lg px-3 py-2 sm:px-4 sm:py-3 min-h-[40px] sm:min-h-[48px]"
         disabled={isRecording && fullVoiceMode}
       />

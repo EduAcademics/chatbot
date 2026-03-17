@@ -9,6 +9,8 @@ export type FlowType =
   | "leave"
   | "leave_approval"
   | "assignment"
+  | "submission"
+  | "review"
   | "course_progress"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";
@@ -62,4 +64,3 @@ export const LANGUAGES = [
 ] as const;
 
 export const WS_BASE = import.meta.env.VITE_WS_BASE_URL;
-
