@@ -38,6 +38,11 @@ export interface ChatInputAreaProps {
   uploadFile: (file: File) => Promise<any>;
   getErpContext: () => { academic_session: string; branch_token: string };
   activeVoiceButtonRef: React.MutableRefObject<"audio" | "mic" | null>;
+  handlePlayTTS: (
+    index: number,
+    text: string,
+    bypassSummary?: boolean,
+  ) => Promise<void>;
 }
 
 export default function ChatInputArea({
@@ -64,6 +69,7 @@ export default function ChatInputArea({
   uploadFile,
   getErpContext,
   activeVoiceButtonRef,
+  handlePlayTTS,
 }: ChatInputAreaProps) {
   const isAttendanceFlow =
     activeFlow === "attendance" || activeFlow === "voice_attendance";
@@ -165,6 +171,7 @@ export default function ChatInputArea({
                 getErpContext,
                 appendBotMessage: (msg) =>
                   setChatHistory((prev) => [...prev, msg]),
+                playTTS: (idx, text) => void handlePlayTTS(idx, text, true),
               });
             }
             e.target.value = "";

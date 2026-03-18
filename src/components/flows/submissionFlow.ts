@@ -37,6 +37,7 @@ export interface SubmissionFileUploadParams {
   userId: string;
   getErpContext: () => { academic_session: string; branch_token: string };
   appendBotMessage: (msg: SubmissionBotMessage) => void;
+  playTTS?: (index: number, text: string) => void;
 }
 
 export function shouldExitSubmissionOnError(answer: string): boolean {
@@ -136,7 +137,7 @@ export async function handleSubmissionChat(
 
       appendBotMessage({ type: "bot", answer, activeTab: "answer" });
 
-      if (isVoiceTriggered) {
+      if (isVoiceTriggered || shouldExitSubmissionOnSuccess(answer)) {
         try {
           // Use backend tts_text (short, user-friendly) when provided; else summarize full answer
           const textToSpeak =
@@ -166,7 +167,13 @@ export async function handleSubmissionChat(
 
       if (shouldExitSubmissionOnSuccess(answer)) {
         console.log("✅ Homework submitted successfully, exiting flow");
-        setTimeout(exitFlow, 1000);
+        const spokenText =
+          ttsText != null && ttsText !== "" ? ttsText : getTTSSummary(answer);
+        const exitDelayMs = Math.min(
+          7000,
+          Math.max(2200, spokenText.length * 45),
+        );
+        setTimeout(exitFlow, exitDelayMs);
       }
     } else {
       const errMsg = result.error || SUBMISSION_ERR;
@@ -199,7 +206,8 @@ export async function handleSubmissionChat(
 export async function handleSubmissionFileUpload(
   params: SubmissionFileUploadParams,
 ): Promise<void> {
-  const { file, sessionId, userId, getErpContext, appendBotMessage } = params;
+  const { file, sessionId, userId, getErpContext, appendBotMessage, playTTS } =
+    params;
 
   try {
     const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
@@ -224,6 +232,14 @@ export async function handleSubmissionFileUpload(
       type: "bot",
       text: `✅ File uploaded successfully! Upload more or say 'skip' to continue.`,
     });
+    try {
+      playTTS?.(
+        -1,
+        "File uploaded successfully! Upload more or say skip to continue.",
+      );
+    } catch (ttsErr) {
+      console.error("Submission upload TTS playback failed:", ttsErr);
+    }
 
     const fileMessage = `Add file ${fileUuid} to attachments`;
     setTimeout(async () => {

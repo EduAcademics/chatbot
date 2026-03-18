@@ -136,6 +136,7 @@ const AudioStreamerChatBot = ({
             uploadFile={api.uploadFile}
             getErpContext={api.getErpContext}
             activeVoiceButtonRef={api.activeVoiceButtonRef}
+            handlePlayTTS={api.handlePlayTTS}
           />
         </div>
       </div>

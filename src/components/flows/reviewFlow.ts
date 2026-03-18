@@ -112,7 +112,7 @@ export async function handleReviewChat(
 
       appendBotMessage({ type: "bot", answer, activeTab: "answer" });
 
-      if (isVoiceTriggered) {
+      if (isVoiceTriggered || shouldExitReviewOnSuccess(answer)) {
         try {
           // Use backend tts_text (short, user-friendly) when provided; else summarize full answer
           const textToSpeak =
