@@ -3,7 +3,7 @@
  * Extracted from AudioStreamerChatBot to reduce main file size.
  */
 import { motion } from "framer-motion";
-import { FiHeadphones, FiSend, FiUpload } from "react-icons/fi";
+import { FiMic, FiSend, FiUpload } from "react-icons/fi";
 import type { FlowType } from "./types";
 import type { AttendanceFlowCallbacks, AttendanceState, ClassInfo } from "./flows/attendanceFlow";
 import { handleAssignmentFileUpload } from "./flows/assignmentFlow";
@@ -230,7 +230,7 @@ export default function ChatInputArea({
             : "Full Voice Mode — Mic always on, auto turn detection"
         }
       >
-        <FiHeadphones />
+        <FiMic />
       </button>
       <button
         onClick={() => handleSubmit()}

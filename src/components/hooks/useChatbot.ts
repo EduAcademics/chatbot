@@ -1200,7 +1200,11 @@ export function useChatbot({
             setActiveFlow((data.data as any).flow_name as FlowType);
           }
           // Information-based query: play summarized TTS (backend generates voice-friendly summary)
-          if (isVoiceTriggeredRequestRef.current === true) {
+          const shouldPlayQueryTTS =
+            isVoiceTriggeredRequestRef.current === true ||
+            fullVoiceMode ||
+            activeVoiceButtonRef.current !== null;
+          if (shouldPlayQueryTTS) {
             try {
               const answerText = data.data?.answer ?? "";
               void handlePlayTTS(-1, answerText, true);
@@ -1217,7 +1221,11 @@ export function useChatbot({
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
-          if (isVoiceTriggeredRequestRef.current === true) {
+          const shouldPlayQueryErrorTTS =
+            isVoiceTriggeredRequestRef.current === true ||
+            fullVoiceMode ||
+            activeVoiceButtonRef.current !== null;
+          if (shouldPlayQueryErrorTTS) {
             try {
               void handlePlayTTS(-1, data.message, true);
             } catch (ttsErr) {
@@ -1233,7 +1241,11 @@ export function useChatbot({
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
-          if (isVoiceTriggeredRequestRef.current === true) {
+          const shouldPlayNoResponseTTS =
+            isVoiceTriggeredRequestRef.current === true ||
+            fullVoiceMode ||
+            activeVoiceButtonRef.current !== null;
+          if (shouldPlayNoResponseTTS) {
             try {
               void handlePlayTTS(-1, "No response from AI.", true);
             } catch (ttsErr) {
@@ -1251,7 +1263,11 @@ export function useChatbot({
           },
         ]);
         try {
-          if (isVoiceTriggeredRequestRef.current === true) {
+          const shouldPlayQueryExceptionTTS =
+            isVoiceTriggeredRequestRef.current === true ||
+            fullVoiceMode ||
+            activeVoiceButtonRef.current !== null;
+          if (shouldPlayQueryExceptionTTS) {
             void handlePlayTTS(-1, errorMessage, true);
           }
         } catch (ttsErr) {
