@@ -1,9 +1,11 @@
+import { useState } from "react";
 import "./markdown-tables.css";
 import "./chatbot.css";
 import ClassInfoModal from "./ClassInfoModal";
 import ChatInputArea from "./ChatInputArea";
 import ChatHeaderWithMenu from "./ChatHeaderWithMenu";
 import ChatMessageList from "./ChatMessageList";
+import FilePreviewModal from "./FilePreviewModal";
 import { useChatbot } from "./hooks/useChatbot";
 
 const AudioStreamerChatBot = ({
@@ -16,6 +18,19 @@ const AudioStreamerChatBot = ({
   loginId: string;
 }) => {
   const api = useChatbot({ userId, roles, loginId });
+  // const api = useChatbot({ userId, roles, email });
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFilename, setPreviewFilename] = useState<string>("Attachment");
+
+  const handleOpenPreview = (url: string, filename: string) => {
+    setPreviewUrl(url);
+    setPreviewFilename(filename || "Attachment");
+  };
+
+  const handleClosePreview = () => {
+    setPreviewUrl(null);
+    setPreviewFilename("Attachment");
+  };
 
   return (
     <>
@@ -82,7 +97,9 @@ const AudioStreamerChatBot = ({
             handleAddStudent={api.handleAddStudent}
             handleRemoveStudent={api.handleRemoveStudent}
             handleSaveAttendance={api.handleSaveAttendance}
-            handleUnifiedAttendanceApproval={api.handleUnifiedAttendanceApproval}
+            handleUnifiedAttendanceApproval={
+              api.handleUnifiedAttendanceApproval
+            }
             handleTextAttendanceRejection={api.handleTextAttendanceRejection}
             setActiveFlow={api.setActiveFlow}
             setAttendanceStep={api.setAttendanceStep}
@@ -94,6 +111,7 @@ const AudioStreamerChatBot = ({
             setRejectReason={api.setRejectReason}
             userId={api.userId}
             getErpContext={api.getErpContext}
+            onOpenPreview={handleOpenPreview}
           />
           <ChatInputArea
             activeFlow={api.activeFlow}
@@ -119,9 +137,18 @@ const AudioStreamerChatBot = ({
             uploadFile={api.uploadFile}
             getErpContext={api.getErpContext}
             activeVoiceButtonRef={api.activeVoiceButtonRef}
+            handlePlayTTS={api.handlePlayTTS}
           />
         </div>
       </div>
+
+      {previewUrl && (
+        <FilePreviewModal
+          url={previewUrl}
+          filename={previewFilename}
+          onClose={handleClosePreview}
+        />
+      )}
     </>
   );
 };

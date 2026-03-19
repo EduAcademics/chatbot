@@ -9,6 +9,8 @@ export type FlowType =
   | "leave"
   | "leave_approval"
   | "assignment"
+  | "submission"
+  | "review"
   | "course_progress"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";

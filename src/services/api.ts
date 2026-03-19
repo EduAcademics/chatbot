@@ -188,6 +188,48 @@ interface AssignmentChatResponse {
   message?: string;
 }
 
+interface SubmissionChatRequest {
+  session_id: string;
+  user_id?: string; // Optional: user ID (used directly as student_id)
+  query: string;
+  bearer_token?: string; // Optional: Bearer token for ERP API
+  academic_session?: string; // Optional: Academic session
+  branch_token?: string; // Optional: Branch token
+  voice_mode?: boolean; // Optional: enable TTS for voice / full-voice mode
+  tts?: boolean; // Optional: alternative to voice_mode
+  tts_voice?: string; // Optional: TTS voice to use
+}
+
+interface SubmissionChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+  };
+  message?: string;
+}
+
+interface ReviewChatRequest {
+  session_id: string;
+  user_id?: string; // Optional: user ID (used directly as teacher_id)
+  query: string;
+  bearer_token?: string; // Optional: Bearer token for ERP API
+  academic_session?: string; // Optional: Academic session
+  branch_token?: string; // Optional: Branch token
+  voice_mode?: boolean; // Optional: enable TTS for voice / full-voice mode
+  tts?: boolean; // Optional: alternative to voice_mode
+  tts_voice?: string; // Optional: TTS voice to use
+}
+
+interface ReviewChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+  };
+  message?: string;
+}
+
 interface CourseProgressChatRequest {
   session_id: string;
   query: string;
@@ -350,7 +392,9 @@ export const authAPI = {
       body: JSON.stringify(credentials),
     });
 
-    const data = await parseJsonResponse<LoginResponse & { message?: string }>(response);
+    const data = await parseJsonResponse<LoginResponse & { message?: string }>(
+      response,
+    );
 
     if (!response.ok) {
       throw new Error(data.message || "Login failed");
@@ -558,6 +602,32 @@ export const aiAPI = {
     });
 
     return await parseJsonResponse<AssignmentChatResponse>(response);
+  },
+
+  // Submission chat
+  submissionChat: async (
+    request: SubmissionChatRequest,
+  ): Promise<SubmissionChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/submission-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
+  // Review chat
+  reviewChat: async (
+    request: ReviewChatRequest,
+  ): Promise<ReviewChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/review-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
   },
 
   // Course progress chat (backend-driven flow)

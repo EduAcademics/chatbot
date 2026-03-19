@@ -10,6 +10,8 @@ import {
 import { API_BASE_URL } from "../../config/api";
 import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
+import { handleSubmissionChat } from "../flows/submissionFlow";
+import { handleReviewChat } from "../flows/reviewFlow";
 import {
   handleAttendanceChat,
   handleAttendanceImageUpload,
@@ -48,7 +50,9 @@ export interface UseChatbotReturn {
   activeFlow: FlowType;
   setActiveFlow: (v: FlowType) => void;
   attendanceStep: "class_info" | "student_details" | "completed";
-  setAttendanceStep: (v: "class_info" | "student_details" | "completed") => void;
+  setAttendanceStep: (
+    v: "class_info" | "student_details" | "completed",
+  ) => void;
   setPendingClassInfo: (v: ClassInfo | null) => void;
   hoveredMenuItem: string | null;
   setHoveredMenuItem: (v: string | null) => void;
@@ -59,7 +63,9 @@ export interface UseChatbotReturn {
   activeFlowRef: RefObject<FlowType>;
   setIsProcessing: (v: boolean) => void;
   setLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
-  setRejectReason: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
+  setRejectReason: React.Dispatch<
+    React.SetStateAction<{ [key: string]: string }>
+  >;
   setLoadingLeaveRequests: (v: boolean) => void;
   devices: MediaDeviceInfo[];
   selectedDeviceId: string;
@@ -80,9 +86,15 @@ export interface UseChatbotReturn {
   showCorrectionBox: number | null;
   setShowCorrectionBox: (v: number | null) => void;
   feedbackComment: { [idx: number]: string };
-  setFeedbackComment: React.Dispatch<React.SetStateAction<{ [idx: number]: string }>>;
+  setFeedbackComment: React.Dispatch<
+    React.SetStateAction<{ [idx: number]: string }>
+  >;
   correctionBoxRef: RefObject<HTMLDivElement | null>;
-  handlePlayTTS: (idx: number, text: string, isQuery?: boolean) => Promise<void>;
+  handlePlayTTS: (
+    idx: number,
+    text: string,
+    isQuery?: boolean,
+  ) => Promise<void>;
   handleSendFeedback: (
     idx: number,
     type: "Approved" | "Rejected",
@@ -403,7 +415,10 @@ export function useChatbot({
    */
   const handleFlowExit = (options?: { newSession?: boolean }) => {
     const flow = activeFlowRef.current;
-    console.log("Ã°Å¸Å¡Âª handleFlowExit:", { flow, newSession: options?.newSession });
+    console.log("Ã°Å¸Å¡Âª handleFlowExit:", {
+      flow,
+      newSession: options?.newSession,
+    });
 
     interruptTTS();
 
@@ -786,9 +801,9 @@ export function useChatbot({
     // Use activeFlow as fallback when activeFlowRef is stale (e.g. in leave_approval voice mode)
     const flowToExitOnCommand =
       isExitCommand && activeFlow !== "none" && activeFlow !== "query"
-        ? (activeFlowRef.current !== "none" && activeFlowRef.current !== "query"
-            ? activeFlowRef.current
-            : activeFlow)
+        ? activeFlowRef.current !== "none" && activeFlowRef.current !== "query"
+          ? activeFlowRef.current
+          : activeFlow
         : null;
 
     if (flowToExitOnCommand) {
@@ -879,7 +894,9 @@ export function useChatbot({
       inLeaveApprovalFlow
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
-      console.log("Ã°Å¸â€œÂ Staying in current flow (multi-step process active)");
+      console.log(
+        "Ã°Å¸â€œÂ Staying in current flow (multi-step process active)",
+      );
       targetFlow =
         activeFlowRef.current !== "none" && activeFlowRef.current !== "query"
           ? activeFlowRef.current
@@ -986,7 +1003,9 @@ export function useChatbot({
           if (targetFlow === ("assignment_create" as any)) {
             targetFlow = "assignment";
           } else if (targetFlow === ("assignment_submit" as any)) {
-            targetFlow = "assignment"; // For now, both map to same flow
+            targetFlow = "submission";
+          } else if (targetFlow === ("review_submission" as any)) {
+            targetFlow = "review";
           }
         } catch (error) {
           console.error("❌ Classification error:", error);
@@ -1005,7 +1024,9 @@ export function useChatbot({
 
         // Low confidence warning (but still proceed)
         if (classificationResult.confidence < 0.25) {
-          console.warn("Ã¢Å¡Â Ã¯Â¸Â Low classification confidence, defaulting to query");
+          console.warn(
+            "Ã¢Å¡Â Ã¯Â¸Â Low classification confidence, defaulting to query",
+          );
           targetFlow = "query";
         }
       }
@@ -1092,6 +1113,44 @@ export function useChatbot({
         console.log("Ã°Å¸â€œÂ Processing first assignment message");
       }
 
+      // Initialize submission flow
+      if (targetFlow === "submission" && isNewFlowInitialization) {
+        console.log("🔤 Initializing submission flow state");
+        console.log("🔤 Setting activeFlow to 'submission'");
+
+        // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
+        activeFlowRef.current = "submission";
+        setActiveFlow("submission");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        // Do not switch to push-to-talk if user started this flow by voice (full voice mode stays on)
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
+        console.log("🔤 Processing first submission message");
+      }
+
+      // Initialize review flow
+      if (targetFlow === "review" && isNewFlowInitialization) {
+        activeFlowRef.current = "review";
+        setActiveFlow("review");
+      }
+
       // Initialize leave flow
       if (targetFlow === "leave" && isNewFlowInitialization) {
         console.log("Ã°Å¸â€œÂ Initializing leave flow state");
@@ -1131,7 +1190,9 @@ export function useChatbot({
         isVoiceTriggeredRequestRef.current = false;
         // Don't return - let the flow continue to make the API call.
         // The backend leave agent will return the initial prompt (Step 1: Half Day / Full Day / Long Leave).
-        console.log("Ã°Å¸â€œÂ Leave flow initialized, continuing to API call...");
+        console.log(
+          "Ã°Å¸â€œÂ Leave flow initialized, continuing to API call...",
+        );
       }
     } else {
       console.log("Ã°Å¸â€œÂ Using current activeFlow:", activeFlow);
@@ -1315,7 +1376,8 @@ export function useChatbot({
         isVoiceTriggeredRequestRef.current = false;
       }
       // Use leaveVoiceInitiatedRef so first response TTS plays (ref is set above before we consume isVoiceTriggeredRequestRef)
-      const shouldPlayTTSForLeave = leaveMessageViaVoice || leaveVoiceInitiatedRef.current;
+      const shouldPlayTTSForLeave =
+        leaveMessageViaVoice || leaveVoiceInitiatedRef.current;
       await handleLeaveChat({
         userMessage,
         sessionId,
@@ -1344,6 +1406,34 @@ export function useChatbot({
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateQueryTTSSummary,
       });
+    } else if (targetFlow === "submission") {
+      await handleSubmissionChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "review") {
+      await handleReviewChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
     } else if (targetFlow === "course_progress") {
       // Course progress flow - fully backend-driven
       // Send user message to backend and render the response
@@ -1360,7 +1450,8 @@ export function useChatbot({
         });
 
         if (response.status === "success" && response.data) {
-          const answer = response.data.answer || "How can I help with course progress?";
+          const answer =
+            response.data.answer || "How can I help with course progress?";
           const botMessage: any = {
             type: "bot",
             text: answer,
@@ -1427,7 +1518,10 @@ export function useChatbot({
       }
     } else if (targetFlow === "leave_approval") {
       // Exit command: handle exit immediately (no backend for leave approval)
-      if (flowToExitOnCommand === "leave_approval" || (isExitCommand && targetFlow === "leave_approval")) {
+      if (
+        flowToExitOnCommand === "leave_approval" ||
+        (isExitCommand && targetFlow === "leave_approval")
+      ) {
         setChatHistory((prev) => [
           ...prev,
           {
@@ -1441,7 +1535,7 @@ export function useChatbot({
           if (isVoiceTriggeredRequestRef.current === true) {
             void handlePlayTTS(
               -1,
-              "You've exited the leave approval flow. How can I help you next?"
+              "You've exited the leave approval flow. How can I help you next?",
             );
           }
         } catch (ttsErr) {

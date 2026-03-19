@@ -21,32 +21,58 @@ export interface ChatMessageListProps {
   editingMessageIndex: number | null;
   setEditingMessageIndex: (v: number | null) => void;
   attendanceData: AttendanceRecord[];
-  setAttendanceData: (v: AttendanceRecord[] | ((prev: AttendanceRecord[]) => AttendanceRecord[])) => void;
+  setAttendanceData: (
+    v: AttendanceRecord[] | ((prev: AttendanceRecord[]) => AttendanceRecord[]),
+  ) => void;
   classInfo: ClassInfo | null;
   setClassInfo: (v: ClassInfo | null) => void;
   showCorrectionBox: number | null;
   setShowCorrectionBox: (v: number | null) => void;
   feedbackComment: { [idx: number]: string };
-  setFeedbackComment: React.Dispatch<React.SetStateAction<{ [idx: number]: string }>>;
+  setFeedbackComment: React.Dispatch<
+    React.SetStateAction<{ [idx: number]: string }>
+  >;
   correctionBoxRef: React.RefObject<HTMLDivElement | null>;
-  handlePlayTTS: (idx: number, text: string, isQuery?: boolean) => Promise<void>;
-  handleSendFeedback: (idx: number, type: "Approved" | "Rejected", comment?: string) => Promise<void>;
-  handleAttendanceDataChange: (index: number, field: string, value: string) => void;
+  handlePlayTTS: (
+    idx: number,
+    text: string,
+    isQuery?: boolean,
+  ) => Promise<void>;
+  handleSendFeedback: (
+    idx: number,
+    type: "Approved" | "Rejected",
+    comment?: string,
+  ) => Promise<void>;
+  handleAttendanceDataChange: (
+    index: number,
+    field: string,
+    value: string,
+  ) => void;
   handleAddStudent: () => void;
   handleRemoveStudent: (index: number) => void;
   handleSaveAttendance: (messageIndex: number) => Promise<void>;
-  handleUnifiedAttendanceApproval: (messageIndex?: number, attendanceType?: "text" | "image" | "voice", fallbackAttendanceData?: any[], fallbackClassInfo?: any) => Promise<void>;
+  handleUnifiedAttendanceApproval: (
+    messageIndex?: number,
+    attendanceType?: "text" | "image" | "voice",
+    fallbackAttendanceData?: any[],
+    fallbackClassInfo?: any,
+  ) => Promise<void>;
   handleTextAttendanceRejection: () => void;
   setActiveFlow: (v: FlowType) => void;
-  setAttendanceStep: (v: "class_info" | "student_details" | "completed") => void;
+  setAttendanceStep: (
+    v: "class_info" | "student_details" | "completed",
+  ) => void;
   setChatHistory: React.Dispatch<React.SetStateAction<any[]>>;
   leaveApprovalRequests: any[];
   setLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
   loadingLeaveRequests: boolean;
   rejectReason: { [key: string]: string };
-  setRejectReason: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
+  setRejectReason: React.Dispatch<
+    React.SetStateAction<{ [key: string]: string }>
+  >;
   userId: string;
   getErpContext: () => { academic_session: string; branch_token: string };
+  onOpenPreview: (url: string, filename: string) => void;
 }
 
 export default function ChatMessageList(props: ChatMessageListProps) {
@@ -79,13 +105,13 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     rejectReason,
     setRejectReason,
     getErpContext,
+    onOpenPreview,
   } = props;
 
   return (
     <div className="chatbot-chatbox" ref={chatBoxRef}>
       {/* Attendance Flow Step Indicator - Mobile-friendly */}
-      {(activeFlow === "attendance" ||
-        activeFlow === "voice_attendance") && (
+      {(activeFlow === "attendance" || activeFlow === "voice_attendance") && (
         <div className="attendance-step-indicator bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 mb-3 sm:mb-4 overflow-x-auto">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-wrap sm:flex-nowrap">
             <div
@@ -162,9 +188,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
           <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
             {msg.type === "user" ? (
               <>
-                <span className="chatbot-msg-bubble user">
-                  {msg.text}
-                </span>
+                <span className="chatbot-msg-bubble user">{msg.text}</span>
                 {/* <span className="chatbot-msg-icon">
                   <FiUser />
                 </span> */}
@@ -194,9 +218,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-4 sm:px-6">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 backdrop-blur rounded-xl flex items-center justify-center">
-                            <span className="text-xl sm:text-2xl">
-                              📊
-                            </span>
+                            <span className="text-xl sm:text-2xl">📊</span>
                           </div>
                           <div className="flex-1 min-w-0">
                             <h4 className="text-base sm:text-lg font-bold text-white truncate">
@@ -213,9 +235,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                         {(() => {
                           const progressData = msg.courseProgress as any;
                           const teacherDiarys =
-                            progressData.teacherDiarys ||
-                            progressData ||
-                            [];
+                            progressData.teacherDiarys || progressData || [];
                           if (
                             !Array.isArray(teacherDiarys) ||
                             teacherDiarys.length === 0
@@ -225,9 +245,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                           const totalProgress = teacherDiarys.reduce(
                             (sum: number, s: any) =>
                               sum +
-                              (s.avrage_progress ||
-                                s.average_progress ||
-                                0),
+                              (s.avrage_progress || s.average_progress || 0),
                             0,
                           );
                           const avgOverall = Math.round(
@@ -253,9 +271,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 />
                               </div>
                               <div className="flex justify-between mt-2 text-xs text-white/70">
-                                <span>
-                                  {teacherDiarys.length} Subjects
-                                </span>
+                                <span>{teacherDiarys.length} Subjects</span>
                                 <span>
                                   {avgOverall >= 75
                                     ? "🎉 Great!"
@@ -274,9 +290,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                         {(() => {
                           const progressData = msg.courseProgress as any;
                           const teacherDiarys =
-                            progressData.teacherDiarys ||
-                            progressData ||
-                            [];
+                            progressData.teacherDiarys || progressData || [];
 
                           if (
                             !Array.isArray(teacherDiarys) ||
@@ -323,8 +337,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                               bg: "bg-red-50",
                               bar: "bg-gradient-to-r from-red-400 to-rose-500",
                               text: "text-red-700",
-                              badge:
-                                "bg-red-100 text-red-700 border-red-200",
+                              badge: "bg-red-100 text-red-700 border-red-200",
                             };
                           };
 
@@ -339,8 +352,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                     subject.average_progress ||
                                     0;
                                   const chapters = subject.chapters || [];
-                                  const style =
-                                    getProgressStyle(avgProgress);
+                                  const style = getProgressStyle(avgProgress);
 
                                   return (
                                     <details
@@ -384,9 +396,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                           <div className="flex items-center justify-between mt-1.5">
                                             <span className="text-xs text-gray-500">
                                               {chapters.length} chapter
-                                              {chapters.length !== 1
-                                                ? "s"
-                                                : ""}
+                                              {chapters.length !== 1 ? "s" : ""}
                                             </span>
                                             <span className="text-xs text-indigo-500 group-open:rotate-180 transition-transform duration-200">
                                               ▼ Details
@@ -407,8 +417,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                 chapter.name ||
                                                 "Unknown Chapter";
                                               const chapterProgress =
-                                                chapter.coverage_status ||
-                                                0;
+                                                chapter.coverage_status || 0;
                                               const chStyle =
                                                 getProgressStyle(
                                                   chapterProgress,
@@ -416,10 +425,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
 
                                               return (
                                                 <div
-                                                  key={
-                                                    chapter.id ||
-                                                    chapterIdx
-                                                  }
+                                                  key={chapter.id || chapterIdx}
                                                   className="bg-white rounded-lg p-2.5 sm:p-3 border border-gray-100 shadow-sm"
                                                 >
                                                   <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -503,10 +509,9 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 Select Your Class
                               </h4>
                               <p className="text-xs sm:text-sm text-blue-100">
-                                {(msg as any).classSectionsOptions.length}{" "}
-                                class section
-                                {(msg as any).classSectionsOptions
-                                  .length !== 1
+                                {(msg as any).classSectionsOptions.length} class
+                                section
+                                {(msg as any).classSectionsOptions.length !== 1
                                   ? "s"
                                   : ""}{" "}
                                 available
@@ -520,8 +525,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                             {(msg as any).classSectionsOptions.map(
                               (cs: any, csIdx: number) => {
-                                const className =
-                                  cs.class?.name || "Unknown";
+                                const className = cs.class?.name || "Unknown";
                                 const sectionName =
                                   cs.section?.name || "Unknown";
                                 const isClassTeacher =
@@ -530,8 +534,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 return (
                                   <div
                                     key={
-                                      cs.class?._id + cs.section?._id ||
-                                      csIdx
+                                      cs.class?._id + cs.section?._id || csIdx
                                     }
                                     className={`relative p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 ${
                                       isClassTeacher
@@ -577,9 +580,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                           {/* Hint */}
                           <div className="mt-4 p-3 bg-blue-50 rounded-xl border border-blue-100">
                             <div className="flex items-start gap-2">
-                              <span className="text-blue-500 text-lg">
-                                💡
-                              </span>
+                              <span className="text-blue-500 text-lg">💡</span>
                               <div className="text-sm text-blue-700">
                                 <span className="font-semibold">
                                   How to select:
@@ -588,12 +589,10 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   <li>
                                     • Say the class name: "
                                     <span className="font-medium">
-                                      {(msg as any)
-                                        .classSectionsOptions[0]?.class
-                                        ?.name || "III"}{" "}
-                                      {(msg as any)
-                                        .classSectionsOptions[0]?.section
-                                        ?.name || "A"}
+                                      {(msg as any).classSectionsOptions[0]
+                                        ?.class?.name || "III"}{" "}
+                                      {(msg as any).classSectionsOptions[0]
+                                        ?.section?.name || "A"}
                                     </span>
                                     "
                                   </li>
@@ -603,9 +602,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                       first one
                                     </span>
                                     ", "
-                                    <span className="font-medium">
-                                      second
-                                    </span>
+                                    <span className="font-medium">second</span>
                                     ", etc.
                                   </li>
                                   <li>
@@ -614,10 +611,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                       Class 3 A
                                     </span>
                                     " or "
-                                    <span className="font-medium">
-                                      3 A
-                                    </span>
-                                    "
+                                    <span className="font-medium">3 A</span>"
                                   </li>
                                 </ul>
                               </div>
@@ -630,9 +624,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                   {/* Only show text if no special UI components are displayed */}
                   {msg.text &&
                     !(msg as any).classSectionsOptions &&
-                    !(
-                      msg.courseProgress && (msg as any).classSection
-                    ) && (
+                    !(msg.courseProgress && (msg as any).classSection) && (
                       <div className="text-gray-800 leading-relaxed">
                         {msg.text}
                       </div>
@@ -654,8 +646,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                       <div className="flex items-center justify-center gap-4">
                                         <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
                                         <span className="text-blue-900 font-semibold text-base">
-                                          Loading pending leave
-                                          requests...
+                                          Loading pending leave requests...
                                         </span>
                                       </div>
                                     </div>
@@ -672,9 +663,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                               Leave Approval Dashboard
                                             </h3>
                                             <p className="text-sm text-blue-100">
-                                              {
-                                                leaveApprovalRequests.length
-                                              }{" "}
+                                              {leaveApprovalRequests.length}{" "}
                                               {leaveApprovalRequests.length ===
                                               1
                                                 ? "request"
@@ -773,8 +762,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                         Employee ID:
                                                       </span>
                                                       <span className="bg-gray-200 px-2 py-0.5 rounded-md font-mono text-xs">
-                                                        {employeeId ||
-                                                          "N/A"}
+                                                        {employeeId || "N/A"}
                                                       </span>
                                                     </p>
                                                   </div>
@@ -852,8 +840,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                         const {
                                                           academic_session,
                                                           branch_token,
-                                                        } =
-                                                          getErpContext();
+                                                        } = getErpContext();
                                                         await leaveApprovalAPI.approve(
                                                           {
                                                             leave_request_uuid:
@@ -917,11 +904,14 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                       }
                                                       onChange={(e) =>
                                                         setRejectReason(
-                                                          (prev: { [key: string]: string }) => ({
+                                                          (prev: {
+                                                            [
+                                                              key: string
+                                                            ]: string;
+                                                          }) => ({
                                                             ...prev,
                                                             [request.uuid]:
-                                                              e.target
-                                                                .value,
+                                                              e.target.value,
                                                           }),
                                                         )
                                                       }
@@ -942,8 +932,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                           const {
                                                             academic_session,
                                                             branch_token,
-                                                          } =
-                                                            getErpContext();
+                                                          } = getErpContext();
                                                           await leaveApprovalAPI.reject(
                                                             {
                                                               leave_request_uuid:
@@ -966,14 +955,17 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                               ),
                                                           );
                                                           setRejectReason(
-                                                            (prev: { [key: string]: string }) => {
+                                                            (prev: {
+                                                              [
+                                                                key: string
+                                                              ]: string;
+                                                            }) => {
                                                               const newReasons =
                                                                 {
                                                                   ...prev,
                                                                 };
                                                               delete newReasons[
-                                                                request
-                                                                  .uuid
+                                                                request.uuid
                                                               ];
                                                               return newReasons;
                                                             },
@@ -1029,9 +1021,9 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                         No pending leave requests found
                                       </p>
                                       <p className="text-green-600 text-sm mt-2">
-                                        All leave requests have been
-                                        processed or there are no pending
-                                        requests at this time.
+                                        All leave requests have been processed
+                                        or there are no pending requests at this
+                                        time.
                                       </p>
                                     </div>
                                   )}
@@ -1046,8 +1038,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                     !!msg.attendance_summary,
                                   attendanceSummaryLength:
                                     msg.attendance_summary?.length || 0,
-                                  attendanceSummary:
-                                    msg.attendance_summary,
+                                  attendanceSummary: msg.attendance_summary,
                                   messageType: msg.type,
                                   hasButtons: !!(msg as any).buttons,
                                 },
@@ -1096,9 +1087,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   console.log(
                                     `❌ NOT in edit mode for message ${idx}. Expected: ${editingMessageIndex}, Got: ${idx}`,
                                   );
-                                  console.log(
-                                    `❌ Table will NOT be editable`,
-                                  );
+                                  console.log(`❌ Table will NOT be editable`);
                                   console.log(
                                     `❌ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
                                   );
@@ -1120,7 +1109,8 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                       </h3>
                                       {editingMessageIndex !== null && (
                                         <div className="bg-blue-100 text-blue-900 p-2 rounded-md text-xs sm:text-sm mb-3 sm:mb-4 font-medium">
-                                          ✏️ Edit mode active - Modify names/status below
+                                          ✏️ Edit mode active - Modify
+                                          names/status below
                                         </div>
                                       )}
                                       {/* Edit Mode Buttons - Show Save/Cancel when in edit mode */}
@@ -1137,22 +1127,18 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                           <button
                                             onClick={() => {
                                               // Cancel editing - exit edit mode without saving
-                                              setEditingMessageIndex(
-                                                null,
-                                              );
+                                              setEditingMessageIndex(null);
                                               setChatHistory((prev) => {
                                                 const updatedHistory = [
                                                   ...prev,
                                                 ];
                                                 if (
                                                   updatedHistory[idx] &&
-                                                  updatedHistory[idx]
-                                                    .type === "bot"
+                                                  updatedHistory[idx].type ===
+                                                    "bot"
                                                 ) {
                                                   (
-                                                    updatedHistory[
-                                                      idx
-                                                    ] as any
+                                                    updatedHistory[idx] as any
                                                   ).isBeingEdited = false;
                                                 }
                                                 return updatedHistory;
@@ -1174,8 +1160,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                       {classInfo && (
                                         <p className="text-gray-500 m-0 text-xs sm:text-sm truncate">
                                           Class {classInfo.class_}{" "}
-                                          {classInfo.section} •{" "}
-                                          {classInfo.date}
+                                          {classInfo.section} • {classInfo.date}
                                         </p>
                                       )}
                                     </div>
@@ -1244,8 +1229,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                             editingMessageIndex !== null;
                                           const dataToUse = isEditing
                                             ? attendanceData
-                                            : msg.attendance_summary ||
-                                              [];
+                                            : msg.attendance_summary || [];
                                           console.log(
                                             `Table data for message ${idx}:`,
                                             {
@@ -1254,8 +1238,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                               msgAttendanceSummaryLength:
                                                 msg.attendance_summary
                                                   ?.length || 0,
-                                              dataToUseLength:
-                                                dataToUse.length,
+                                              dataToUseLength: dataToUse.length,
                                               isEditing: isEditing,
                                               msgAttendanceSummary:
                                                 msg.attendance_summary,
@@ -1280,7 +1263,10 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                           }
 
                                           return dataToUse.map(
-                                            (item: AttendanceRecord, index: number) => (
+                                            (
+                                              item: AttendanceRecord,
+                                              index: number,
+                                            ) => (
                                               <tr
                                                 key={index}
                                                 className={`border-b border-gray-200 ${
@@ -1304,17 +1290,14 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                           handleAttendanceDataChange(
                                                             index,
                                                             "student_name",
-                                                            e.target
-                                                              .value,
+                                                            e.target.value,
                                                           )
                                                         }
                                                         className="w-full p-1.5 sm:p-2 border border-gray-300 rounded bg-white text-gray-900 text-xs sm:text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 min-w-0"
                                                       />
                                                     ) : (
                                                       <span className="text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none block">
-                                                        {
-                                                          item.student_name
-                                                        }
+                                                        {item.student_name}
                                                       </span>
                                                     );
                                                   })()}
@@ -1333,8 +1316,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                           handleAttendanceDataChange(
                                                             index,
                                                             "attendance_status",
-                                                            e.target
-                                                              .value,
+                                                            e.target.value,
                                                           )
                                                         }
                                                         className="w-full p-1.5 sm:p-2 border border-gray-300 rounded bg-white text-gray-900 text-xs sm:text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 min-w-0"
@@ -1358,9 +1340,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                               : "text-gray-500"
                                                         }`}
                                                       >
-                                                        {
-                                                          item.attendance_status
-                                                        }
+                                                        {item.attendance_status}
                                                       </span>
                                                     );
                                                   })()}
@@ -1409,6 +1389,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 <MemoizedAnswer
                                   answer={msg.answer || ""}
                                   messageIdx={idx}
+                                  onOpenPreview={onOpenPreview}
                                 />
                               </>
                             )}
@@ -1451,9 +1432,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setShowCorrectionBox(
-                                      showCorrectionBox === idx
-                                        ? null
-                                        : idx,
+                                      showCorrectionBox === idx ? null : idx,
                                     );
                                   }}
                                 >
