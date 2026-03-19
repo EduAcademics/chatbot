@@ -9,13 +9,13 @@ import { useChatbot } from "./hooks/useChatbot";
 const AudioStreamerChatBot = ({
   userId,
   roles,
-  email,
+  loginId,
 }: {
   userId: string;
   roles: string;
-  email: string;
+  loginId: string;
 }) => {
-  const api = useChatbot({ userId, roles, email });
+  const api = useChatbot({ userId, roles, loginId });
 
   return (
     <>

@@ -1,38 +1,35 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { FiMail, FiCheck } from "react-icons/fi";
+import { FiCheck } from "react-icons/fi";
 import { userAPI } from "../services/api";
 
 interface Props {
-  onUserFetched: (userId: string, roles: string, email: string) => void;
-  initialEmail?: string;
+  onUserFetched: (userId: string, roles: string, loginId: string) => void;
+  initialLoginId?: string;
   initialError?: string;
 }
 
 const UserInfoBox = ({
   onUserFetched,
-  initialEmail,
+  initialLoginId,
   initialError,
 }: Props) => {
-  const [email, setEmail] = useState(initialEmail ?? "");
+  const [loginId, setLoginId] = useState(initialLoginId ?? "");
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [isLoading, setIsLoading] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isValid, setIsValid] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const validateEmail = (email: string) =>
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  useEffect(() => {
+    setIsValid(!!loginId.trim());
+  }, [loginId]);
 
   useEffect(() => {
-    setIsValid(email ? validateEmail(email) : false);
-  }, [email]);
-
-  useEffect(() => {
-    if (initialEmail) {
-      setEmail(initialEmail);
+    if (initialLoginId) {
+      setLoginId(initialLoginId);
     }
-  }, [initialEmail]);
+  }, [initialLoginId]);
 
   useEffect(() => {
     setError(initialError ?? null);
@@ -42,9 +39,9 @@ const UserInfoBox = ({
     setError(null);
     setIsLoading(true);
     try {
-      const data = await userAPI.fetch({ email });
+      const data = await userAPI.fetch({ login_id: loginId.trim() });
       if (data.status === "success" && data.user_id) {
-        onUserFetched(data.user_id, data.user_roles || "", email);
+        onUserFetched(data.user_id, data.user_roles || "", loginId.trim());
       } else {
         setError(data.message || "User not found");
       }
@@ -81,21 +78,13 @@ const UserInfoBox = ({
             Welcome to <span className="text-[#b5895b]">Sofisto</span>
           </h2>
           <p className="text-[#7a6a58] text-sm md:text-base">
-            Enter your email to continue
+            Enter your Admission No / Employee ID to continue
           </p>
         </div>
 
         {/* Input Field */}
         <div className="relative mb-5">
-          <span
-            className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${
-              isFocused ? "text-[#c69a63]" : "text-[#b7a58c]"
-            }`}
-          >
-            <FiMail size={18} />
-          </span>
-
-          {isValid && email && (
+          {isValid && loginId && (
             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-green-500">
               <FiCheck size={16} />
             </span>
@@ -103,11 +92,12 @@ const UserInfoBox = ({
 
           <input
             ref={inputRef}
-            type="email"
-            placeholder="Enter your email address"
-            value={email}
+            type="text"
+            inputMode="text"
+            placeholder="Enter Admission No / Employee ID"
+            value={loginId}
             onChange={(e) => {
-              setEmail(e.target.value);
+              setLoginId(e.target.value);
               if (error) {
                 setError(null);
               }
@@ -117,7 +107,7 @@ const UserInfoBox = ({
             }
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            className={`w-full pl-12 pr-10 py-3 rounded-xl text-base outline-none transition-all
+            className={`w-full pl-4 pr-10 py-3 rounded-xl text-base outline-none transition-all
               ${
                 error
                   ? "border border-red-500 focus:ring-2 focus:ring-red-300"
@@ -133,18 +123,18 @@ const UserInfoBox = ({
         {/* Continue Button */}
         <motion.button
           onClick={handleFetch}
-          disabled={!email.trim() || isLoading || !isValid}
+          disabled={!loginId.trim() || isLoading || !isValid}
           whileHover={
-            email.trim() && !isLoading && isValid
+            loginId.trim() && !isLoading && isValid
               ? { scale: 1.03, y: -2 }
               : undefined
           }
           whileTap={
-            email.trim() && !isLoading && isValid ? { scale: 0.97 } : undefined
+            loginId.trim() && !isLoading && isValid ? { scale: 0.97 } : undefined
           }
           className={`w-full py-3.5 rounded-xl font-semibold text-lg transition-all shadow-md flex items-center justify-center
             ${
-              email.trim() && !isLoading && isValid
+              loginId.trim() && !isLoading && isValid
                 ? "bg-gradient-to-r from-[#d4a574] to-[#c69457] text-white hover:shadow-lg"
                 : "bg-[#e9dfd2] text-white cursor-not-allowed"
             }`}

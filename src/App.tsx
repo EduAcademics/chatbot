@@ -16,7 +16,7 @@ function App() {
   );
   const [userId, setUserId] = useState<string | null>(null);
   const [roles, setRoles] = useState<string>("");
-  const [userEmail, setUserEmail] = useState<string>("");
+  const [loginId, setLoginId] = useState<string>("");
   const [isAuthResolved, setIsAuthResolved] = useState(false);
   const [isAutoFetching, setIsAutoFetching] = useState(false);
   const [autoAuthError, setAutoAuthError] = useState<string | null>(null);
@@ -37,17 +37,19 @@ function App() {
 
       const params = new URLSearchParams(window.location.search);
       const tokenFromQuery = params.get("token");
-      const emailFromQuery = params.get("email");
+      const loginIdFromQuery = params.get("login_id");
 
-      if (tokenFromQuery && emailFromQuery) {
+      if (tokenFromQuery && loginIdFromQuery) {
         setIsAutoFetching(true);
         setAutoAuthError(null);
         localStorage.setItem("token", tokenFromQuery);
         setIsAuthenticated(true);
-        setUserEmail(emailFromQuery);
+        setLoginId(loginIdFromQuery);
 
         try {
-          const response = await userAPI.fetch({ email: emailFromQuery });
+          const response = await userAPI.fetch({
+            login_id: loginIdFromQuery,
+          });
           if (response.status === "success" && response.user_id) {
             setUserId(response.user_id);
             setRoles(response.user_roles || "");
@@ -114,13 +116,13 @@ function App() {
             isAuthenticated ? (
               <MainLayout
                 userId={userId}
-                userEmail={userEmail}
+                loginId={loginId}
                 roles={roles}
                 autoAuthError={autoAuthError}
-                onUserFetched={(id, r, email) => {
+                onUserFetched={(id, r, fetchedLoginId) => {
                   setUserId(id);
                   setRoles(r);
-                  setUserEmail(email);
+                  setLoginId(fetchedLoginId);
                   setAutoAuthError(null);
                 }}
                 onLogout={handleLogout}
@@ -140,17 +142,17 @@ function App() {
 // Main Layout component
 const MainLayout = ({
   userId,
-  userEmail,
+  loginId,
   roles,
   autoAuthError,
   onUserFetched,
   onLogout,
 }: {
   userId: string | null;
-  userEmail: string;
+  loginId: string;
   roles: string;
   autoAuthError: string | null;
-  onUserFetched: (id: string, r: string, email: string) => void;
+  onUserFetched: (id: string, r: string, loginId: string) => void;
   onLogout: () => void;
 }) => {
   return (
@@ -158,12 +160,16 @@ const MainLayout = ({
       <NavigationButtons onLogout={onLogout} />
       {!userId ? (
         <UserInfoBox
-          initialEmail={userEmail}
+          initialLoginId={loginId}
           initialError={autoAuthError ?? undefined}
           onUserFetched={onUserFetched}
         />
       ) : (
-        <AudioStreamerChatBot userId={userId} roles={roles} email={userEmail} />
+        <AudioStreamerChatBot
+          userId={userId}
+          roles={roles}
+          loginId={loginId}
+        />
       )}
     </>
   );

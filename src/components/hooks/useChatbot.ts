@@ -127,11 +127,11 @@ export interface UseChatbotReturn {
 export function useChatbot({
   userId,
   roles,
-  email,
+  loginId,
 }: {
   userId: string;
   roles: string;
-  email: string;
+  loginId: string;
 }): UseChatbotReturn {
   const webrtcServiceRef = useRef<WebRTCAudioService | null>(null);
   const lastInterimTextRef = useRef<string>(""); // Track last interim text to replace it with final
@@ -334,7 +334,7 @@ export function useChatbot({
   useEffect(() => {
     const fetchUserSession = async () => {
       try {
-        const data = await userAPI.fetch({ email });
+        const data = await userAPI.fetch({ login_id: loginId });
         if (data.status === "success" && data.session_id) {
           setSessionId(data.session_id);
         }
@@ -344,7 +344,7 @@ export function useChatbot({
     };
 
     fetchUserSession();
-  }, [userId]);
+  }, [userId, loginId]);
 
   useEffect(() => {
     activeFlowRef.current = activeFlow;
