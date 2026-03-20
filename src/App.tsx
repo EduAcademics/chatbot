@@ -2,18 +2,12 @@ import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiLogOut } from "react-icons/fi";
-import Login from "./pages/Login";
 import AudioStreamerChatBot from "./components/AudioStreamerChatBot";
 import UserInfoBox from "./components/UserInfoBox";
 import { userAPI } from "./services/api";
 import { syncAuthFromURL} from "./utils/authStorage";
 
-// import AttendanceTest from "./pages/AttendanceTest";
-
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    !!localStorage.getItem("token")
-  );
   const [userId, setUserId] = useState<string | null>(null);
   const [roles, setRoles] = useState<string>("");
   const [loginId, setLoginId] = useState<string>("");
@@ -43,7 +37,6 @@ function App() {
         setIsAutoFetching(true);
         setAutoAuthError(null);
         localStorage.setItem("token", tokenFromQuery);
-        setIsAuthenticated(true);
         setLoginId(loginIdFromQuery);
 
         try {
@@ -69,10 +62,6 @@ function App() {
         return;
       }
 
-      const storedToken = localStorage.getItem("token");
-      if (storedToken) {
-        setIsAuthenticated(true);
-      }
       setIsAuthResolved(true);
     };
 
@@ -107,13 +96,12 @@ function App() {
         <Routes>
           <Route
             path="/login"
-            element={!isAuthenticated ? <Login /> : <Navigate to="/" />}
+            element={<Navigate to="/" />}
           />
         {/* <Route path="/test-attendance" element={<AttendanceTest />} /> */}
         <Route
           path="/"
           element={
-            isAuthenticated ? (
               <MainLayout
                 userId={userId}
                 loginId={loginId}
@@ -127,9 +115,6 @@ function App() {
                 }}
                 onLogout={handleLogout}
               />
-            ) : (
-              <Navigate to="/login" />
-            )
           }
         />
         <Route path="*" element={<Navigate to="/login" />} />
