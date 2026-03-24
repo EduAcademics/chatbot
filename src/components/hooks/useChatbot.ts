@@ -12,6 +12,7 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
+import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
 import {
   handleAttendanceChat,
   handleAttendanceImageUpload,
@@ -281,7 +282,7 @@ export function useChatbot({
   const getErpContext = () => {
     const academic_session =
       localStorage.getItem("academic_session") || "2025-26";
-    const branch_token = localStorage.getItem("branch_token") || "demo";
+    const branch_token = localStorage.getItem("branch_token") || "qa";
     return { academic_session, branch_token };
   };
 
@@ -1006,6 +1007,8 @@ export function useChatbot({
             targetFlow = "submission";
           } else if (targetFlow === ("review_submission" as any)) {
             targetFlow = "review";
+          } else if (targetFlow === ("marks_entry" as any)) {
+            targetFlow = "marks";
           }
         } catch (error) {
           console.error("❌ Classification error:", error);
@@ -1149,6 +1152,29 @@ export function useChatbot({
       if (targetFlow === "review" && isNewFlowInitialization) {
         activeFlowRef.current = "review";
         setActiveFlow("review");
+      } else if (activeFlowRef.current === "marks" || targetFlow === "marks") {
+        if (targetFlow === "marks" && isNewFlowInitialization) {
+          activeFlowRef.current = "marks";
+          setActiveFlow("marks");
+        }
+        try {
+          await handleMarksChat({
+            userMessage,
+            sessionId,
+            userId,
+            isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+            getErpContext,
+            appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+            exitFlow: () => handleFlowExit({ newSession: false }),
+            exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+            setProcessing: setIsProcessing,
+            playTTS: (idx, text) => void handlePlayTTS(idx, text),
+            getTTSSummary: generateQueryTTSSummary,
+          });
+        } finally {
+          setIsProcessing(false);
+        }
+        return;
       }
 
       // Initialize leave flow
@@ -2573,6 +2599,30 @@ export function useChatbot({
     }
   };
 
+  const handleSaveColumn = async (columnTitle: string, studentData: any[]) => {
+    try {
+      const result = await sendColumnSave({
+        columnTitle,
+        studentData,
+        sessionId,
+        userId,
+        getErpContext,
+      });
+      if (result?.data?.answer) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            answer: result.data.answer,
+            activeTab: "answer",
+          },
+        ]);
+      }
+    } catch (error) {
+      console.error("Save column error:", error);
+    }
+  };
+
   // Scroll chat to bottom on new message
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -2705,6 +2755,7 @@ export function useChatbot({
     handleAddStudent,
     handleRemoveStudent,
     handleSaveAttendance,
+    handleSaveColumn,
     handleUnifiedAttendanceApproval,
     handleTextAttendanceRejection,
     leaveApprovalRequests,

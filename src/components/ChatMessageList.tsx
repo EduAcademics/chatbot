@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
+import { MarksEntryTable } from "./MarksEntryTable";
 import type { FlowType } from "./types";
 import { getThumbsUpClass, getThumbsDownClass } from "./utils/chatbotUtils";
 import { leaveApprovalAPI } from "../services/api";
@@ -51,6 +52,7 @@ export interface ChatMessageListProps {
   handleAddStudent: () => void;
   handleRemoveStudent: (index: number) => void;
   handleSaveAttendance: (messageIndex: number) => Promise<void>;
+  handleSaveColumn?: (columnTitle: string, studentData: any[]) => void;
   handleUnifiedAttendanceApproval: (
     messageIndex?: number,
     attendanceType?: "text" | "image" | "voice",
@@ -98,6 +100,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     handleAddStudent,
     handleRemoveStudent,
     handleSaveAttendance,
+    handleSaveColumn,
     setChatHistory,
     leaveApprovalRequests,
     setLeaveApprovalRequests,
@@ -1392,6 +1395,14 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   onOpenPreview={onOpenPreview}
                                 />
                               </>
+                            )}
+                            {msg.marks_table && (
+                              <MarksEntryTable
+                                data={msg.marks_table}
+                                onSaveColumn={(columnTitle, studentData) =>
+                                  handleSaveColumn(columnTitle, studentData)
+                                }
+                              />
                             )}
                             <div className="bot-actions-bottom">
                               <button
