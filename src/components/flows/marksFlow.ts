@@ -57,17 +57,27 @@ export async function sendColumnSave(params: {
     mark: string | number;
     remarks: string;
   }>;
-  sessionId: string;
+  sessionId: string | null;
   userId: string;
   getErpContext: () => any;
 }) {
   const { columnTitle, studentData, sessionId, userId, getErpContext } = params;
+  const effectiveSessionId = sessionId || userId;
+
+  console.log("📊 Marks Column Save - Session Debug:", {
+    columnTitle,
+    providedSessionId: sessionId,
+    userId,
+    effectiveSessionId,
+    usingFallback: !sessionId,
+    studentDataCount: studentData.length,
+  });
 
   const query = `SAVE_COLUMN:${columnTitle}:${JSON.stringify(studentData)}`;
 
   return await runMarksChat({
     userMessage: query,
-    sessionId,
+    sessionId: effectiveSessionId,
     userId,
     isVoiceTriggered: false,
     getErpContext,
