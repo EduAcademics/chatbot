@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { Children, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -74,10 +74,11 @@ const MemoizedAnswer = memo(
             ),
             a: ({ node, href, children, ...props }) => {
               const safeHref = href || "";
+              const childArray = Children.toArray(children);
+              const firstChild = childArray[0];
               const linkLabel =
-                typeof children?.[0] === "string" &&
-                children[0].trim().length > 0
-                  ? children[0]
+                typeof firstChild === "string" && firstChild.trim().length > 0
+                  ? firstChild
                   : pickFilenameFromUrl(safeHref);
 
               if (safeHref && isPreviewableFileLink(safeHref)) {

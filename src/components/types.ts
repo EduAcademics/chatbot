@@ -11,6 +11,7 @@ export type FlowType =
   | "assignment"
   | "submission"
   | "review"
+  | "marks"
   | "course_progress"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";
@@ -65,4 +66,3 @@ export const LANGUAGES = [
 
 import { WS_BASE_URL } from "../config/settings";
 export const WS_BASE = WS_BASE_URL;
-

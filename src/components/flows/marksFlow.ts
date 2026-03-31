@@ -6,7 +6,6 @@ interface MarksFlowParams {
   userId: string;
   isVoiceTriggered: boolean;
   getErpContext: () => {
-    bearer_token: string;
     academic_session: string;
     branch_token: string;
   };
@@ -16,6 +15,7 @@ interface MarksFlowParams {
   setProcessing: (val: boolean) => void;
   playTTS: (idx: number, text: string) => void;
   getTTSSummary: (text: string) => string;
+  setActiveFlow: (flow: string) => void;
 }
 
 export async function runMarksChat(params: {
@@ -86,6 +86,7 @@ export async function handleMarksChat(params: MarksFlowParams) {
     exitFlowForManualExit,
     playTTS,
     getTTSSummary,
+    setActiveFlow,
   } = params;
 
   try {
@@ -107,7 +108,7 @@ export async function handleMarksChat(params: MarksFlowParams) {
     }
 
     const answer = response.data.answer || "";
-    const ttsText = response.data.tts_text || answer;
+    const ttsText = response.data.tts_text;
     const marksTable = response.data.marks_table || null;
     const columnSaved = response.data.column_saved || null;
 
@@ -128,17 +129,19 @@ export async function handleMarksChat(params: MarksFlowParams) {
     appendBotMessage(botMessage);
 
     // Play TTS if voice triggered
-    if (isVoiceTriggered && ttsText) {
+    if (isVoiceTriggered && (ttsText || answer)) {
       const idx = Date.now();
-      playTTS(idx, getTTSSummary(ttsText));
+      const textToSpeak =
+        ttsText != null && ttsText !== "" ? ttsText : getTTSSummary(answer);
+      playTTS(idx, textToSpeak);
     }
 
-    // Detect manual exit
-    const isManualExit =
-      answer.toLowerCase().includes("exited") ||
-      answer.toLowerCase().includes("cancelled");
-    if (isManualExit) {
-      setTimeout(() => exitFlowForManualExit(), 500);
+    // Detect manual exit (match leave flow pattern)
+    if (
+      answer.toLowerCase().includes("you've exited the marks entry flow") ||
+      (answer.includes("✅") && answer.toLowerCase().includes("exited"))
+    ) {
+      (exitFlowForManualExit ?? exitFlow)();
       return;
     }
 
@@ -146,8 +149,13 @@ export async function handleMarksChat(params: MarksFlowParams) {
     const isSuccess =
       answer.includes("✅") && answer.toLowerCase().includes("all marks saved");
     if (isSuccess) {
-      setTimeout(() => exitFlow(), 1000);
+      exitFlow();
       return;
+    }
+
+    // Handle flow state based on response - keep marks flow active on errors
+    if (!answer.includes("✅")) {
+      setActiveFlow("marks");
     }
   } catch (error) {
     console.error("Marks flow error:", error);

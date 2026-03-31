@@ -4,6 +4,7 @@ interface Column {
   title: string;
   type: "numeric" | "grade" | "readonly";
   grades: string[];
+  items?: Array<Record<string, any>>;
 }
 
 interface StudentRow {
@@ -24,13 +25,19 @@ interface MarksTableData {
   section_name: string;
   term_name: string;
   max_marks: number;
+  grade_type?: {
+    grades?: Array<Record<string, any>>;
+  };
+  total_marks_grade_type?: {
+    grades?: Array<Record<string, any>>;
+  };
   columns: Column[];
   students: StudentRow[];
 }
 
 interface MarksEntryTableProps {
   data: MarksTableData;
-  onSaveColumn: (columnTitle: string, studentData: any[]) => void;
+  onSaveColumn: (columnTitle: string, studentData: any[]) => Promise<boolean>;
 }
 
 const REMARKS_OPTIONS = [
@@ -52,6 +59,18 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
   const [savedColumns, setSavedColumns] = useState<Set<string>>(new Set());
   const [remarksOpen, setRemarksOpen] = useState<string | null>(null);
   const remarksRef = useRef<HTMLDivElement>(null);
+  const editVersionRef = useRef<Record<string, number>>({});
+
+  const markColumnUnsaved = (columnTitle: string) => {
+    editVersionRef.current[columnTitle] =
+      (editVersionRef.current[columnTitle] ?? 0) + 1;
+    setSavedColumns((prev) => {
+      if (!prev.has(columnTitle)) return prev;
+      const next = new Set(prev);
+      next.delete(columnTitle);
+      return next;
+    });
+  };
 
   // Close remarks dropdown on outside click
   useEffect(() => {
@@ -77,6 +96,236 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
     }, 0);
   };
 
+  const hasAnyNumericValue = (row: StudentRow): boolean => {
+    return numericCols.some((col) => {
+      const raw = row.marks[col.title];
+      if (raw === undefined || raw === null) return false;
+      const text = String(raw).trim();
+      return text !== "";
+    });
+  };
+
+  const getMarkByTitle = (
+    marks: Record<string, string | number>,
+    columnTitle: string,
+  ): string | number | undefined => {
+    if (Object.prototype.hasOwnProperty.call(marks, columnTitle)) {
+      return marks[columnTitle];
+    }
+    const wanted = columnTitle.trim().toLowerCase();
+    const key = Object.keys(marks).find(
+      (k) => k.trim().toLowerCase() === wanted,
+    );
+    return key ? marks[key] : undefined;
+  };
+
+  const resolveGradeFromRules = (row: StudentRow, column: Column): string => {
+    const total = calcTotal(row);
+    const percentage =
+      data.max_marks > 0 ? (total / Number(data.max_marks)) * 100 : total;
+    const gradeRules = [
+      ...(Array.isArray(column.items) ? column.items : []),
+      ...(data.total_marks_grade_type?.grades || []),
+      ...(data.grade_type?.grades || []),
+    ];
+
+    const resolveNumber = (rule: Record<string, any>, keys: string[]) => {
+      for (const k of keys) {
+        const raw = rule[k];
+        const val = Number(raw);
+        if (!Number.isNaN(val)) return val;
+      }
+
+      const flattened: Array<{ key: string; value: any }> = [];
+      const walk = (obj: any, prefix = "", depth = 0) => {
+        if (!obj || typeof obj !== "object" || depth > 2) return;
+        for (const [k, v] of Object.entries(obj)) {
+          const fullKey = `${prefix}${k}`.toLowerCase();
+          flattened.push({ key: fullKey, value: v });
+          if (v && typeof v === "object") {
+            walk(v, `${fullKey}.`, depth + 1);
+          }
+        }
+      };
+      walk(rule);
+
+      for (const k of keys) {
+        const wanted = k.toLowerCase();
+        const hit = flattened.find((item) => item.key.includes(wanted));
+        if (!hit) continue;
+        const val = Number(hit.value);
+        if (!Number.isNaN(val)) return val;
+      }
+
+      return undefined;
+    };
+
+    const resolveLevel = (rule: Record<string, any>) => {
+      const level =
+        rule.level ??
+        rule.grade ??
+        rule.name ??
+        rule.title ??
+        rule.label ??
+        rule.value ??
+        rule.display_name ??
+        rule.level_name ??
+        rule.grade_name ??
+        rule.code;
+      if (typeof level === "string" && level.trim()) {
+        return level.trim();
+      }
+
+      const flattened: Array<{ key: string; value: any }> = [];
+      const walk = (obj: any, prefix = "", depth = 0) => {
+        if (!obj || typeof obj !== "object" || depth > 2) return;
+        for (const [k, v] of Object.entries(obj)) {
+          const fullKey = `${prefix}${k}`.toLowerCase();
+          flattened.push({ key: fullKey, value: v });
+          if (v && typeof v === "object") {
+            walk(v, `${fullKey}.`, depth + 1);
+          }
+        }
+      };
+      walk(rule);
+
+      const labelKeys = [
+        "grade",
+        "level",
+        "label",
+        "name",
+        "title",
+        "code",
+        "value",
+      ];
+      const hit = flattened.find(
+        (item) =>
+          typeof item.value === "string" &&
+          labelKeys.some((token) => item.key.includes(token)),
+      );
+      return hit ? String(hit.value).trim() : "";
+    };
+
+    for (const rule of gradeRules) {
+      const minPercent = resolveNumber(rule, [
+        "min_percentage",
+        "minimum_percentage",
+        "from_percentage",
+        "min_percent",
+        "from_percent",
+      ]);
+      const maxPercent = resolveNumber(rule, [
+        "max_percentage",
+        "maximum_percentage",
+        "to_percentage",
+        "max_percent",
+        "to_percent",
+      ]);
+      const min = resolveNumber(rule, [
+        "min_mark",
+        "min_marks",
+        "minimum_marks",
+        "minimum_mark",
+        "from_marks",
+        "from_mark",
+        "start_mark",
+        "lower_limit",
+        "lowerLimit",
+        "lower_bound",
+        "min",
+        "from",
+      ]);
+      const max = resolveNumber(rule, [
+        "max_mark",
+        "max_marks",
+        "maximum_marks",
+        "maximum_mark",
+        "to_marks",
+        "to_mark",
+        "end_mark",
+        "upper_limit",
+        "upperLimit",
+        "upper_bound",
+        "max",
+        "to",
+      ]);
+      const level = resolveLevel(rule);
+      if (!level) continue;
+
+      if (
+        minPercent !== undefined &&
+        maxPercent !== undefined &&
+        percentage >= minPercent &&
+        percentage <= maxPercent
+      ) {
+        return level;
+      }
+      if (
+        minPercent !== undefined &&
+        maxPercent === undefined &&
+        percentage >= minPercent
+      ) {
+        return level;
+      }
+      if (
+        minPercent === undefined &&
+        maxPercent !== undefined &&
+        percentage <= maxPercent
+      ) {
+        return level;
+      }
+
+      if (
+        min !== undefined &&
+        max !== undefined &&
+        total >= min &&
+        total <= max
+      ) {
+        return level;
+      }
+      if (min !== undefined && max === undefined && total >= min) {
+        return level;
+      }
+      if (min === undefined && max !== undefined && total <= max) {
+        return level;
+      }
+    }
+
+    return "";
+  };
+
+  const getReadonlyDisplayValue = (row: StudentRow, column: Column) => {
+    const columnTitle = column.title;
+    if (columnTitle.toUpperCase().includes("GRADE")) {
+      const liveGrade = resolveGradeFromRules(row, column);
+      if (liveGrade) return liveGrade;
+
+      const storedGrade = getMarkByTitle(row.marks, columnTitle);
+      if (
+        storedGrade !== undefined &&
+        storedGrade !== null &&
+        storedGrade !== ""
+      ) {
+        return storedGrade;
+      }
+      return "—";
+    }
+
+    const exactValue = getMarkByTitle(row.marks, columnTitle);
+    if (exactValue !== undefined && exactValue !== null && exactValue !== "") {
+      return exactValue;
+    }
+
+    if (
+      columnTitle.toUpperCase().includes("TOTAL") &&
+      hasAnyNumericValue(row)
+    ) {
+      return Math.round(calcTotal(row) * 100) / 100;
+    }
+
+    return "—";
+  };
+
   const getSafeNumericInputValue = (
     value: string | number | undefined,
   ): string => {
@@ -90,6 +339,7 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
     colTitle: string,
     value: string,
   ) => {
+    markColumnUnsaved(colTitle);
     setTableData((prev) =>
       prev.map((row) => {
         if (row.uuid !== studentUuid) return row;
@@ -106,6 +356,16 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
         if (totalCol) {
           updated.marks[totalCol.title] = Math.round(total * 100) / 100;
         }
+
+        const gradeCol = data.columns.find(
+          (c) =>
+            c.type === "readonly" && c.title.toUpperCase().includes("GRADE"),
+        );
+        if (gradeCol) {
+          const liveGrade = resolveGradeFromRules(updated, gradeCol);
+          updated.marks[gradeCol.title] = liveGrade || "";
+        }
+
         return updated;
       }),
     );
@@ -116,6 +376,7 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
   };
 
   const handleRemarksAdd = (studentUuid: string, option: string) => {
+    markColumnUnsaved("remarks");
     setTableData((prev) =>
       prev.map((row) => {
         if (row.uuid !== studentUuid) return row;
@@ -135,6 +396,7 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
   };
 
   const handleRemarksRemove = (studentUuid: string, tag: string) => {
+    markColumnUnsaved("remarks");
     setTableData((prev) =>
       prev.map((row) => {
         if (row.uuid !== studentUuid) return row;
@@ -152,23 +414,29 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
     );
   };
 
-  const handleSaveColumn = (colTitle: string) => {
+  const handleSaveColumn = async (colTitle: string) => {
+    const saveVersion = editVersionRef.current[colTitle] ?? 0;
     const studentData = tableData.map((row) => ({
       uuid: row.uuid,
       mark: row.marks[colTitle] ?? "",
       remarks: row.remarks,
     }));
-    onSaveColumn(colTitle, studentData);
+    const saveSucceeded = await onSaveColumn(colTitle, studentData);
+    if (!saveSucceeded) return;
+    if ((editVersionRef.current[colTitle] ?? 0) !== saveVersion) return;
     setSavedColumns((prev) => new Set([...prev, colTitle]));
   };
 
-  const handleSaveRemarks = () => {
+  const handleSaveRemarks = async () => {
+    const saveVersion = editVersionRef.current.remarks ?? 0;
     const studentData = tableData.map((row) => ({
       uuid: row.uuid,
       mark: "",
       remarks: row.remarks,
     }));
-    onSaveColumn("remarks", studentData);
+    const saveSucceeded = await onSaveColumn("remarks", studentData);
+    if (!saveSucceeded) return;
+    if ((editVersionRef.current.remarks ?? 0) !== saveVersion) return;
     setSavedColumns((prev) => new Set([...prev, "remarks"]));
   };
 
@@ -353,7 +621,7 @@ export const MarksEntryTable: React.FC<MarksEntryTableProps> = ({
                 >
                   {col.type === "readonly" ? (
                     <span style={{ color: "#64748b", fontSize: "13px" }}>
-                      {row.marks[col.title] ?? "—"}
+                      {getReadonlyDisplayValue(row, col)}
                     </span>
                   ) : col.type === "numeric" ? (
                     <input

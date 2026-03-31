@@ -52,7 +52,10 @@ export interface ChatMessageListProps {
   handleAddStudent: () => void;
   handleRemoveStudent: (index: number) => void;
   handleSaveAttendance: (messageIndex: number) => Promise<void>;
-  handleSaveColumn?: (columnTitle: string, studentData: any[]) => void;
+  handleSaveColumn?: (
+    columnTitle: string,
+    studentData: any[],
+  ) => Promise<boolean>;
   handleUnifiedAttendanceApproval: (
     messageIndex?: number,
     attendanceType?: "text" | "image" | "voice",
@@ -1034,68 +1037,12 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                               )}
                             {/* Show table if this message has attendance data */}
                             {(() => {
-                              console.log(
-                                `Checking message ${idx} for attendance data:`,
-                                {
-                                  hasAttendanceSummary:
-                                    !!msg.attendance_summary,
-                                  attendanceSummaryLength:
-                                    msg.attendance_summary?.length || 0,
-                                  attendanceSummary: msg.attendance_summary,
-                                  messageType: msg.type,
-                                  hasButtons: !!(msg as any).buttons,
-                                },
-                              );
                               return (
                                 msg.attendance_summary &&
                                 msg.attendance_summary.length > 0
                               );
                             })() ? (
                               (() => {
-                                console.log(
-                                  `Rendering table for message ${idx}, editingMessageIndex: ${editingMessageIndex}, isEditing: ${
-                                    editingMessageIndex === idx
-                                  }`,
-                                );
-                                console.log(
-                                  `Message ${idx} attendance_summary length:`,
-                                  msg.attendance_summary?.length || 0,
-                                );
-                                console.log(
-                                  `Global attendanceData length:`,
-                                  attendanceData.length,
-                                );
-                                console.log(`Message type:`, msg.type);
-                                console.log(
-                                  `Message has attendance_summary:`,
-                                  !!msg.attendance_summary,
-                                );
-
-                                // Add a simple test to see if the edit mode is detected
-                                if (editingMessageIndex === idx) {
-                                  console.log(
-                                    `✅ EDIT MODE DETECTED for message ${idx}!`,
-                                  );
-                                  console.log(
-                                    `✅ Table should be editable now!`,
-                                  );
-                                  console.log(
-                                    `✅ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
-                                  );
-                                  console.log(
-                                    `✅ Global attendanceData:`,
-                                    attendanceData,
-                                  );
-                                } else {
-                                  console.log(
-                                    `❌ NOT in edit mode for message ${idx}. Expected: ${editingMessageIndex}, Got: ${idx}`,
-                                  );
-                                  console.log(`❌ Table will NOT be editable`);
-                                  console.log(
-                                    `❌ Current editingMessageIndex: ${editingMessageIndex}, Current idx: ${idx}`,
-                                  );
-                                }
-
                                 return true;
                               })() && (
                                 <div
@@ -1399,9 +1346,16 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                             {msg.marks_table && (
                               <MarksEntryTable
                                 data={msg.marks_table}
-                                onSaveColumn={(columnTitle, studentData) =>
-                                  handleSaveColumn(columnTitle, studentData)
-                                }
+                                onSaveColumn={async (
+                                  columnTitle,
+                                  studentData,
+                                ) => {
+                                  if (!handleSaveColumn) return false;
+                                  return handleSaveColumn(
+                                    columnTitle,
+                                    studentData,
+                                  );
+                                }}
                               />
                             )}
                             <div className="bot-actions-bottom">
@@ -1499,15 +1453,6 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                             )}
 
                             {(() => {
-                              console.log(
-                                `Checking buttons for message ${idx}:`,
-                                {
-                                  hasButtons: !!(msg as any).buttons,
-                                  buttonsLength:
-                                    (msg as any).buttons?.length || 0,
-                                  buttons: (msg as any).buttons,
-                                },
-                              );
                               return (
                                 (msg as any).buttons &&
                                 (msg as any).buttons.length > 0
