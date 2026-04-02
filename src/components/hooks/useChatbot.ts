@@ -12,6 +12,7 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
+import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
 import {
   handleAttendanceChat,
   handleAttendanceImageUpload,
@@ -108,6 +109,10 @@ export interface UseChatbotReturn {
   handleAddStudent: () => void;
   handleRemoveStudent: (index: number) => void;
   handleSaveAttendance: (messageIndex: number) => Promise<void>;
+  handleSaveColumn: (
+    columnTitle: string,
+    studentData: any[],
+  ) => Promise<boolean>;
   handleUnifiedAttendanceApproval: (
     messageIndex?: number,
     attendanceType?: "text" | "image" | "voice",
@@ -281,7 +286,7 @@ export function useChatbot({
   const getErpContext = () => {
     const academic_session =
       localStorage.getItem("academic_session") || "2025-26";
-    const branch_token = localStorage.getItem("branch_token") || "demo";
+    const branch_token = localStorage.getItem("branch_token") || "qa";
     return { academic_session, branch_token };
   };
 
@@ -1006,6 +1011,8 @@ export function useChatbot({
             targetFlow = "submission";
           } else if (targetFlow === ("review_submission" as any)) {
             targetFlow = "review";
+          } else if (targetFlow === ("marks_entry" as any)) {
+            targetFlow = "marks";
           }
         } catch (error) {
           console.error("❌ Classification error:", error);
@@ -1196,6 +1203,35 @@ export function useChatbot({
       }
     } else {
       console.log("Ã°Å¸â€œÂ Using current activeFlow:", activeFlow);
+    }
+
+    // IMPORTANT: Always route marks messages to marks handler, including
+    // explicit "exit" while already in marks flow (no fresh classification run).
+    if (activeFlowRef.current === "marks" || targetFlow === "marks") {
+      if (targetFlow === "marks" && activeFlowRef.current !== "marks") {
+        activeFlowRef.current = "marks";
+        setActiveFlow("marks");
+      }
+
+      try {
+        await handleMarksChat({
+          userMessage,
+          sessionId,
+          userId,
+          isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+          getErpContext,
+          appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+          exitFlow: () => handleFlowExit({ newSession: false }),
+          exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+          setProcessing: setIsProcessing,
+          playTTS: (idx, text) => void handlePlayTTS(idx, text),
+          getTTSSummary: generateQueryTTSSummary,
+          setActiveFlow: (flow: string) => setActiveFlow(flow as FlowType),
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
     }
 
     // If still no flow selected after classification, prompt user
@@ -2573,6 +2609,69 @@ export function useChatbot({
     }
   };
 
+  const handleSaveColumn = async (columnTitle: string, studentData: any[]) => {
+    try {
+      const result = await sendColumnSave({
+        columnTitle,
+        studentData,
+        sessionId,
+        userId,
+        getErpContext,
+      });
+      const answerText = String(result?.data?.answer || "");
+      const columnSavedText = String(result?.data?.column_saved || "");
+      const isExpectedSaveResponse =
+        columnSavedText.trim().toLowerCase() ===
+          columnTitle.trim().toLowerCase() ||
+        answerText.toLowerCase().includes("saved for all students");
+
+      if (isExpectedSaveResponse && answerText) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            answer: answerText,
+            activeTab: "answer",
+          },
+        ]);
+      } else if (!isExpectedSaveResponse) {
+        // Suppress unexpected flow prompts (e.g., class/term question) from appearing
+        // during table save; keep the table context stable.
+        console.warn("Ignored unexpected marks-save response", {
+          columnTitle,
+          answerText,
+          columnSavedText,
+        });
+      }
+
+      // Marks save can happen from table clicks while voice mode is active,
+      // so explicitly speak backend-provided TTS for save confirmations.
+      const shouldSpeakSaveMessage =
+        fullVoiceMode || isVoiceActive || activeVoiceButtonRef.current !== null;
+      if (shouldSpeakSaveMessage && isExpectedSaveResponse) {
+        const ttsFromBackend = result?.data?.tts_text;
+        const textToSpeakRaw =
+          ttsFromBackend != null && ttsFromBackend !== ""
+            ? ttsFromBackend
+            : answerText
+              ? generateQueryTTSSummary(answerText)
+              : "";
+        const textToSpeak = textToSpeakRaw
+          .replace(/\|/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (textToSpeak) {
+          void handlePlayTTS(-1, textToSpeak);
+        }
+      }
+
+      return Boolean(result?.success) && isExpectedSaveResponse;
+    } catch (error) {
+      console.error("Save column error:", error);
+      return false;
+    }
+  };
+
   // Scroll chat to bottom on new message
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -2705,6 +2804,7 @@ export function useChatbot({
     handleAddStudent,
     handleRemoveStudent,
     handleSaveAttendance,
+    handleSaveColumn,
     handleUnifiedAttendanceApproval,
     handleTextAttendanceRejection,
     leaveApprovalRequests,

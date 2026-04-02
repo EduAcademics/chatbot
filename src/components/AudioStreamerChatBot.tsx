@@ -97,6 +97,7 @@ const AudioStreamerChatBot = ({
             handleAddStudent={api.handleAddStudent}
             handleRemoveStudent={api.handleRemoveStudent}
             handleSaveAttendance={api.handleSaveAttendance}
+            handleSaveColumn={api.handleSaveColumn}
             handleUnifiedAttendanceApproval={
               api.handleUnifiedAttendanceApproval
             }

@@ -74,7 +74,8 @@ const MemoizedAnswer = memo(
             ),
             a: ({ node, href, children, ...props }) => {
               const safeHref = href || "";
-              const firstChild = Children.toArray(children)[0];
+              const childArray = Children.toArray(children);
+              const firstChild = childArray[0];
               const linkLabel =
                 typeof firstChild === "string" && firstChild.trim().length > 0
                   ? firstChild

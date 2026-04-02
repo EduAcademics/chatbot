@@ -221,6 +221,32 @@ interface ReviewChatRequest {
   tts_voice?: string; // Optional: TTS voice to use
 }
 
+export interface MarksChatRequest {
+  session_id: string;
+  user_id: string;
+  query: string;
+  bearer_token?: string | undefined;
+  academic_session: string;
+  branch_token: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+export interface MarksChatResponse {
+  status: string;
+  message: string;
+  total_token_counts: number;
+  inf_time: number;
+  data: {
+    answer: string;
+    tts_text?: string;
+    references?: string;
+    mongodbquery?: string;
+    marks_table?: any;
+    column_saved?: string;
+  };
+}
+
 interface ReviewChatResponse {
   status: string;
   data?: {
@@ -628,6 +654,18 @@ export const aiAPI = {
     });
 
     return await response.json();
+  },
+
+  marksChat: async (request: MarksChatRequest): Promise<MarksChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/marks-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
   },
 
   // Course progress chat (backend-driven flow)
