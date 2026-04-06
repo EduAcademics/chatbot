@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { ERP_FILES_URL_RE } from "../config/settings";
 
 interface FilePreviewModalProps {
   url: string;
@@ -8,8 +9,6 @@ interface FilePreviewModalProps {
 
 const IMAGE_EXT_RE = /\.(jpg|jpeg|png|gif)(?:[?#].*)?$/i;
 const PDF_EXT_RE = /\.pdf(?:[?#].*)?$/i;
-const EDU_FILE_URL_RE = /api\.eduacademics\.com\/v1\/files\//i;
-
 const isImageUrl = (url: string): boolean => IMAGE_EXT_RE.test(url);
 const isPdfUrl = (url: string): boolean => PDF_EXT_RE.test(url);
 
@@ -30,7 +29,7 @@ export default function FilePreviewModal({
   }, [onClose]);
 
   const imageView = isImageUrl(url);
-  const pdfView = isPdfUrl(url) || EDU_FILE_URL_RE.test(url);
+  const pdfView = isPdfUrl(url) || ERP_FILES_URL_RE.test(url);
 
   return (
     <div

@@ -8,6 +8,14 @@ import {
   getAIHeaders,
 } from "../../services/api";
 import { API_BASE_URL } from "../../config/api";
+import {
+  getAcademicSessionForRequest,
+  getBranchTokenForRequest,
+} from "../../config/settings";
+import {
+  normalizeRolesToList,
+  normalizeRolesToString,
+} from "../../utils/userRoles";
 import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
@@ -278,12 +286,10 @@ export function useChatbot({
   const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voiceÃ‚Â inputÃ‚Â time
 
   // Shared helper: get academic session and branch token dynamically
-  const getErpContext = () => {
-    const academic_session =
-      localStorage.getItem("academic_session") || "2025-26";
-    const branch_token = localStorage.getItem("branch_token") || "demo";
-    return { academic_session, branch_token };
-  };
+  const getErpContext = () => ({
+    academic_session: getAcademicSessionForRequest(),
+    branch_token: getBranchTokenForRequest(),
+  });
 
   // const [autoRouting, setAutoRouting] = useState<boolean>(true); // Enable auto-routing by default
   // const [_detectedFlow, setDetectedFlow] = useState<string | null>(null); // Show detected flow to user
@@ -739,7 +745,7 @@ export function useChatbot({
         body: JSON.stringify({
           query: message,
           user_id: userId,
-          user_roles: roles ? roles.split(",") : [],
+          user_roles: normalizeRolesToList(roles),
         }),
       });
 
@@ -1240,7 +1246,7 @@ export function useChatbot({
       try {
         const data = await aiAPI.queryHandler({
           user_id: userId,
-          user_roles: roles,
+          user_roles: normalizeRolesToString(roles),
           query: userMessage,
         });
         if (data.status === "success" && data.data) {

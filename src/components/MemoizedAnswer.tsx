@@ -1,6 +1,7 @@
 import { Children, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ERP_FILES_URL_RE } from "../config/settings";
 
 interface MemoizedAnswerProps {
   answer: string;
@@ -10,10 +11,10 @@ interface MemoizedAnswerProps {
 
 const IMAGE_EXT_RE = /\.(jpg|jpeg|png|gif)(?:[?#].*)?$/i;
 const PDF_EXT_RE = /\.pdf(?:[?#].*)?$/i;
-const EDU_FILE_URL_RE = /api\.eduacademics\.com\/v1\/files\//i;
-
 const isPreviewableFileLink = (url: string): boolean =>
-  IMAGE_EXT_RE.test(url) || PDF_EXT_RE.test(url) || EDU_FILE_URL_RE.test(url);
+  IMAGE_EXT_RE.test(url) ||
+  PDF_EXT_RE.test(url) ||
+  ERP_FILES_URL_RE.test(url);
 
 const pickFilenameFromUrl = (url: string): string => {
   try {

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { FiCheck } from "react-icons/fi";
 import { userAPI } from "../services/api";
+import { normalizeRolesToString } from "../utils/userRoles";
 
 interface Props {
   onUserFetched: (userId: string, roles: string, loginId: string) => void;
@@ -41,7 +42,14 @@ const UserInfoBox = ({
     try {
       const data = await userAPI.fetch({ login_id: loginId.trim() });
       if (data.status === "success" && data.user_id) {
-        onUserFetched(data.user_id, data.user_roles || "", loginId.trim());
+        if (data.academic_session) {
+          localStorage.setItem("academic_session", data.academic_session);
+        }
+        onUserFetched(
+          data.user_id,
+          normalizeRolesToString(data.user_roles),
+          loginId.trim(),
+        );
       } else {
         setError(data.message || "User not found");
       }

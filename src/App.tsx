@@ -5,7 +5,8 @@ import { FiLogOut } from "react-icons/fi";
 import AudioStreamerChatBot from "./components/AudioStreamerChatBot";
 import UserInfoBox from "./components/UserInfoBox";
 import { userAPI } from "./services/api";
-import { syncAuthFromURL} from "./utils/authStorage";
+import { syncAuthFromURL } from "./utils/authStorage";
+import { normalizeRolesToString } from "./utils/userRoles";
 
 function App() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -45,7 +46,13 @@ function App() {
           });
           if (response.status === "success" && response.user_id) {
             setUserId(response.user_id);
-            setRoles(response.user_roles || "");
+            setRoles(normalizeRolesToString(response.user_roles));
+            if (response.academic_session) {
+              localStorage.setItem(
+                "academic_session",
+                response.academic_session,
+              );
+            }
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {
             throw new Error(response.message || "Unable to fetch user details.");

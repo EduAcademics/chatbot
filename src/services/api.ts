@@ -1,4 +1,9 @@
-import { API_BASE_URL, ERP_API_BASE_URL } from "../config/settings";
+import {
+  API_BASE_URL,
+  ERP_API_BASE_URL,
+  getAcademicSessionForRequest,
+  getBranchTokenForRequest,
+} from "../config/settings";
 
 // Types
 export interface LoginCredentials {
@@ -24,7 +29,8 @@ interface UserFetchRequest {
 interface UserFetchResponse {
   status: string;
   user_id?: string;
-  user_roles?: string;
+  user_roles?: string | string[];
+  academic_session?: string;
   session_id?: string;
   login_id?: string;
   user_type?: string;
@@ -374,11 +380,8 @@ const getDefaultHeaders = (includeAuth: boolean = false): HeadersInit => {
 export const getAIHeaders = (): HeadersInit => {
   const headers = getDefaultHeaders(true) as Record<string, string>;
 
-  const academicSession = localStorage.getItem("academic_session") || "2025-26";
-  const branchToken = localStorage.getItem("branch_token") || "indp";
-
-  headers["x-academic-session"] = academicSession;
-  headers["x-branch-token"] = branchToken;
+  headers["x-academic-session"] = getAcademicSessionForRequest();
+  headers["x-branch-token"] = getBranchTokenForRequest();
 
   return headers;
 };
