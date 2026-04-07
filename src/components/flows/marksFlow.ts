@@ -126,6 +126,7 @@ export async function handleMarksChat(params: MarksFlowParams) {
       type: "bot",
       answer,
       activeTab: "answer",
+      session_id: sessionId,
     };
 
     if (marksTable) {

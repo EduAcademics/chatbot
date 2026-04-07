@@ -55,6 +55,7 @@ export interface ChatMessageListProps {
   handleSaveColumn?: (
     columnTitle: string,
     studentData: any[],
+    sessionId?: string,
   ) => Promise<boolean>;
   handleUnifiedAttendanceApproval: (
     messageIndex?: number,
@@ -1354,6 +1355,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   return handleSaveColumn(
                                     columnTitle,
                                     studentData,
+                                    msg.session_id,
                                   );
                                 }}
                               />

@@ -112,6 +112,7 @@ export interface UseChatbotReturn {
   handleSaveColumn: (
     columnTitle: string,
     studentData: any[],
+    sessionId?: string,
   ) => Promise<boolean>;
   handleUnifiedAttendanceApproval: (
     messageIndex?: number,
@@ -166,11 +167,12 @@ export function useChatbot({
   // Removed unused: const courseProgressVoiceInitiatedRef = useRef<boolean>(false);
 
   /**
-   * Clears all frontend flow and session state (TTS interrupted, flow state cleared, new session).
+   * Clears all frontend flow and session state (clear flow state, new session).
    * Called when exit is detected from backend or query errors.
+   * Preserves TTS so exit responses can speak.
    */
   const handleFrontendExit = () => {
-    handleFlowExit({ newSession: true });
+    handleFlowExit({ newSession: true, skipTTSInterrupt: true });
   };
   // Flag to remember that the current Leave flow was initiated
   // via the microphone. This persists so we can play TTS for leave responses.
@@ -381,13 +383,13 @@ export function useChatbot({
     // Increment request ID to cancel any in-flight TTS requests
     ttsRequestIdRef.current += 1;
     console.log(
-      `Ã°Å¸â€ºâ€˜ TTS interrupted - new request ID: ${ttsRequestIdRef.current}`,
+      `[TTS] Interrupted - new request ID: ${ttsRequestIdRef.current}`,
     );
 
     if (currentTTSAudioRef.current) {
       const audio = currentTTSAudioRef.current;
       // Always interrupt if audio exists - pause and reset
-      console.log("Ã°Å¸â€ºâ€˜ Interrupting TTS playback", {
+      console.log("[TTS] Interrupting playback", {
         paused: audio.paused,
         currentTime: audio.currentTime,
         readyState: audio.readyState,
@@ -414,18 +416,24 @@ export function useChatbot({
   };
 
   /**
-   * Centralized flow exit: interrupt TTS, clear flow-specific state, set activeFlow to none.
+   * Centralized flow exit: clear flow-specific state, set activeFlow to none.
    * Call on user manual exit (e.g. "exit"/"quit") or when a flow completes.
    * @param options.newSession - if true, generate new sessionId (use for manual exit)
+   * @param options.skipTTSInterrupt - if true, preserve in-flight TTS (for exit messages that should speak)
    */
-  const handleFlowExit = (options?: { newSession?: boolean }) => {
+  const handleFlowExit = (options?: {
+    newSession?: boolean;
+    skipTTSInterrupt?: boolean;
+  }) => {
     const flow = activeFlowRef.current;
-    console.log("Ã°Å¸Å¡Âª handleFlowExit:", {
+    console.log("[Flow] handleFlowExit:", {
       flow,
       newSession: options?.newSession,
     });
 
-    interruptTTS();
+    if (!options?.skipTTSInterrupt) {
+      interruptTTS();
+    }
 
     if (
       flow === "attendance" ||
@@ -465,7 +473,7 @@ export function useChatbot({
   const startStreaming = async (useFullVoice = false) => {
     // Step 2: AUDIO BUTTON click handler should set ref for immediate access
     activeVoiceButtonRef.current = "audio";
-    console.log("Ã°Å¸Å½â„¢Ã¯Â¸Â Audio button - set mode to audio");
+    console.log("[Voice] Audio button - set mode to audio");
     try {
       // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
@@ -491,6 +499,10 @@ export function useChatbot({
                 activeVoiceButtonRef.current,
                 text,
               );
+
+              if (currentTTSAudioRef.current) {
+                return;
+              }
 
               // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
               if (useFullVoice) {
@@ -753,7 +765,7 @@ export function useChatbot({
       if (data.status === "success") {
         const { flow, confidence, entities } = data.data;
 
-        console.log("Ã°Å¸â€Â Query Classification:", {
+        console.log("[Routing] Query classification:", {
           query: message,
           detectedFlow: flow,
           confidence: `${(confidence * 100).toFixed(0)}%`,
@@ -775,7 +787,11 @@ export function useChatbot({
     const userMessage = (overrideMessage ?? inputText).trim();
     if (!userMessage) return;
 
-    console.log("Ã°Å¸Å¡â‚¬ handleSubmit START:", {
+    // Snapshot request-level voice source before any flow/exit handlers mutate refs.
+    const isVoiceTriggeredForThisRequest =
+      isVoiceTriggeredRequestRef.current === true;
+
+    console.log("[Submit] handleSubmit START:", {
       userMessage,
       activeFlow,
       userOptionSelected,
@@ -871,7 +887,7 @@ export function useChatbot({
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
 
-    console.log("Ã°Å¸â€Â§ Auto-routing check:", {
+    console.log("[Routing] Auto-routing check:", {
       autoRouting,
       activeFlow,
       userOptionSelected,
@@ -900,7 +916,7 @@ export function useChatbot({
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log(
-        "Ã°Å¸â€œÂ Staying in current flow (multi-step process active)",
+        "[Routing] Staying in current flow (multi-step process active)",
       );
       targetFlow =
         activeFlowRef.current !== "none" && activeFlowRef.current !== "query"
@@ -949,7 +965,7 @@ export function useChatbot({
       ) {
         // Keep current flow for simple confirmation words
         console.log(
-          "Ã°Å¸â€œÂ Simple response detected, keeping current flow:",
+          "[Routing] Simple response detected, keeping current flow:",
           activeFlowRef.current,
         );
         targetFlow = activeFlowRef.current;
@@ -961,13 +977,13 @@ export function useChatbot({
       ) {
         // Short message in an active flow (likely a response to a question) - stay in current flow
         console.log(
-          "Ã°Å¸â€œÂ Short response in active flow, staying in:",
+          "[Routing] Short response in active flow, staying in:",
           activeFlowRef.current,
         );
         targetFlow = activeFlowRef.current;
       } else {
         // Run classification for every new query when auto-routing is enabled
-        console.log("Ã°Å¸â€œÂ Running classification...");
+        console.log("[Routing] Running classification...");
         try {
           // Deterministic lexical override: if the normalized tokens contain
           // the token 'leave' (or 'leaves') AND at least one explicit
@@ -987,7 +1003,7 @@ export function useChatbot({
 
           if (hasLeaveToken && hasApprovalToken) {
             console.log(
-              "Ã°Å¸â€œÂ Lexical override: forcing leave_approval based on tokens",
+              "[Routing] Lexical override: forcing leave_approval based on tokens",
               { tokens },
             );
             // Mark classificationResult so downstream logic treats this as a
@@ -1020,7 +1036,7 @@ export function useChatbot({
         }
       }
 
-      console.log("Ã°Å¸â€œÂ Target flow determined:", targetFlow);
+      console.log("[Routing] Target flow determined:", targetFlow);
 
       // Update UI to show detected flow
       setDetectedFlow(targetFlow);
@@ -1032,7 +1048,7 @@ export function useChatbot({
         // Low confidence warning (but still proceed)
         if (classificationResult.confidence < 0.25) {
           console.warn(
-            "Ã¢Å¡Â Ã¯Â¸Â Low classification confidence, defaulting to query",
+            "[Routing] Low classification confidence, defaulting to query",
           );
           targetFlow = "query";
         }
@@ -1047,7 +1063,7 @@ export function useChatbot({
         targetFlow === "voice_attendance" ||
         targetFlow === "full_voice_attendance"
       ) {
-        console.log("Ã°Å¸â€œÂ Initializing unified attendance flow state");
+        console.log("[Routing] Initializing unified attendance flow state");
         setAttendanceStep("class_info");
         setPendingClassInfo(null);
         // Initialize unified attendance flow state
@@ -1090,8 +1106,8 @@ export function useChatbot({
 
       // Initialize assignment flow
       if (targetFlow === "assignment" && isNewFlowInitialization) {
-        console.log("Ã°Å¸â€œÂ Initializing assignment flow state");
-        console.log("Ã°Å¸â€œÂ Setting activeFlow to 'assignment'");
+        console.log("[Routing] Initializing assignment flow state");
+        console.log("[Routing] Setting activeFlow to 'assignment'");
 
         // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
         activeFlowRef.current = "assignment";
@@ -1117,7 +1133,7 @@ export function useChatbot({
         setDetectedFlow(null);
         setRouterMode("llm");
         setAutoRouting(true);
-        console.log("Ã°Å¸â€œÂ Processing first assignment message");
+        console.log("[Routing] Processing first assignment message");
       }
 
       // Initialize submission flow
@@ -1160,7 +1176,7 @@ export function useChatbot({
 
       // Initialize leave flow
       if (targetFlow === "leave" && isNewFlowInitialization) {
-        console.log("Ã°Å¸â€œÂ Initializing leave flow state");
+        console.log("[Routing] Initializing leave flow state");
 
         // Only reset state, do NOT fetch or reset sessionId unless user explicitly exits
         activeFlowRef.current = "leave";
@@ -1190,7 +1206,7 @@ export function useChatbot({
         if (isVoiceTriggeredRequestRef.current === true) {
           leaveVoiceInitiatedRef.current = true;
           console.log(
-            "Ã°Å¸Å½Â¤ Leave flow voice-initiated: TTS will play for leave responses",
+            "[Voice] Leave flow voice-initiated: TTS will play for leave responses",
           );
         }
         // Consume trigger so it doesn't leak to later requests
@@ -1198,11 +1214,11 @@ export function useChatbot({
         // Don't return - let the flow continue to make the API call.
         // The backend leave agent will return the initial prompt (Step 1: Half Day / Full Day / Long Leave).
         console.log(
-          "Ã°Å¸â€œÂ Leave flow initialized, continuing to API call...",
+          "[Routing] Leave flow initialized, continuing to API call...",
         );
       }
     } else {
-      console.log("Ã°Å¸â€œÂ Using current activeFlow:", activeFlow);
+      console.log("[Routing] Using current activeFlow:", activeFlow);
     }
 
     // IMPORTANT: Always route marks messages to marks handler, including
@@ -1222,7 +1238,8 @@ export function useChatbot({
           getErpContext,
           appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
           exitFlow: () => handleFlowExit({ newSession: false }),
-          exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+          exitFlowForManualExit: () =>
+            handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
           setProcessing: setIsProcessing,
           playTTS: (idx, text) => void handlePlayTTS(idx, text),
           getTTSSummary: generateQueryTTSSummary,
@@ -1250,9 +1267,9 @@ export function useChatbot({
       return;
     }
 
-    console.log("Ã°Å¸â€œÂ Routing to flow:", targetFlow);
-    console.log("Ã°Å¸â€œÂ Current attendance step:", attendanceStep);
-    console.log("Ã°Å¸â€œÂ Pending class info:", pendingClassInfo);
+    console.log("[Routing] Routing to flow:", targetFlow);
+    console.log("[Routing] Current attendance step:", attendanceStep);
+    console.log("[Routing] Pending class info:", pendingClassInfo);
 
     // Update active flow for next message (unless manually overridden)
     if (autoRouting) {
@@ -1267,7 +1284,7 @@ export function useChatbot({
       attendanceStep === "student_details" &&
       pendingClassInfo
     ) {
-      console.log("Ã°Å¸â€œÂ Continuing attendance at student_details step");
+      console.log("[Routing] Continuing attendance at student_details step");
       // Keep the current step - don't reset
     }
 
@@ -1298,7 +1315,7 @@ export function useChatbot({
           }
           // Information-based query: play summarized TTS (backend generates voice-friendly summary)
           const shouldPlayQueryTTS =
-            isVoiceTriggeredRequestRef.current === true ||
+            isVoiceTriggeredForThisRequest ||
             fullVoiceMode ||
             activeVoiceButtonRef.current !== null;
           if (shouldPlayQueryTTS) {
@@ -1319,7 +1336,7 @@ export function useChatbot({
             handleFrontendExit();
           }
           const shouldPlayQueryErrorTTS =
-            isVoiceTriggeredRequestRef.current === true ||
+            isVoiceTriggeredForThisRequest ||
             fullVoiceMode ||
             activeVoiceButtonRef.current !== null;
           if (shouldPlayQueryErrorTTS) {
@@ -1339,7 +1356,7 @@ export function useChatbot({
             handleFrontendExit();
           }
           const shouldPlayNoResponseTTS =
-            isVoiceTriggeredRequestRef.current === true ||
+            isVoiceTriggeredForThisRequest ||
             fullVoiceMode ||
             activeVoiceButtonRef.current !== null;
           if (shouldPlayNoResponseTTS) {
@@ -1361,7 +1378,7 @@ export function useChatbot({
         ]);
         try {
           const shouldPlayQueryExceptionTTS =
-            isVoiceTriggeredRequestRef.current === true ||
+            isVoiceTriggeredForThisRequest ||
             fullVoiceMode ||
             activeVoiceButtonRef.current !== null;
           if (shouldPlayQueryExceptionTTS) {
@@ -1422,7 +1439,8 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
-        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateLeaveTTSSummary,
@@ -1437,7 +1455,8 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
-        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateQueryTTSSummary,
@@ -1451,7 +1470,8 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
-        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateQueryTTSSummary,
@@ -1465,7 +1485,8 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
-        exitFlowForManualExit: () => handleFlowExit({ newSession: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateQueryTTSSummary,
@@ -1515,7 +1536,7 @@ export function useChatbot({
               answer.toLowerCase().includes("course progress")) ||
             (answer.includes("✅") && answer.toLowerCase().includes("exited"));
           if (isExitResponse) {
-            handleFlowExit({ newSession: true });
+            handleFlowExit({ newSession: true, skipTTSInterrupt: true });
           }
 
           // Play TTS if voice-initiated
@@ -1565,7 +1586,7 @@ export function useChatbot({
             text: "✅ Exited. How can I help you next?",
           },
         ]);
-        handleFlowExit({ newSession: true });
+        handleFlowExit({ newSession: true, skipTTSInterrupt: true });
         setIsProcessing(false);
         try {
           if (isVoiceTriggeredRequestRef.current === true) {
@@ -1691,7 +1712,7 @@ export function useChatbot({
     const thisRequestId = ttsRequestIdRef.current;
 
     console.log(
-      `Ã°Å¸â€Å  TTS Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`,
+      `[TTS] Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`,
     );
 
     setTtsLoading(idx);
@@ -1708,7 +1729,7 @@ export function useChatbot({
       // Check if this request is still the latest (not cancelled by a newer request)
       if (ttsRequestIdRef.current !== thisRequestId) {
         console.log(
-          `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`,
+          `[TTS] Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`,
         );
         setTtsLoading(null);
         return;
@@ -1725,7 +1746,7 @@ export function useChatbot({
         // Check again during streaming if request is still valid
         if (ttsRequestIdRef.current !== thisRequestId) {
           console.log(
-            `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled during streaming`,
+            `[TTS] Request #${thisRequestId} cancelled during streaming`,
           );
           setTtsLoading(null);
           return;
@@ -1735,7 +1756,7 @@ export function useChatbot({
       // Final check before creating audio
       if (ttsRequestIdRef.current !== thisRequestId) {
         console.log(
-          `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled before playback`,
+          `[TTS] Request #${thisRequestId} cancelled before playback`,
         );
         setTtsLoading(null);
         return;
@@ -1784,7 +1805,7 @@ export function useChatbot({
       // Final check right before playing
       if (ttsRequestIdRef.current !== thisRequestId) {
         console.log(
-          `Ã°Å¸â€â€¡ TTS Request #${thisRequestId} cancelled right before play`,
+          `[TTS] Request #${thisRequestId} cancelled right before play`,
         );
         URL.revokeObjectURL(audioUrl);
         setTtsLoading(null);
@@ -1792,7 +1813,7 @@ export function useChatbot({
       }
 
       // Play audio and handle play promise rejection
-      console.log(`Ã°Å¸â€Å  TTS Request #${thisRequestId} playing`);
+      console.log(`[TTS] Request #${thisRequestId} playing`);
       try {
         await audio.play();
       } catch (playError) {
@@ -1881,7 +1902,8 @@ export function useChatbot({
     setEditingMessageIndex: (index) => setEditingMessageIndex(index),
     getChatHistoryLength: () => chatHistory.length,
     exitFlow: () => handleFlowExit({ newSession: false }),
-    exitFlowWithNewSession: () => handleFlowExit({ newSession: true }),
+    exitFlowWithNewSession: () =>
+      handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
     setProcessing: setIsProcessing,
     playTTS: (index, text) => void handlePlayTTS(index, text),
     submitMessage: (message: string) => handleSubmit(message),
@@ -2609,12 +2631,16 @@ export function useChatbot({
     }
   };
 
-  const handleSaveColumn = async (columnTitle: string, studentData: any[]) => {
+  const handleSaveColumn = async (
+    columnTitle: string,
+    studentData: any[],
+    saveSessionId?: string,
+  ) => {
     try {
       const result = await sendColumnSave({
         columnTitle,
         studentData,
-        sessionId,
+        sessionId: saveSessionId || sessionId,
         userId,
         getErpContext,
       });

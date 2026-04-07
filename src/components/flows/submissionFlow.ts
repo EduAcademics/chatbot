@@ -36,6 +36,7 @@ export interface SubmissionFileUploadParams {
   sessionId: string | null;
   userId: string;
   getErpContext: () => { academic_session: string; branch_token: string };
+  isVoiceTriggered?: boolean;
   appendBotMessage: (msg: SubmissionBotMessage) => void;
   playTTS?: (index: number, text: string) => void;
 }
@@ -137,7 +138,7 @@ export async function handleSubmissionChat(
 
       appendBotMessage({ type: "bot", answer, activeTab: "answer" });
 
-      if (isVoiceTriggered || shouldExitSubmissionOnSuccess(answer)) {
+      if (isVoiceTriggered) {
         try {
           // Use backend tts_text (short, user-friendly) when provided; else summarize full answer
           const textToSpeak =
@@ -169,9 +170,11 @@ export async function handleSubmissionChat(
         console.log("✅ Homework submitted successfully, exiting flow");
         const spokenText =
           ttsText != null && ttsText !== "" ? ttsText : getTTSSummary(answer);
+        // Add generation/network slack so flow-exit doesn't interrupt speech right after play starts.
+        const generationSlackMs = 3000;
         const exitDelayMs = Math.min(
-          7000,
-          Math.max(2200, spokenText.length * 45),
+          12000,
+          Math.max(5000, spokenText.length * 55 + generationSlackMs),
         );
         setTimeout(exitFlow, exitDelayMs);
       }
@@ -206,8 +209,15 @@ export async function handleSubmissionChat(
 export async function handleSubmissionFileUpload(
   params: SubmissionFileUploadParams,
 ): Promise<void> {
-  const { file, sessionId, userId, getErpContext, appendBotMessage, playTTS } =
-    params;
+  const {
+    file,
+    sessionId,
+    userId,
+    getErpContext,
+    isVoiceTriggered,
+    appendBotMessage,
+    playTTS,
+  } = params;
 
   try {
     const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
@@ -232,13 +242,16 @@ export async function handleSubmissionFileUpload(
       type: "bot",
       text: `✅ File uploaded successfully! Upload more or say 'skip' to continue.`,
     });
-    try {
-      playTTS?.(
-        -1,
-        "File uploaded successfully! Upload more or say skip to continue.",
-      );
-    } catch (ttsErr) {
-      console.error("Submission upload TTS playback failed:", ttsErr);
+
+    if (isVoiceTriggered && playTTS) {
+      try {
+        playTTS(
+          -1,
+          "File uploaded successfully. Upload more or say skip to continue.",
+        );
+      } catch (ttsErr) {
+        console.error("Submission upload TTS playback failed:", ttsErr);
+      }
     }
 
     const fileMessage = `Add file ${fileUuid} to attachments`;

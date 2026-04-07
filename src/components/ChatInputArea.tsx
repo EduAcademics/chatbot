@@ -169,6 +169,7 @@ export default function ChatInputArea({
                 sessionId,
                 userId,
                 getErpContext,
+                isVoiceTriggered: activeVoiceButtonRef.current !== null,
                 appendBotMessage: (msg) =>
                   setChatHistory((prev) => [...prev, msg]),
                 playTTS: (idx, text) => void handlePlayTTS(idx, text, true),

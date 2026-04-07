@@ -37,7 +37,11 @@ interface MarksTableData {
 
 interface MarksEntryTableProps {
   data: MarksTableData;
-  onSaveColumn: (columnTitle: string, studentData: any[]) => Promise<boolean>;
+  onSaveColumn: (
+    columnTitle: string,
+    studentData: any[],
+    sessionId?: string,
+  ) => Promise<boolean>;
 }
 
 const REMARKS_OPTIONS = [
