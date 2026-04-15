@@ -40,7 +40,7 @@ function getIceServers(): RTCIceServer[] {
   const servers: RTCIceServer[] = [{ urls: stunUrl }];
 
   const turnUrl =
-    env.VITE_TURN_URL || "turn:aiapi.eduacademics.com:3478";
+    env.VITE_TURN_URL || "turn:aiapi.schoolforschools.ai:3478";
   const turnUsername = env.VITE_TURN_USERNAME || "webrtc";
   const turnCredential = env.VITE_TURN_CREDENTIAL || "webrtcpass";
   servers.push({
