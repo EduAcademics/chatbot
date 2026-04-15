@@ -11,6 +11,7 @@ export type FlowType =
   | "assignment"
   | "submission"
   | "review"
+  | "teacher_diary"
   | "marks"
   | "course_progress"
   | "_legacy_attendance_disabled"

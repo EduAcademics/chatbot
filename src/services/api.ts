@@ -256,6 +256,30 @@ interface ReviewChatResponse {
   message?: string;
 }
 
+interface TeacherDiaryChatRequest {
+  session_id: string;
+  user_id: string;
+  query: string;
+  bearer_token?: string;
+  academic_session: string;
+  branch_token: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+interface TeacherDiaryChatResponse {
+  status: string;
+  message: string;
+  total_token_counts: number;
+  inf_time: number;
+  data: {
+    answer: string;
+    tts_text?: string;
+    references?: string;
+    mongodbquery?: string;
+  };
+}
+
 interface CourseProgressChatRequest {
   session_id: string;
   query: string;
@@ -648,6 +672,18 @@ export const aiAPI = {
     request: ReviewChatRequest,
   ): Promise<ReviewChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/review-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
+  teacherDiaryChat: async (
+    request: TeacherDiaryChatRequest,
+  ): Promise<TeacherDiaryChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/teacher-diary-chat`, {
       method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),

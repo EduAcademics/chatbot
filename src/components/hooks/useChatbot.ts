@@ -12,6 +12,7 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
+import { handleDiaryChat } from "../flows/diaryFlow";
 import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
 import {
   handleAttendanceChat,
@@ -1478,6 +1479,21 @@ export function useChatbot({
       });
     } else if (targetFlow === "review") {
       await handleReviewChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "teacher_diary") {
+      await handleDiaryChat({
         userMessage,
         sessionId,
         userId,
