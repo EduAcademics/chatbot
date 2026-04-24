@@ -3,6 +3,7 @@ export type TabType = "answer" | "references" | "query";
 export type FlowType =
   | "none"
   | "query"
+  | "faq"
   | "attendance"
   | "voice_attendance"
   | "full_voice_attendance"

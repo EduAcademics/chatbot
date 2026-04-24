@@ -748,6 +748,7 @@ export function useChatbot({
     flow: string;
     confidence: number;
     entities: any;
+    validation_status?: string;
   }> => {
     try {
       const response = await fetch(`${API_BASE_URL}/v1/ai/classify-query`, {
@@ -763,7 +764,7 @@ export function useChatbot({
       const data = await response.json();
 
       if (data.status === "success") {
-        const { flow, confidence, entities } = data.data;
+        const { flow, confidence, entities,validation_status } = data.data;
 
         console.log("[Routing] Query classification:", {
           query: message,
@@ -772,7 +773,7 @@ export function useChatbot({
           entities,
         });
 
-        return { flow, confidence, entities };
+        return { flow, confidence, entities,validation_status };
       }
 
       // Fallback
@@ -784,7 +785,7 @@ export function useChatbot({
   };
 
   const handleSubmit = async (overrideMessage?: string) => {
-    const userMessage = (overrideMessage ?? inputText).trim();
+    const userMessage = (overrideMessage ?? inputText).trim(); // captures user question here
     if (!userMessage) return;
 
     // Snapshot request-level voice source before any flow/exit handlers mutate refs.
@@ -836,7 +837,12 @@ export function useChatbot({
 
     // AUTO-ROUTING: Classify query if auto-routing is enabled and no manual flow selected
     let targetFlow = activeFlow;
-    let classificationResult = null;
+    let classificationResult: {
+      flow: string;
+      confidence: number;
+      entities: any;
+      validation_status?: string;
+    } | null = null;
 
     // Don't re-classify if we're in the middle of a multi-step flow
     const inAttendanceFlow =
@@ -1015,9 +1021,9 @@ export function useChatbot({
             } as any;
             targetFlow = "leave_approval" as FlowType;
           } else {
-            classificationResult = await classifyQuery(userMessage);
+            classificationResult = await classifyQuery(userMessage);  
             console.log("✅ Classification complete:", classificationResult);
-            targetFlow = classificationResult.flow as FlowType;
+            targetFlow = classificationResult.flow as FlowType;  // the question now is classified  
           }
 
           // Map backend flow names to frontend flow types
@@ -1288,20 +1294,22 @@ export function useChatbot({
       // Keep the current step - don't reset
     }
 
-    if (targetFlow === "query") {
+    if (targetFlow === "query" || targetFlow === "faq") {  // the code checcks if the intent is query or faq and then calls the query handler API
       // Query handler API
       try {
-        const data = await aiAPI.queryHandler({
+        const data = await aiAPI.queryHandler({    // this is where suitcase is built using model.py structure and sent to backend server(supriyo). the code combines the ID, Question and label into one package 
           user_id: userId,
           user_roles: roles,
           query: userMessage,
+          flow: targetFlow,
+          validation_status: classificationResult?.validation_status 
         });
         if (data.status === "success" && data.data) {
           setChatHistory((prev) => [
             ...prev,
             {
               type: "bot",
-              answer: data.data?.answer,
+              answer: data.data?.answer,   // the answer comes from backend and the frontend displays it(supriyo)
               references: data.data?.references,
               mongodbquery: data.data?.mongodbquery,
               activeTab: "answer", // Set initial active tab
