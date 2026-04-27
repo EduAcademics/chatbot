@@ -425,6 +425,13 @@
   pointer-events: none;
   border-radius: 1px;
 }
+.chatbot-btn-full-voice.full-voice-connecting {
+  opacity: 0.85;
+  cursor: wait;
+}
+.chatbot-btn-full-voice.full-voice-connecting svg {
+  animation: spin 1s linear infinite;
+}
 @keyframes pulse {
   0%,
   100% {

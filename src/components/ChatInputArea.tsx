@@ -3,7 +3,7 @@
  * Extracted from AudioStreamerChatBot to reduce main file size.
  */
 import { motion } from "framer-motion";
-import { FiMic, FiSend, FiUpload } from "react-icons/fi";
+import { FiLoader, FiMic, FiSend, FiUpload } from "react-icons/fi";
 import type { FlowType } from "./types";
 import type {
   AttendanceFlowCallbacks,
@@ -20,6 +20,7 @@ export interface ChatInputAreaProps {
   setInputText: (v: string | ((prev: string) => string)) => void;
   isRecording: boolean;
   fullVoiceMode: boolean;
+  isFullVoiceConnecting: boolean;
   setFullVoiceMode: (v: boolean) => void;
   isVoiceActive: boolean;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
@@ -51,6 +52,7 @@ export default function ChatInputArea({
   setInputText,
   isRecording,
   fullVoiceMode,
+  isFullVoiceConnecting,
   setFullVoiceMode,
   isVoiceActive: _isVoiceActive,
   handleSubmit,
@@ -248,6 +250,7 @@ export default function ChatInputArea({
       />
       <button
         onClick={() => {
+          if (isFullVoiceConnecting) return;
           activeVoiceButtonRef.current = "audio";
           if (fullVoiceMode) {
             setFullVoiceMode(false);
@@ -259,14 +262,17 @@ export default function ChatInputArea({
         }}
         className={`chatbot-btn chatbot-btn-full-voice w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center ${
           fullVoiceMode ? " full-voice-active" : ""
-        }`}
+        } ${isFullVoiceConnecting ? " full-voice-connecting" : ""}`}
         title={
-          fullVoiceMode
+          isFullVoiceConnecting
+            ? "Connecting Full Voice Mode..."
+            : fullVoiceMode
             ? "Exit Full Voice Mode (Hands-Free)"
             : "Full Voice Mode — Mic always on, auto turn detection"
         }
+        disabled={isFullVoiceConnecting}
       >
-        <FiMic />
+        {isFullVoiceConnecting ? <FiLoader /> : <FiMic />}
       </button>
       <button
         onClick={() => handleSubmit()}

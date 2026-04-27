@@ -120,6 +120,7 @@ const AudioStreamerChatBot = ({
             setInputText={api.setInputText}
             isRecording={api.isRecording}
             fullVoiceMode={api.fullVoiceMode}
+            isFullVoiceConnecting={api.isFullVoiceConnecting}
             setFullVoiceMode={api.setFullVoiceMode}
             isVoiceActive={api.isVoiceActive}
             handleSubmit={api.handleSubmit}

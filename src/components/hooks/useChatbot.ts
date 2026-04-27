@@ -128,6 +128,7 @@ export interface UseChatbotReturn {
   setInputText: React.Dispatch<React.SetStateAction<string>>;
   isRecording: boolean;
   fullVoiceMode: boolean;
+  isFullVoiceConnecting: boolean;
   setFullVoiceMode: (v: boolean) => void;
   isVoiceActive: boolean;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
@@ -275,6 +276,8 @@ export function useChatbot({
   const [fullVoiceAutoSubmitTimer, setFullVoiceAutoSubmitTimer] =
     useState<ReturnType<typeof setTimeout> | null>(null); // <-- add for full voice auto-submit timer
   const [fullVoiceMode, setFullVoiceMode] = useState<boolean>(false); // Full Voice Mode (Hands-Free)
+  const [isFullVoiceConnecting, setIsFullVoiceConnecting] =
+    useState<boolean>(false);
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
   const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
@@ -475,6 +478,11 @@ export function useChatbot({
     activeVoiceButtonRef.current = "audio";
     console.log("[Voice] Audio button - set mode to audio");
     try {
+      if (useFullVoice) {
+        setIsFullVoiceConnecting(true);
+      } else {
+        setIsFullVoiceConnecting(false);
+      }
       // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
       finalTextRef.current = "";
@@ -570,13 +578,16 @@ export function useChatbot({
           onError: (error: Error) => {
             console.error("WebRTC error:", error);
             setIsRecording(false);
+            setIsFullVoiceConnecting(false);
             setIsVoiceActive(false);
           },
           onConnected: () => {
             setIsRecording(true);
+            setIsFullVoiceConnecting(false);
           },
           onDisconnected: () => {
             setIsRecording(false);
+            setIsFullVoiceConnecting(false);
             setIsVoiceActive(false);
             console.log("WebRTC disconnected");
           },
@@ -618,6 +629,7 @@ export function useChatbot({
     } catch (error) {
       console.error("Failed to start WebRTC streaming:", error);
       setIsRecording(false);
+      setIsFullVoiceConnecting(false);
       setIsVoiceActive(false);
     }
   };
@@ -633,6 +645,7 @@ export function useChatbot({
       clearTimeout(fullVoiceAutoSubmitTimer);
       setFullVoiceAutoSubmitTimer(null);
     }
+    setIsFullVoiceConnecting(false);
     if (webrtcServiceRef.current) {
       await webrtcServiceRef.current.disconnect();
       webrtcServiceRef.current = null;
@@ -2848,6 +2861,7 @@ export function useChatbot({
     setInputText,
     isRecording,
     fullVoiceMode,
+    isFullVoiceConnecting,
     setFullVoiceMode,
     isVoiceActive,
     handleSubmit,
