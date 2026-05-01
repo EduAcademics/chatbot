@@ -133,7 +133,7 @@ export interface UseChatbotReturn {
   isVoiceActive: boolean;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
   startStreaming: (useFullVoice?: boolean) => Promise<void>;
-  stopStreaming: (skipSubmit?: boolean) => Promise<void>;
+  stopStreaming: (skipSubmit?: boolean, keepWarmConnection?: boolean) => Promise<void>;
   pendingClassInfo: ClassInfo | null;
   attendanceFlowState: AttendanceState;
   getAttendanceFlowCallbacks: () => AttendanceFlowCallbacks;
@@ -281,11 +281,21 @@ export function useChatbot({
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
   const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
+  const warmDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   ); // Debounce turn-complete
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0);
   const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voiceÃ‚Â inputÃ‚Â time
+
+  const clearWarmDisconnectTimer = () => {
+    if (warmDisconnectTimerRef.current) {
+      clearTimeout(warmDisconnectTimerRef.current);
+      warmDisconnectTimerRef.current = null;
+    }
+  };
 
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
@@ -350,6 +360,16 @@ export function useChatbot({
       stream.getTracks().forEach((track) => track.stop()); // Cleanup
     };
     fetchMicrophones();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearWarmDisconnectTimer();
+      if (webrtcServiceRef.current) {
+        void webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
+      }
+    };
   }, []);
 
   // Fetch user info and session id on mount (or when userId changes)
@@ -478,6 +498,7 @@ export function useChatbot({
     activeVoiceButtonRef.current = "audio";
     console.log("[Voice] Audio button - set mode to audio");
     try {
+      clearWarmDisconnectTimer();
       if (useFullVoice) {
         setIsFullVoiceConnecting(true);
       } else {
@@ -488,6 +509,14 @@ export function useChatbot({
       finalTextRef.current = "";
 
       // Create WebRTC service instance
+      const existingService = webrtcServiceRef.current;
+      if (existingService?.getIsConnected()) {
+        existingService.enableMic(true);
+        setIsRecording(true);
+        setIsFullVoiceConnecting(false);
+        return;
+      }
+
       const webrtcService = new WebRTCAudioService();
       webrtcServiceRef.current = webrtcService;
 
@@ -634,7 +663,10 @@ export function useChatbot({
     }
   };
 
-  const stopStreaming = async (skipSubmit = false) => {
+  const stopStreaming = async (
+    skipSubmit = false,
+    keepWarmConnection = false,
+  ) => {
     // Step 4: Reset voice mode tracker when stopping
     activeVoiceButtonRef.current = null;
     if (turnCompleteTimerRef.current) {
@@ -646,7 +678,25 @@ export function useChatbot({
       setFullVoiceAutoSubmitTimer(null);
     }
     setIsFullVoiceConnecting(false);
+    if (keepWarmConnection && webrtcServiceRef.current?.getIsConnected()) {
+      webrtcServiceRef.current.enableMic(false);
+      setIsRecording(false);
+      setIsVoiceActive(false);
+
+      clearWarmDisconnectTimer();
+      warmDisconnectTimerRef.current = setTimeout(async () => {
+        if (webrtcServiceRef.current) {
+          await webrtcServiceRef.current.disconnect();
+          webrtcServiceRef.current = null;
+        }
+        warmDisconnectTimerRef.current = null;
+      }, 20000);
+
+      if (skipSubmit) return;
+    }
+
     if (webrtcServiceRef.current) {
+      clearWarmDisconnectTimer();
       await webrtcServiceRef.current.disconnect();
       webrtcServiceRef.current = null;
     }

@@ -25,7 +25,10 @@ export interface ChatInputAreaProps {
   isVoiceActive: boolean;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
   startStreaming: (useFullVoice?: boolean) => Promise<void>;
-  stopStreaming: (skipSubmit?: boolean) => Promise<void>;
+  stopStreaming: (
+    skipSubmit?: boolean,
+    keepWarmConnection?: boolean,
+  ) => Promise<void>;
   setChatHistory: React.Dispatch<React.SetStateAction<any[]>>;
   sessionId: string;
   userId: string;
@@ -254,7 +257,7 @@ export default function ChatInputArea({
           activeVoiceButtonRef.current = "audio";
           if (fullVoiceMode) {
             setFullVoiceMode(false);
-            stopStreaming(true);
+            stopStreaming(true, true);
           } else {
             setFullVoiceMode(true);
             startStreaming(true);
