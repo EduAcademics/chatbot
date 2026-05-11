@@ -223,6 +223,18 @@ interface ReviewChatRequest {
   tts_voice?: string; // Optional: TTS voice to use
 }
 
+interface TeacherDiaryChatRequest {
+  session_id: string;
+  user_id?: string; // Optional: user ID (used directly as teacher_id)
+  query: string;
+  bearer_token?: string; // Optional: Bearer token for ERP API
+  academic_session?: string; // Optional: Academic session
+  branch_token?: string; // Optional: Branch token
+  voice_mode?: boolean; // Optional: enable TTS for voice / full-voice mode
+  tts?: boolean; // Optional: alternative to voice_mode
+  tts_voice?: string; // Optional: TTS voice to use
+}
+
 export interface MarksChatRequest {
   session_id: string;
   user_id: string;
@@ -250,6 +262,15 @@ export interface MarksChatResponse {
 }
 
 interface ReviewChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+  };
+  message?: string;
+}
+
+interface TeacherDiaryChatResponse {
   status: string;
   data?: {
     answer?: string;
@@ -650,6 +671,19 @@ export const aiAPI = {
     request: ReviewChatRequest,
   ): Promise<ReviewChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/review-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
+  // Teacher diary chat
+  teacherDiaryChat: async (
+    request: TeacherDiaryChatRequest,
+  ): Promise<TeacherDiaryChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/teacher-diary-chat`, {
       method: "POST",
       headers: getDefaultHeaders(),
       body: JSON.stringify(request),

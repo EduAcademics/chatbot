@@ -12,6 +12,7 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
+import { handleTeacherDiaryChat } from "../flows/teacherDiaryFlow";
 import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
 import {
   handleAttendanceChat,
@@ -880,6 +881,10 @@ export function useChatbot({
       "create assignment",
       "give assignment",
       "new assignment",
+      "create diary",
+      "diary entry",
+      "teacher diary",
+      "class diary",
       "show me",
       "list all",
       "show",
@@ -902,9 +907,13 @@ export function useChatbot({
     const inLeaveApproval =
       activeFlowRef.current === "leave_approval" ||
       activeFlow === "leave_approval";
+    const inTeacherDiary =
+      activeFlowRef.current === "teacher_diary" ||
+      activeFlow === "teacher_diary";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
+    const inTeacherDiaryFlow = inTeacherDiary && !looksLikeNewRequest;
 
     console.log("[Routing] Auto-routing check:", {
       autoRouting,
@@ -917,6 +926,7 @@ export function useChatbot({
       inLeaveFlow,
       inAssignmentFlow,
       inLeaveApprovalFlow,
+      inTeacherDiaryFlow,
       looksLikeNewRequest,
       message: userMessage,
     });
@@ -931,7 +941,8 @@ export function useChatbot({
       inVoiceAttendanceFlow ||
       inLeaveFlow ||
       inAssignmentFlow ||
-      inLeaveApprovalFlow
+      inLeaveApprovalFlow ||
+      inTeacherDiaryFlow
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log(
@@ -1191,6 +1202,32 @@ export function useChatbot({
       if (targetFlow === "review" && isNewFlowInitialization) {
         activeFlowRef.current = "review";
         setActiveFlow("review");
+      }
+
+      // Initialize teacher diary flow
+      if (targetFlow === "teacher_diary" && isNewFlowInitialization) {
+        activeFlowRef.current = "teacher_diary";
+        setActiveFlow("teacher_diary");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
       }
 
       // Initialize leave flow
@@ -1499,6 +1536,21 @@ export function useChatbot({
       });
     } else if (targetFlow === "review") {
       await handleReviewChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "teacher_diary") {
+      await handleTeacherDiaryChat({
         userMessage,
         sessionId,
         userId,
