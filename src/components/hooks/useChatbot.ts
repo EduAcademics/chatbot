@@ -1376,6 +1376,7 @@ export function useChatbot({
               references: data.data?.references,
               mongodbquery: data.data?.mongodbquery,
               activeTab: "answer", // Set initial active tab
+              visualization: data.data?.visualization,
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response
