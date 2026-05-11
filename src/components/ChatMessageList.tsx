@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
+import VisualizationRenderer from "./VisualizationRenderer";
 import { MarksEntryTable } from "./MarksEntryTable";
 import type { FlowType } from "./types";
 import { getThumbsUpClass, getThumbsDownClass } from "./utils/chatbotUtils";
@@ -1344,6 +1345,11 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 />
                               </>
                             )}
+                            {msg.visualization?.show_chart && msg.visualization ? (
+                              <VisualizationRenderer
+                                visualization={msg.visualization}
+                              />
+                            ) : null}
                             {msg.marks_table && (
                               <MarksEntryTable
                                 data={msg.marks_table}

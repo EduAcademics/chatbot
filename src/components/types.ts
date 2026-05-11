@@ -17,6 +17,19 @@ export type FlowType =
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";
 
+export type ChartType = "bar" | "line" | "pie" | "table" | "none";
+
+/** Matches backend query-handler `data.visualization` contract */
+export interface Visualization {
+  show_chart: boolean;
+  chart_type: ChartType;
+  title: string;
+  x_key: string | null;
+  y_key: string | null;
+  payload: Record<string, unknown>[];
+  reason: string;
+}
+
 export interface ClassSectionOption {
   classId: string;
   sectionId: string;
@@ -45,6 +58,7 @@ export interface ChatMessage {
   courseProgress?: any;
   classSection?: ClassSectionOption;
   classSectionsOptions?: any[];
+  visualization?: Visualization;
 }
 
 export interface ClassInfo {

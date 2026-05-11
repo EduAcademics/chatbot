@@ -1,4 +1,5 @@
 import { API_BASE_URL, ERP_API_BASE_URL } from "../config/settings";
+import type { Visualization } from "../components/types";
 
 // Types
 export interface LoginCredentials {
@@ -45,6 +46,8 @@ interface QueryHandlerResponse {
     answer: string;
     references: any[];
     mongodbquery: string[];
+    uuid_question?: string;
+    visualization?: Visualization;
   };
   message?: string;
 }
