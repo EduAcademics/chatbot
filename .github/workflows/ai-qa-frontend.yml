@@ -11,4 +11,160 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Code checkout
-        
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install code dependencies
+        run: |
+          echo "Installing dependencies..."
+          npm ci
+          echo "Dependencies installed successfully."
+
+      - name: Code linting
+        run: |
+          echo "Running code linting..."
+          npm run lint
+          echo "Code linting completed successfully."
+
+      - name: Building the application
+        run: |
+          echo "Building the application..."
+          npm run build
+        env:
+          NODE_ENV: production
+          VITE_NAME: "AI chatbot"
+          VITE_URL: "https://qa.chat.schoolforschools.ai"
+          VITE_API_BASE_URL: "https://aiapi.qa.schoolforschools.ai/"
+          VITE_WS_BASE_URL: "wss://aiapi.qa.schoolforschools.ai/"
+          VITE_BOT_START_URL: "https://aiapi.qa.schoolforschools.ai/client/start"
+          VITE_BOT_START_PUBLIC_API_KEY: ""
+          TRANSLATOR: "false"
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: Verifying Build application
+        run: |
+          echo "Verifying build application..."
+          ls -la dist/
+          test -f dist/index.html || { echo "dist/index.html not found! Build may failed."; exit 1; }
+          echo "Build application verified successfully."
+
+      - name: Upload Build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-qa-frontend-build
+          path: dist/
+          retention-days: 1
+
+  Frontend-CD:
+    needs: frontend-ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download Generated Build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-qa-frontend-build
+          path: dist/
+
+      - name: Cleaning serve build directory
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AI_QA_SERVER_HOST }}
+          username: ${{ secrets.AI_QA_SERVER_USERNAME }}
+          key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
+          script: |
+            rm -rf /home/ubuntu/frontend-build/*
+
+      - name: Deploying Latest build to server
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.AI_QA_SERVER_HOST }}
+          username: ${{ secrets.AI_QA_SERVER_USERNAME }}
+          key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
+          source: "dist/*"
+          target: /home/ubuntu/frontend-build/
+
+      - name: Verifying Deployment on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AI_QA_SERVER_HOST }}
+          username: ${{ secrets.AI_QA_SERVER_USERNAME }}
+          key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
+          script: |
+            ls -la /home/ubuntu/frontend-build/
+            test -f /home/ubuntu/frontend-build/index.html || { echo "Deployed index.html not found! Deployment may failed."; exit 1; }
+            echo "Deployment verified successfully on server."
+
+      - name: Restarting Frontend server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AI_QA_SERVER_HOST }}
+          username: ${{ secrets.AI_QA_SERVER_USERNAME }}
+          key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
+          script: |
+            docker exec chatbot-nginx nginx -s reload || { echo "nginx reload failed!"; exit 1; }
+            echo "Frontend server restarted successfully."
+
+      - name: Verifying Deployment & Server health status
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.AI_QA_SERVER_HOST }}
+          username: ${{ secrets.AI_QA_SERVER_USERNAME }}
+          key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
+          script: |
+            sleep 15
+            response=$(curl -s -o /dev/null -w "%{http_code}" https://qa.chat.schoolforschools.ai)
+            echo "Server health check completed. Response: $response"
+            if [ "$response" = "200" ] || [ "$response" = "301" ] || [ "$response" = "302" ]; then
+              echo "Deployment verified successfully. Server is healthy. status code: $response"
+            else
+              echo "Deployment verification failed. Server is not healthy. status code: $response"
+              exit 1
+            fi
+
+      - name: Success Deployment Notification
+        uses: dawidd6/action-send-mail@v3
+        if: success()
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "✅ AI QA Frontend Deployment Successful — #${{ github.run_number }}"
+          body: |
+            The AI QA frontend has been successfully deployed.
+ 
+            Branch : ${{ github.ref_name }}
+            Commit : ${{ github.sha }}
+            Run    : #${{ github.run_number }}
+ 
+            Verify at: https://chat.qa.schoolforschools.ai
+          to: ${{ vars.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+
+      - name: Failure Deployment Notification
+        uses: dawidd6/action-send-mail@v3
+        if: failure()
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "❌ AI QA Frontend Deployment Failed — #${{ github.run_number }}"
+          body: |
+            The AI QA frontend deployment has FAILED. Pleaes check the Deployment logs to identify the issue and fix it as soon as possible..
+ 
+            Branch : ${{ github.ref_name }}
+            Commit : ${{ github.sha }}
+            Run    : #${{ github.run_number }}
+
+            Please check the GitHub Actions logs:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          to: ${{ vars.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_USERNAME }} 
