@@ -1,0 +1,14 @@
+name: ai-qa-frontend-pipeline
+
+on: 
+  push:
+    branches:
+      - qa
+
+jobs:
+  frontend-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Code checkout
+        
