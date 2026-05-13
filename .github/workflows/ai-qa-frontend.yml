@@ -5,6 +5,10 @@ on:
     branches:
       - qa
 
+concurrency:
+  group: ai-qa-frontend-pipeline
+  cancel-in-progress: true
+
 jobs:
   frontend-ci:
     runs-on: ubuntu-latest
