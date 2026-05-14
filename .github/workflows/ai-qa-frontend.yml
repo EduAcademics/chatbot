@@ -34,7 +34,7 @@ jobs:
           echo "Running code linting..."
           npm run lint || echo "Linting issues found. Please fix them before committing."
         continue-on-error: true
-        
+
       - name: Building the application
         run: |
           echo "Building the application...."
@@ -92,6 +92,7 @@ jobs:
           key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
           source: "dist/*"
           target: /home/ubuntu/frontend-build/
+          strip_components: 1
 
       - name: Verifying Deployment on server
         uses: appleboy/ssh-action@v1
@@ -101,7 +102,7 @@ jobs:
           key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
           script: |
             ls -la /home/ubuntu/frontend-build/
-            test -f /home/ubuntu/frontend-build/index.html || { echo "Deployed index.html not found! Deployment may failed."; exit 1; }
+            test -f /home/ubuntu/frontend-build/dist/index.html || { echo "Deployed index.html not found! Deployment may failed."; exit 1; }
             echo "Deployment verified successfully on server."
 
       - name: Restarting Frontend server
