@@ -102,7 +102,7 @@ jobs:
           key: ${{ secrets.AI_QA_SERVER_SSH_KEY }}
           script: |
             ls -la /home/ubuntu/frontend-build/
-            test -f /home/ubuntu/frontend-build/dist/index.html || { echo "Deployed index.html not found! Deployment may failed."; exit 1; }
+            test -f /home/ubuntu/frontend-build/index.html || { echo "Deployed index.html not found! Deployment may failed."; exit 1; }
             echo "Deployment verified successfully on server."
 
       - name: Restarting Frontend server
