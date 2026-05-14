@@ -148,7 +148,7 @@ jobs:
             Commit : ${{ github.sha }}
             Run    : #${{ github.run_number }}
  
-            Verify at: https://chat.qa.schoolforschools.ai
+            Verify at: https://qa.chat.schoolforschools.ai
           to: ${{ vars.EMAIL_TO }}
           from: ${{ secrets.EMAIL_USERNAME }}
 
