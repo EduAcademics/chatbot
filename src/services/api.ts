@@ -264,6 +264,34 @@ export interface MarksChatResponse {
   };
 }
 
+export interface HealthCardChatRequest {
+  session_id: string;
+  user_id: string;
+  query: string;
+  bearer_token?: string | undefined;
+  academic_session: string;
+  branch_token: string;
+  user_roles?: string[];
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+export interface HealthCardChatResponse {
+  status: string;
+  message: string;
+  total_token_counts: number;
+  inf_time: number;
+  data: {
+    answer: string;
+    tts_text?: string;
+    references?: string;
+    mongodbquery?: string;
+    health_card_table?: any;
+    health_card_sections?: any[];
+    health_card_saved?: string;
+  };
+}
+
 interface ReviewChatResponse {
   status: string;
   data?: {
@@ -697,6 +725,20 @@ export const aiAPI = {
 
   marksChat: async (request: MarksChatRequest): Promise<MarksChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/marks-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  healthCardChat: async (
+    request: HealthCardChatRequest,
+  ): Promise<HealthCardChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/health-card-chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),

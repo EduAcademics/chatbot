@@ -113,6 +113,13 @@ const AudioStreamerChatBot = ({
             userId={api.userId}
             getErpContext={api.getErpContext}
             onOpenPreview={handleOpenPreview}
+            handleSubmit={api.handleSubmit}
+            userRoles={
+              api.roles
+                ? api.roles.split(",").map((r: string) => r.trim()).filter(Boolean)
+                : []
+            }
+            speakHealthCardBotMessage={api.speakHealthCardBotMessage}
           />
           <ChatInputArea
             activeFlow={api.activeFlow}
