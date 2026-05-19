@@ -28,6 +28,8 @@ export interface Visualization {
   y_key: string | null;
   payload: Record<string, unknown>[];
   reason: string;
+  /** Non-holiday working day count for attendance % denominator */
+  attendance_working_days?: number | null;
 }
 
 export interface ClassSectionOption {
