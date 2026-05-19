@@ -182,7 +182,23 @@ export default function VisualizationRenderer({
   }
 
   if (chart_type === "pie") {
-    const total = values.reduce((a, b) => a + b, 0);
+    const isAttendanceLike = pairs.some((p) => {
+      const n = p.label.toLowerCase();
+      return (
+        n.includes("present") || n.includes("absent") || n.includes("leave")
+      );
+    });
+    const presentCount = pairs
+      .filter((p) => p.label.toLowerCase().includes("present"))
+      .reduce((sum, p) => sum + (p.value as number), 0);
+    const absentCount = pairs
+      .filter((p) => p.label.toLowerCase().includes("absent"))
+      .reduce((sum, p) => sum + (p.value as number), 0);
+    const attendanceDenom = presentCount + absentCount;
+    const total =
+      isAttendanceLike && attendanceDenom > 0
+        ? attendanceDenom
+        : values.reduce((a, b) => a + b, 0);
     if (total <= 0) return null;
     const formatPercent = (value: number): string => {
       const pct = (value / total) * 100;
@@ -226,15 +242,14 @@ export default function VisualizationRenderer({
     const lead = [...pairs]
       .sort((a, b) => (b.value as number) - (a.value as number))
       .at(0);
-    const leadPercent = lead
-      ? Math.round(((lead.value as number) / total) * 100)
-      : null;
-    const isAttendanceLike = pairs.some((p) => {
-      const n = p.label.toLowerCase();
-      return (
-        n.includes("present") || n.includes("absent") || n.includes("leave")
-      );
-    });
+    const leadPercent =
+      isAttendanceLike && attendanceDenom > 0
+        ? Math.round((presentCount / attendanceDenom) * 100)
+        : lead
+          ? Math.round(((lead.value as number) / total) * 100)
+          : null;
+    const centerLabel =
+      isAttendanceLike && attendanceDenom > 0 ? "Present" : lead?.label || "Top";
     return (
       <div className="mt-4 w-full rounded-2xl border-2 border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         {title ? (
@@ -257,7 +272,7 @@ export default function VisualizationRenderer({
                     {leadPercent}%
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    {lead?.label || "Top"}
+                    {centerLabel}
                   </div>
                 </>
               ) : null}
