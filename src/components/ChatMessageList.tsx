@@ -7,6 +7,8 @@ import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
 import { MarksEntryTable } from "./MarksEntryTable";
+import { HealthCardTable } from "./HealthCardTable";
+import { HealthCardSelector } from "./HealthCardSelector";
 import type { FlowType } from "./types";
 import { getThumbsUpClass, getThumbsDownClass } from "./utils/chatbotUtils";
 import { leaveApprovalAPI } from "../services/api";
@@ -79,6 +81,9 @@ export interface ChatMessageListProps {
   userId: string;
   getErpContext: () => { academic_session: string; branch_token: string };
   onOpenPreview: (url: string, filename: string) => void;
+  handleSubmit: (overrideMessage?: string) => Promise<void>;
+  userRoles: string[];
+  speakHealthCardBotMessage: (text: string) => void;
 }
 
 export default function ChatMessageList(props: ChatMessageListProps) {
@@ -112,8 +117,20 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     rejectReason,
     setRejectReason,
     getErpContext,
+    userId,
     onOpenPreview,
+    handleSubmit,
+    userRoles,
+    speakHealthCardBotMessage,
   } = props;
+
+  const lastHealthCardSectionsIdx = chatHistory.reduce(
+    (acc, m, i) =>
+      m.health_card_sections && Array.isArray(m.health_card_sections) && m.health_card_sections.length > 0
+        ? i
+        : acc,
+    -1,
+  );
 
   return (
     <div className="chatbot-chatbox" ref={chatBoxRef}>
@@ -1358,6 +1375,31 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                     msg.session_id,
                                   );
                                 }}
+                              />
+                            )}
+                            {msg.health_card_sections &&
+                              Array.isArray(msg.health_card_sections) &&
+                              msg.health_card_sections.length > 0 &&
+                              idx === lastHealthCardSectionsIdx && (
+                                <HealthCardSelector
+                                  sections={msg.health_card_sections}
+                                  disabled={isProcessing}
+                                  onConfirm={(selection) =>
+                                    handleSubmit(selection)
+                                  }
+                                />
+                              )}
+                            {msg.health_card_table && (
+                              <HealthCardTable
+                                tableData={msg.health_card_table}
+                                sessionId={msg.session_id || ""}
+                                userId={userId}
+                                userRoles={userRoles}
+                                getErpContext={getErpContext}
+                                appendBotMessage={(botMsg) =>
+                                  setChatHistory((prev) => [...prev, botMsg])
+                                }
+                                speakBotMessage={speakHealthCardBotMessage}
                               />
                             )}
                             <div className="bot-actions-bottom">
