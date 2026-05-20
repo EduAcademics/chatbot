@@ -98,6 +98,32 @@ export async function sendHealthCardSave(params: {
   });
 }
 
+export async function sendHealthCardColumnSave(params: {
+  fieldName: keyof HealthCardData;
+  rows: { uuid: string; health_card: HealthCardData }[];
+  sessionId: string | null;
+  userId: string;
+  userRoles: string[];
+  getErpContext: () => { academic_session: string; branch_token: string };
+}) {
+  const { fieldName, rows, sessionId, userId, getErpContext } = params;
+  const effectiveSessionId = sessionId || userId;
+  const payload = rows.map((row) => ({
+    uuid: row.uuid,
+    ...row.health_card,
+  }));
+  const query = `SAVE_HEALTH_CARD_COLUMN:${fieldName}:${JSON.stringify(payload)}`;
+
+  return await runHealthCardChat({
+    userMessage: query,
+    sessionId: effectiveSessionId,
+    userId,
+    userRoles: params.userRoles,
+    isVoiceTriggered: false,
+    getErpContext,
+  });
+}
+
 export async function handleHealthCardChat(params: HealthCardFlowParams) {
   const {
     userMessage,

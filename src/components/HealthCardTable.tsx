@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import {
+  sendHealthCardColumnSave,
   sendHealthCardSave,
   type HealthCardData,
 } from "./flows/healthCardFlow";
@@ -58,6 +59,28 @@ const EMPTY_HEALTH_CARD: HealthCardData = {
   remarks: "",
 };
 
+const STICKY_NAME_WIDTH = 140;
+const STICKY_ROLL_LEFT = STICKY_NAME_WIDTH;
+const STICKY_ROLL_WIDTH = 100;
+
+const stickyCellShadow = "2px 0 4px rgba(0,0,0,0.06)";
+
+const PURPLE_BTN_BG = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
+const GREY_BTN_BG = "#9CA3AF";
+const SAVING_BTN_BG = "#94a3b8";
+
+const COLUMN_DISPLAY_NAMES: Record<keyof HealthCardData, string> = {
+  height: "Height",
+  weight: "Weight",
+  leftVision: "Left Vision",
+  rightVision: "Right Vision",
+  vaccinationRequired: "Vaccination Required",
+  dentalExamination: "Dental Examination",
+  observation: "Observation",
+  followupAdvice: "Followup Advice",
+  remarks: "Remarks",
+};
+
 const isSaveSuccess = (result: {
   success?: boolean;
   data?: { answer?: string };
@@ -70,6 +93,31 @@ const isSaveSuccess = (result: {
     answer.includes("updated")
   );
 };
+
+const isColumnSaveSuccess = (
+  result: { success?: boolean; data?: { column_saved?: string; answer?: string } },
+  fieldKey: string,
+): boolean => {
+  if (!result?.success) return false;
+  if (result.data?.column_saved === fieldKey) return true;
+  const answer = String(result.data?.answer || "").toLowerCase();
+  return answer.includes("✅") && answer.includes("saved");
+};
+
+const Spinner = ({ size = 14, color = "#fff" }: { size?: number; color?: string }) => (
+  <span
+    style={{
+      width: size,
+      height: size,
+      border: `2px solid ${color === "#fff" ? "rgba(255,255,255,0.3)" : "rgba(102,126,234,0.3)"}`,
+      borderTopColor: color,
+      borderRadius: "50%",
+      animation: "healthCardSpin 0.8s linear infinite",
+      display: "inline-block",
+      flexShrink: 0,
+    }}
+  />
+);
 
 export const HealthCardTable: React.FC<HealthCardTableProps> = ({
   tableData,
@@ -86,24 +134,16 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
       health_card: { ...EMPTY_HEALTH_CARD, ...(s.health_card || {}) },
     })),
   );
-  const [savedRows, setSavedRows] = useState<Set<string>>(new Set());
-  const [rowSaveToasts, setRowSaveToasts] = useState<Set<string>>(new Set());
+  const [dirtyColumns, setDirtyColumns] = useState<Set<string>>(new Set());
   const [savingAll, setSavingAll] = useState(false);
-  const toastTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
-    {},
-  );
-
-  useEffect(() => {
-    return () => {
-      Object.values(toastTimersRef.current).forEach(clearTimeout);
-    };
-  }, []);
+  const [savingColumns, setSavingColumns] = useState<Set<string>>(new Set());
 
   const handleFieldChange = (
     studentUuid: string,
     field: keyof HealthCardData,
     value: string,
   ) => {
+    setDirtyColumns((prev) => new Set(prev).add(field));
     setRows((prev) =>
       prev.map((row) =>
         row.uuid === studentUuid
@@ -114,23 +154,6 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
           : row,
       ),
     );
-  };
-
-  const showRowSavedToast = (studentUuid: string) => {
-    setRowSaveToasts((prev) => new Set([...prev, studentUuid]));
-
-    if (toastTimersRef.current[studentUuid]) {
-      clearTimeout(toastTimersRef.current[studentUuid]);
-    }
-
-    toastTimersRef.current[studentUuid] = setTimeout(() => {
-      setRowSaveToasts((prev) => {
-        const next = new Set(prev);
-        next.delete(studentUuid);
-        return next;
-      });
-      delete toastTimersRef.current[studentUuid];
-    }, 2000);
   };
 
   const saveRow = async (row: HealthCardStudentRow): Promise<boolean> => {
@@ -145,14 +168,52 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
       });
 
       if (isSaveSuccess(result)) {
-        setSavedRows((prev) => new Set([...prev, row.uuid]));
-        showRowSavedToast(row.uuid);
         return true;
       }
       return false;
     } catch (error) {
       console.error("Health card row save error:", error);
       return false;
+    }
+  };
+
+  const handleSaveColumn = async (fieldKey: keyof HealthCardData) => {
+    setSavingColumns((prev) => new Set([...prev, fieldKey]));
+    try {
+      const result = await sendHealthCardColumnSave({
+        fieldName: fieldKey,
+        rows: rows.map((r) => ({ uuid: r.uuid, health_card: r.health_card })),
+        sessionId: sessionId || userId,
+        userId,
+        userRoles,
+        getErpContext,
+      });
+
+      if (isColumnSaveSuccess(result, fieldKey)) {
+        setDirtyColumns((prev) => {
+          const next = new Set(prev);
+          next.delete(fieldKey);
+          return next;
+        });
+
+        const displayName = COLUMN_DISPLAY_NAMES[fieldKey] || fieldKey;
+        const saveMessage =
+          result.data?.answer || `✅ ${displayName} saved for all students.`;
+        appendBotMessage?.({
+          type: "bot",
+          answer: saveMessage,
+          activeTab: "answer",
+        });
+        speakBotMessage?.(saveMessage);
+      }
+    } catch (error) {
+      console.error("Health card column save error:", error);
+    } finally {
+      setSavingColumns((prev) => {
+        const next = new Set(prev);
+        next.delete(fieldKey);
+        return next;
+      });
     }
   };
 
@@ -166,11 +227,13 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
         if (ok) successCount += 1;
       }
 
-      if (successCount > 0 && appendBotMessage) {
+      if (successCount > 0) {
+        setDirtyColumns(new Set());
+
         const classLabel = tableData.class_name || "";
         const sectionLabel = tableData.section_name || "";
-        const saveAllMessage = `✅ All health cards saved for ${classLabel} - ${sectionLabel} successfully!`;
-        appendBotMessage({
+        const saveAllMessage = `✅ All health cards saved for ${classLabel}-${sectionLabel} successfully!`;
+        appendBotMessage?.({
           type: "bot",
           answer: saveAllMessage,
           activeTab: "answer",
@@ -181,6 +244,27 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
       setSavingAll(false);
     }
   };
+
+  const stickyNameStyle = (bg: string, zIndex: number): React.CSSProperties => ({
+    position: "sticky",
+    left: 0,
+    background: bg,
+    zIndex,
+    minWidth: STICKY_NAME_WIDTH,
+    boxShadow: stickyCellShadow,
+  });
+
+  const stickyRollStyle = (bg: string, zIndex: number): React.CSSProperties => ({
+    position: "sticky",
+    left: STICKY_ROLL_LEFT,
+    background: bg,
+    zIndex,
+    minWidth: STICKY_ROLL_WIDTH,
+    boxShadow: stickyCellShadow,
+  });
+
+  const footerBg = "#f1f5f9";
+  const isAnySaving = savingAll || savingColumns.size > 0;
 
   return (
     <div
@@ -222,15 +306,11 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
           <tr style={{ background: "#f8f9fa" }}>
             <th
               style={{
-                position: "sticky",
-                left: 0,
-                background: "#f8f9fa",
+                ...stickyNameStyle("#f8f9fa", 3),
                 padding: "8px 12px",
                 textAlign: "left",
                 borderBottom: "2px solid #e2e8f0",
-                minWidth: "140px",
                 fontWeight: 600,
-                zIndex: 2,
               }}
             >
               STUDENT NAME
@@ -248,10 +328,10 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
             </th>
             <th
               style={{
+                ...stickyRollStyle("#f8f9fa", 3),
                 padding: "8px 12px",
                 textAlign: "center",
                 borderBottom: "2px solid #e2e8f0",
-                minWidth: "80px",
                 fontWeight: 600,
               }}
             >
@@ -286,156 +366,172 @@ export const HealthCardTable: React.FC<HealthCardTableProps> = ({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, idx) => (
-            <tr
-              key={row.uuid}
-              style={{
-                background: idx % 2 === 0 ? "#fff" : "#f8f9fc",
-                borderBottom: "1px solid #e2e8f0",
-              }}
-            >
-              <td
+          {rows.map((row, idx) => {
+            const rowBg = idx % 2 === 0 ? "#fff" : "#f8f9fc";
+            return (
+              <tr
+                key={row.uuid}
                 style={{
-                  position: "sticky",
-                  left: 0,
-                  background: idx % 2 === 0 ? "#fff" : "#f8f9fc",
-                  padding: "8px 12px",
-                  fontWeight: 500,
-                  zIndex: 1,
-                  minWidth: "140px",
+                  background: rowBg,
+                  borderBottom: "1px solid #e2e8f0",
                 }}
               >
-                {row.name}
-              </td>
-              <td
-                style={{
-                  padding: "8px 12px",
-                  textAlign: "center",
-                  color: "#64748b",
-                }}
-              >
-                {row.admission_no || "—"}
-              </td>
-              <td
-                style={{
-                  padding: "8px 12px",
-                  textAlign: "center",
-                  color: "#64748b",
-                }}
-              >
-                {row.roll_no ?? "—"}
-              </td>
-              {EDITABLE_COLUMNS.map((col) => (
                 <td
-                  key={col.key}
-                  style={{ padding: "6px 8px", textAlign: "center" }}
-                >
-                  <input
-                    type="text"
-                    value={String(row.health_card[col.key] ?? "")}
-                    onChange={(e) =>
-                      handleFieldChange(row.uuid, col.key, e.target.value)
-                    }
-                    disabled={savingAll}
-                    style={{
-                      width: col.key === "remarks" ? "130px" : "90px",
-                      padding: "4px 6px",
-                      border: "1px solid #d1d5db",
-                      borderRadius: "6px",
-                      fontSize: "13px",
-                      outline: "none",
-                      textAlign: "center",
-                      background: savingAll ? "#f3f4f6" : "#fff",
-                    }}
-                  />
-                </td>
-              ))}
-              <td style={{ padding: "6px 8px", textAlign: "center" }}>
-                <div
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "4px",
-                    minHeight: "24px",
+                    ...stickyNameStyle(rowBg, 1),
+                    padding: "8px 12px",
+                    fontWeight: 500,
                   }}
                 >
-                  {rowSaveToasts.has(row.uuid) && (
-                    <span
+                  {row.name}
+                </td>
+                <td
+                  style={{
+                    padding: "8px 12px",
+                    textAlign: "center",
+                    color: "#64748b",
+                  }}
+                >
+                  {row.admission_no || "—"}
+                </td>
+                <td
+                  style={{
+                    ...stickyRollStyle(rowBg, 1),
+                    padding: "8px 12px",
+                    textAlign: "center",
+                    color: "#64748b",
+                  }}
+                >
+                  {row.roll_no ?? "—"}
+                </td>
+                {EDITABLE_COLUMNS.map((col) => (
+                  <td
+                    key={col.key}
+                    style={{ padding: "6px 8px", textAlign: "center" }}
+                  >
+                    <input
+                      type="text"
+                      value={String(row.health_card[col.key] ?? "")}
+                      onChange={(e) =>
+                        handleFieldChange(row.uuid, col.key, e.target.value)
+                      }
+                      disabled={isAnySaving}
                       style={{
-                        fontSize: "12px",
-                        color: "#16a34a",
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
+                        width: col.key === "remarks" ? "130px" : "90px",
+                        padding: "4px 6px",
+                        border: "1px solid #d1d5db",
+                        borderRadius: "6px",
+                        fontSize: "13px",
+                        outline: "none",
+                        textAlign: "center",
+                        background: isAnySaving ? "#f3f4f6" : "#fff",
                       }}
-                    >
-                      ✅ Saved!
-                    </span>
-                  )}
-                  {savedRows.has(row.uuid) && (
-                    <span
-                      style={{ fontSize: "16px" }}
-                      title="Health card saved"
-                    >
-                      ✅
-                    </span>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
+                    />
+                  </td>
+                ))}
+                <td style={{ padding: "6px 8px", textAlign: "center" }} />
+              </tr>
+            );
+          })}
         </tbody>
-      </table>
-
-      <div
-        style={{
-          padding: "12px 16px",
-          borderTop: "1px solid #e2e8f0",
-          display: "flex",
-          justifyContent: "flex-end",
-          background: "#f8f9fa",
-          borderRadius: "0 0 12px 12px",
-        }}
-      >
-        <button
-          type="button"
-          onClick={handleSaveAll}
-          disabled={savingAll || rows.length === 0}
-          style={{
-            padding: "10px 20px",
-            background: savingAll
-              ? "#94a3b8"
-              : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-            color: "#fff",
-            border: "none",
-            borderRadius: "8px",
-            fontWeight: 600,
-            fontSize: "14px",
-            cursor: savingAll ? "not-allowed" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-        >
-          {savingAll ? (
-            <>
-              <span
+        <tfoot>
+          <tr style={{ background: footerBg, borderTop: "2px solid #e2e8f0" }}>
+            <td
+              style={{
+                ...stickyNameStyle(footerBg, 2),
+                padding: "10px 12px",
+                verticalAlign: "bottom",
+              }}
+            >
+              <div
                 style={{
-                  width: "16px",
-                  height: "16px",
-                  border: "2px solid rgba(255,255,255,0.3)",
-                  borderTopColor: "#fff",
-                  borderRadius: "50%",
-                  animation: "healthCardSpin 0.8s linear infinite",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
                 }}
-              />
-              Saving...
-            </>
-          ) : (
-            "💾 Save All"
-          )}
-        </button>
-      </div>
+              >
+                <button
+                  type="button"
+                  onClick={handleSaveAll}
+                  disabled={isAnySaving || rows.length === 0}
+                  style={{
+                    padding: "8px 16px",
+                    background: savingAll ? SAVING_BTN_BG : PURPLE_BTN_BG,
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    cursor: isAnySaving ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {savingAll ? (
+                    <>
+                      <Spinner />
+                      Saving...
+                    </>
+                  ) : (
+                    "💾 Save All"
+                  )}
+                </button>
+              </div>
+            </td>
+            <td style={{ padding: "10px 8px" }} />
+            <td style={{ ...stickyRollStyle(footerBg, 2), padding: "10px 8px" }} />
+            {EDITABLE_COLUMNS.map((col) => {
+              const isSavingCol = savingColumns.has(col.key);
+              const isDirty = dirtyColumns.has(col.key);
+              const columnBtnBg = isSavingCol
+                ? SAVING_BTN_BG
+                : isDirty
+                  ? GREY_BTN_BG
+                  : PURPLE_BTN_BG;
+
+              return (
+                <td
+                  key={col.key}
+                  style={{ padding: "8px 6px", textAlign: "center", verticalAlign: "bottom" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSaveColumn(col.key)}
+                    disabled={isAnySaving || rows.length === 0}
+                    title={`Save ${col.label}`}
+                    style={{
+                      padding: "4px 10px",
+                      background: columnBtnBg,
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      fontWeight: 500,
+                      cursor: isAnySaving ? "not-allowed" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isSavingCol ? (
+                      <>
+                        <Spinner size={12} />
+                        Saving...
+                      </>
+                    ) : (
+                      "💾 Save"
+                    )}
+                  </button>
+                </td>
+              );
+            })}
+            <td style={{ padding: "10px 8px" }} />
+          </tr>
+        </tfoot>
+      </table>
       <style>{`
         @keyframes healthCardSpin {
           to { transform: rotate(360deg); }
