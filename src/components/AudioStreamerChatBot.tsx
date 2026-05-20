@@ -115,8 +115,8 @@ const AudioStreamerChatBot = ({
             onOpenPreview={handleOpenPreview}
             handleSubmit={api.handleSubmit}
             userRoles={
-              api.roles
-                ? api.roles.split(",").map((r: string) => r.trim()).filter(Boolean)
+              roles
+                ? roles.split(",").map((r: string) => r.trim()).filter(Boolean)
                 : []
             }
             speakHealthCardBotMessage={api.speakHealthCardBotMessage}

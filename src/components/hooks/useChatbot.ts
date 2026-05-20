@@ -14,10 +14,7 @@ import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
 import { handleTeacherDiaryChat } from "../flows/teacherDiaryFlow";
 import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
-import {
-  handleHealthCardChat,
-  sendHealthCardSave,
-} from "../flows/healthCardFlow";
+import { handleHealthCardChat } from "../flows/healthCardFlow";
 import {
   handleAttendanceChat,
   handleAttendanceImageUpload,
