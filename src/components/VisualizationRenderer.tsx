@@ -24,7 +24,8 @@ export default function VisualizationRenderer({
     return null;
   }
 
-  const { payload, title, chart_type, x_key, y_key } = visualization;
+  const { payload, title, chart_type, x_key, y_key, attendance_working_days } =
+    visualization;
 
   if (!payload || payload.length === 0) {
     return null;
@@ -194,15 +195,28 @@ export default function VisualizationRenderer({
     const absentCount = pairs
       .filter((p) => p.label.toLowerCase().includes("absent"))
       .reduce((sum, p) => sum + (p.value as number), 0);
-    const attendanceDenom = presentCount + absentCount;
+    const weightedTotal = presentCount + absentCount;
+    const attendanceDenom =
+      isAttendanceLike &&
+      attendance_working_days != null &&
+      attendance_working_days > 0
+        ? attendance_working_days
+        : weightedTotal;
     const total =
       isAttendanceLike && attendanceDenom > 0
         ? attendanceDenom
         : values.reduce((a, b) => a + b, 0);
     if (total <= 0) return null;
+    const useAttendancePercentDecimals =
+      isAttendanceLike &&
+      attendance_working_days != null &&
+      attendance_working_days > 0;
     const formatPercent = (value: number): string => {
       const pct = (value / total) * 100;
       if (pct > 0 && pct < 1) return "<1%";
+      if (useAttendancePercentDecimals) {
+        return `${pct.toFixed(1)}%`;
+      }
       if (pct >= 1 && pct < 10) return `${pct.toFixed(1)}%`;
       return `${Math.round(pct)}%`;
     };
@@ -224,12 +238,17 @@ export default function VisualizationRenderer({
     const rawPercents = pairs.map((p) => ((p.value as number) / total) * 100);
     const nonZeroCount = rawPercents.filter((p) => p > 0).length;
     const minSlicePct = nonZeroCount > 0 ? Math.min(1, 100 / nonZeroCount) : 0;
+    const useWorkingDayDenom =
+      isAttendanceLike &&
+      attendance_working_days != null &&
+      attendance_working_days > weightedTotal;
     const boostedPercents = rawPercents.map((p) =>
       p > 0 && p < minSlicePct ? minSlicePct : p,
     );
     const boostedTotal = boostedPercents.reduce((a, b) => a + b, 0);
-    const displayPercents =
-      boostedTotal > 0
+    const displayPercents = useWorkingDayDenom
+      ? rawPercents
+      : boostedTotal > 0
         ? boostedPercents.map((p) => (p / boostedTotal) * 100)
         : rawPercents;
 
@@ -242,12 +261,25 @@ export default function VisualizationRenderer({
     const lead = [...pairs]
       .sort((a, b) => (b.value as number) - (a.value as number))
       .at(0);
-    const leadPercent =
-      isAttendanceLike && attendanceDenom > 0
-        ? Math.round((presentCount / attendanceDenom) * 100)
-        : lead
-          ? Math.round(((lead.value as number) / total) * 100)
-          : null;
+    let centerPercentText: string | null = null;
+    if (
+      isAttendanceLike &&
+      attendance_working_days != null &&
+      attendance_working_days > 0
+    ) {
+      centerPercentText = (
+        (presentCount / attendance_working_days) *
+        100
+      ).toFixed(1);
+    } else if (isAttendanceLike && attendanceDenom > 0) {
+      centerPercentText = String(
+        Math.round((presentCount / attendanceDenom) * 100),
+      );
+    } else if (lead) {
+      centerPercentText = String(
+        Math.round(((lead.value as number) / total) * 100),
+      );
+    }
     const centerLabel =
       isAttendanceLike && attendanceDenom > 0 ? "Present" : lead?.label || "Top";
     return (
@@ -266,10 +298,10 @@ export default function VisualizationRenderer({
               aria-label={title || "Pie chart"}
             />
             <div className="absolute left-1/2 top-1/2 flex h-[102px] w-[102px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full bg-white text-center shadow-inner">
-              {leadPercent !== null ? (
+              {centerPercentText !== null ? (
                 <>
                   <div className="text-3xl font-bold leading-none text-slate-800">
-                    {leadPercent}%
+                    {centerPercentText}%
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
                     {centerLabel}
@@ -296,7 +328,11 @@ export default function VisualizationRenderer({
           </ul>
         </div>
         {isAttendanceLike ? (
-          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 text-center text-[11px] sm:text-xs">
+          <div
+            className={`mt-4 grid gap-2 border-t border-slate-200 pt-3 text-center text-[11px] sm:text-xs ${
+              pairs.length === 2 ? "grid-cols-2" : "grid-cols-3"
+            }`}
+          >
             {pairs.map((p, i) => (
               <div key={i} className="rounded-md bg-slate-50 px-2 py-2">
                 <div className="flex items-center justify-center gap-1.5 text-slate-500">
@@ -309,7 +345,10 @@ export default function VisualizationRenderer({
                   </span>
                 </div>
                 <div className="mt-1 text-base font-semibold leading-none text-slate-800 sm:text-lg">
-                  {p.value}
+                  {formatPercent(p.value as number)}
+                </div>
+                <div className="mt-0.5 text-[10px] tabular-nums text-slate-500 sm:text-[11px]">
+                  {p.value} days
                 </div>
               </div>
             ))}
