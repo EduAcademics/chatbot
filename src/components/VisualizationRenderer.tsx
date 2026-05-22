@@ -207,9 +207,16 @@ export default function VisualizationRenderer({
         ? attendanceDenom
         : values.reduce((a, b) => a + b, 0);
     if (total <= 0) return null;
+    const useAttendancePercentDecimals =
+      isAttendanceLike &&
+      attendance_working_days != null &&
+      attendance_working_days > 0;
     const formatPercent = (value: number): string => {
       const pct = (value / total) * 100;
       if (pct > 0 && pct < 1) return "<1%";
+      if (useAttendancePercentDecimals) {
+        return `${pct.toFixed(1)}%`;
+      }
       if (pct >= 1 && pct < 10) return `${pct.toFixed(1)}%`;
       return `${Math.round(pct)}%`;
     };
@@ -321,7 +328,11 @@ export default function VisualizationRenderer({
           </ul>
         </div>
         {isAttendanceLike ? (
-          <div className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 text-center text-[11px] sm:text-xs">
+          <div
+            className={`mt-4 grid gap-2 border-t border-slate-200 pt-3 text-center text-[11px] sm:text-xs ${
+              pairs.length === 2 ? "grid-cols-2" : "grid-cols-3"
+            }`}
+          >
             {pairs.map((p, i) => (
               <div key={i} className="rounded-md bg-slate-50 px-2 py-2">
                 <div className="flex items-center justify-center gap-1.5 text-slate-500">
@@ -334,7 +345,10 @@ export default function VisualizationRenderer({
                   </span>
                 </div>
                 <div className="mt-1 text-base font-semibold leading-none text-slate-800 sm:text-lg">
-                  {p.value}
+                  {formatPercent(p.value as number)}
+                </div>
+                <div className="mt-0.5 text-[10px] tabular-nums text-slate-500 sm:text-[11px]">
+                  {p.value} days
                 </div>
               </div>
             ))}
