@@ -226,6 +226,18 @@ interface ReviewChatRequest {
   tts_voice?: string; // Optional: TTS voice to use
 }
 
+interface TeacherDiaryChatRequest {
+  session_id: string;
+  user_id?: string; // Optional: user ID (used directly as teacher_id)
+  query: string;
+  bearer_token?: string; // Optional: Bearer token for ERP API
+  academic_session?: string; // Optional: Academic session
+  branch_token?: string; // Optional: Branch token
+  voice_mode?: boolean; // Optional: enable TTS for voice / full-voice mode
+  tts?: boolean; // Optional: alternative to voice_mode
+  tts_voice?: string; // Optional: TTS voice to use
+}
+
 export interface MarksChatRequest {
   session_id: string;
   user_id: string;
@@ -252,7 +264,44 @@ export interface MarksChatResponse {
   };
 }
 
+export interface HealthCardChatRequest {
+  session_id: string;
+  user_id: string;
+  query: string;
+  bearer_token?: string | undefined;
+  academic_session: string;
+  branch_token: string;
+  user_roles?: string[];
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+export interface HealthCardChatResponse {
+  status: string;
+  message: string;
+  total_token_counts: number;
+  inf_time: number;
+  data: {
+    answer: string;
+    tts_text?: string;
+    references?: string;
+    mongodbquery?: string;
+    health_card_table?: any;
+    health_card_sections?: any[];
+    health_card_saved?: string;
+  };
+}
+
 interface ReviewChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+  };
+  message?: string;
+}
+
+interface TeacherDiaryChatResponse {
   status: string;
   data?: {
     answer?: string;
@@ -661,8 +710,35 @@ export const aiAPI = {
     return await response.json();
   },
 
+  // Teacher diary chat
+  teacherDiaryChat: async (
+    request: TeacherDiaryChatRequest,
+  ): Promise<TeacherDiaryChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/teacher-diary-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await response.json();
+  },
+
   marksChat: async (request: MarksChatRequest): Promise<MarksChatResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/ai/marks-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  },
+
+  healthCardChat: async (
+    request: HealthCardChatRequest,
+  ): Promise<HealthCardChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/health-card-chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),

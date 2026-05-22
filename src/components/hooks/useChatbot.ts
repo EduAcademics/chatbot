@@ -12,7 +12,12 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
+import { handleTeacherDiaryChat } from "../flows/teacherDiaryFlow";
 import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
+import {
+  handleHealthCardChat,
+  sendHealthCardSave,
+} from "../flows/healthCardFlow";
 import {
   handleAttendanceChat,
   handleAttendanceImageUpload,
@@ -141,6 +146,7 @@ export interface UseChatbotReturn {
   setShowClassInfoModal: (v: boolean) => void;
   uploadFile: (file: File) => Promise<any>;
   activeVoiceButtonRef: RefObject<"audio" | "mic" | null>;
+  speakHealthCardBotMessage: (text: string) => void;
 }
 
 export function useChatbot({
@@ -181,6 +187,10 @@ export function useChatbot({
   // Flag to remember that the current Attendance flow was initiated
   // via the microphone. This persists so we can play TTS for attendance responses.
   const attendanceVoiceInitiatedRef = useRef<boolean>(false);
+  /** Prevents immediate handleFlowExit while unauthorized health-card TTS plays */
+  const healthCardUnauthorizedExitTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   const [userOptionSelected, setUserOptionSelected] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -444,10 +454,19 @@ export function useChatbot({
    * @param options.newSession - if true, generate new sessionId (use for manual exit)
    * @param options.skipTTSInterrupt - if true, preserve in-flight TTS (for exit messages that should speak)
    */
+  const clearHealthCardUnauthorizedExitTimer = () => {
+    if (healthCardUnauthorizedExitTimerRef.current != null) {
+      clearTimeout(healthCardUnauthorizedExitTimerRef.current);
+      healthCardUnauthorizedExitTimerRef.current = null;
+    }
+  };
+
   const handleFlowExit = (options?: {
     newSession?: boolean;
     skipTTSInterrupt?: boolean;
   }) => {
+    clearHealthCardUnauthorizedExitTimer();
+
     const flow = activeFlowRef.current;
     console.log("[Flow] handleFlowExit:", {
       flow,
@@ -491,6 +510,24 @@ export function useChatbot({
       localStorage.setItem("sessionId", newSessionId);
       console.log("✅ New session ID on exit:", newSessionId);
     }
+  };
+
+  const scheduleHealthCardUnauthorizedExit = () => {
+    clearHealthCardUnauthorizedExitTimer();
+    healthCardUnauthorizedExitTimerRef.current = setTimeout(() => {
+      healthCardUnauthorizedExitTimerRef.current = null;
+      handleFlowExit({ newSession: false, skipTTSInterrupt: true });
+    }, 5000);
+  };
+
+  const healthCardExitFlow = () => {
+    if (healthCardUnauthorizedExitTimerRef.current != null) {
+      console.log(
+        "[HealthCard] Skipping immediate exitFlow — delayed unauthorized exit already scheduled",
+      );
+      return;
+    }
+    handleFlowExit({ newSession: false });
   };
 
   const startStreaming = async (useFullVoice = false) => {
@@ -930,6 +967,10 @@ export function useChatbot({
       "create assignment",
       "give assignment",
       "new assignment",
+      "create diary",
+      "diary entry",
+      "teacher diary",
+      "class diary",
       "show me",
       "list all",
       "show",
@@ -938,6 +979,14 @@ export function useChatbot({
       "syllabus",
       "view",
       "display",
+      "health card",
+      "health cards",
+      "update health",
+      "health data",
+      "vision test",
+      "dental examination",
+      "enter marks",
+      "marks entry",
     ];
     const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
       userMessage.toLowerCase().includes(keyword),
@@ -952,9 +1001,20 @@ export function useChatbot({
     const inLeaveApproval =
       activeFlowRef.current === "leave_approval" ||
       activeFlow === "leave_approval";
+    const inTeacherDiary =
+      activeFlowRef.current === "teacher_diary" ||
+      activeFlow === "teacher_diary";
+    const inHealthCard =
+      activeFlowRef.current === "health_card" ||
+      activeFlow === "health_card";
+    const inMarks =
+      activeFlowRef.current === "marks" || activeFlow === "marks";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
+    const inTeacherDiaryFlow = inTeacherDiary && !looksLikeNewRequest;
+    const inHealthCardFlow = inHealthCard && !looksLikeNewRequest;
+    const inMarksFlow = inMarks && !looksLikeNewRequest;
 
     console.log("[Routing] Auto-routing check:", {
       autoRouting,
@@ -967,6 +1027,9 @@ export function useChatbot({
       inLeaveFlow,
       inAssignmentFlow,
       inLeaveApprovalFlow,
+      inTeacherDiaryFlow,
+      inHealthCardFlow,
+      inMarksFlow,
       looksLikeNewRequest,
       message: userMessage,
     });
@@ -981,7 +1044,10 @@ export function useChatbot({
       inVoiceAttendanceFlow ||
       inLeaveFlow ||
       inAssignmentFlow ||
-      inLeaveApprovalFlow
+      inLeaveApprovalFlow ||
+      inTeacherDiaryFlow ||
+      inHealthCardFlow ||
+      inMarksFlow
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log(
@@ -1083,6 +1149,24 @@ export function useChatbot({
               confidence: 1,
             } as any;
             targetFlow = "leave_approval" as FlowType;
+          } else if (
+            [
+              "health card",
+              "health cards",
+              "update health",
+              "health data",
+              "vision test",
+              "dental examination",
+            ].some((keyword) => normalized.includes(keyword))
+          ) {
+            console.log(
+              "[Routing] Lexical override: forcing health_card based on keywords",
+            );
+            classificationResult = {
+              flow: "health_card",
+              confidence: 1,
+            } as any;
+            targetFlow = "health_card" as FlowType;
           } else {
             classificationResult = await classifyQuery(userMessage);  
             console.log("✅ Classification complete:", classificationResult);
@@ -1098,6 +1182,8 @@ export function useChatbot({
             targetFlow = "review";
           } else if (targetFlow === ("marks_entry" as any)) {
             targetFlow = "marks";
+          } else if (targetFlow === ("health_card" as any)) {
+            targetFlow = "health_card";
           }
         } catch (error) {
           console.error("❌ Classification error:", error);
@@ -1243,6 +1329,32 @@ export function useChatbot({
         setActiveFlow("review");
       }
 
+      // Initialize teacher diary flow
+      if (targetFlow === "teacher_diary" && isNewFlowInitialization) {
+        activeFlowRef.current = "teacher_diary";
+        setActiveFlow("teacher_diary");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
+      }
+
       // Initialize leave flow
       if (targetFlow === "leave" && isNewFlowInitialization) {
         console.log("[Routing] Initializing leave flow state");
@@ -1309,6 +1421,46 @@ export function useChatbot({
           exitFlow: () => handleFlowExit({ newSession: false }),
           exitFlowForManualExit: () =>
             handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+          setProcessing: setIsProcessing,
+          playTTS: (idx, text) => void handlePlayTTS(idx, text),
+          getTTSSummary: generateQueryTTSSummary,
+          setActiveFlow: (flow: string) => setActiveFlow(flow as FlowType),
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
+    if (activeFlowRef.current === "health_card" || targetFlow === "health_card") {
+      if (
+        targetFlow === "health_card" &&
+        activeFlowRef.current !== "health_card"
+      ) {
+        activeFlowRef.current = "health_card";
+        setActiveFlow("health_card");
+      }
+
+      try {
+        clearHealthCardUnauthorizedExitTimer();
+        await handleHealthCardChat({
+          userMessage,
+          sessionId,
+          userId,
+          userRoles: roles ? roles.split(",").map((r) => r.trim()).filter(Boolean) : [],
+          isVoiceTriggered: isVoiceTriggeredForThisRequest,
+          isTtsSessionActive:
+            fullVoiceMode ||
+            isVoiceActive ||
+            activeVoiceButtonRef.current !== null,
+          getErpContext,
+          appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+          exitFlow: healthCardExitFlow,
+          exitFlowForManualExit: () => {
+            clearHealthCardUnauthorizedExitTimer();
+            handleFlowExit({ newSession: true, skipTTSInterrupt: true });
+          },
+          scheduleUnauthorizedExit: scheduleHealthCardUnauthorizedExit,
           setProcessing: setIsProcessing,
           playTTS: (idx, text) => void handlePlayTTS(idx, text),
           getTTSSummary: generateQueryTTSSummary,
@@ -1550,6 +1702,21 @@ export function useChatbot({
       });
     } else if (targetFlow === "review") {
       await handleReviewChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "teacher_diary") {
+      await handleTeacherDiaryChat({
         userMessage,
         sessionId,
         userId,
@@ -1910,6 +2077,16 @@ export function useChatbot({
         console.error("Failed to play audio:", err);
       }
     }
+  };
+
+  const speakHealthCardBotMessage = (text: string) => {
+    const shouldSpeak =
+      fullVoiceMode ||
+      isVoiceActive ||
+      activeVoiceButtonRef.current !== null;
+    if (!shouldSpeak || !text?.trim()) return;
+    const cleaned = generateQueryTTSSummary(text);
+    if (cleaned) void handlePlayTTS(-1, cleaned);
   };
 
   // Feedback handler: update feedback in chatHistory for the correct bot message
@@ -2925,5 +3102,6 @@ export function useChatbot({
     setShowClassInfoModal,
     uploadFile,
     activeVoiceButtonRef,
+    speakHealthCardBotMessage,
   };
 }

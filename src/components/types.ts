@@ -13,6 +13,8 @@ export type FlowType =
   | "submission"
   | "review"
   | "marks"
+  | "health_card"
+  | "teacher_diary"
   | "course_progress"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";

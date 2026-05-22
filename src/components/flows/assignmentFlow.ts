@@ -6,7 +6,8 @@
 
 import { aiAPI } from "../../services/api";
 
-const ASSIGNMENT_ERR = "Sorry, there was an error processing your assignment request.";
+const ASSIGNMENT_ERR =
+  "Sorry, there was an error processing your assignment request.";
 
 export type AssignmentBotMessage =
   | { type: "bot"; answer: string; activeTab: "answer" }
@@ -104,7 +105,9 @@ export async function runAssignmentChat(params: {
 /**
  * Handle a user message in the assignment flow: call API, update chat, TTS, exit logic.
  */
-export async function handleAssignmentChat(params: AssignmentChatParams): Promise<void> {
+export async function handleAssignmentChat(
+  params: AssignmentChatParams,
+): Promise<void> {
   const {
     userMessage,
     sessionId,
@@ -198,18 +201,16 @@ export async function handleAssignmentChat(params: AssignmentChatParams): Promis
  * Handle assignment file upload: upload file, add to chat, then attach via assignmentChat.
  */
 export async function handleAssignmentFileUpload(
-  params: AssignmentFileUploadParams
+  params: AssignmentFileUploadParams,
 ): Promise<void> {
   const { file, sessionId, userId, getErpContext, appendBotMessage } = params;
 
   try {
-    const result = await aiAPI.uploadAssignmentFile(
-      file,
-      sessionId || userId
-    );
+    const result = await aiAPI.uploadAssignmentFile(file, sessionId || userId);
 
     if (result.status !== "success") {
-      const errMsg = (result as { message?: string }).message ?? "Unknown error";
+      const errMsg =
+        (result as { message?: string }).message ?? "Unknown error";
       appendBotMessage({ type: "bot", text: `File upload failed: ${errMsg}` });
       return;
     }
@@ -223,11 +224,9 @@ export async function handleAssignmentFileUpload(
       return;
     }
 
-    const filename = result.data?.filename ?? file.name;
-
     appendBotMessage({
       type: "bot",
-      text: `✅ File uploaded successfully: ${filename}\n\nType 'skip' to proceed or upload more files.`,
+      text: "✅ File uploaded successfully. Type 'skip' to proceed or upload more files.",
     });
 
     const fileMessage = `Add file ${fileUuid} to attachments`;
