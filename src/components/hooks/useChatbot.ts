@@ -1398,7 +1398,11 @@ export function useChatbot({
           sessionId,
           userId,
           userRoles: roles ? roles.split(",").map((r) => r.trim()).filter(Boolean) : [],
-          isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+          isVoiceTriggered: isVoiceTriggeredForThisRequest,
+          isTtsSessionActive:
+            fullVoiceMode ||
+            isVoiceActive ||
+            activeVoiceButtonRef.current !== null,
           getErpContext,
           appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
           exitFlow: healthCardExitFlow,

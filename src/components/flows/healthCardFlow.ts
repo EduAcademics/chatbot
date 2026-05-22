@@ -18,6 +18,7 @@ interface HealthCardFlowParams {
   userId: string;
   userRoles: string[];
   isVoiceTriggered: boolean;
+  isTtsSessionActive: boolean;
   getErpContext: () => {
     academic_session: string;
     branch_token: string;
@@ -131,6 +132,7 @@ export async function handleHealthCardChat(params: HealthCardFlowParams) {
     userId,
     userRoles,
     isVoiceTriggered,
+    isTtsSessionActive,
     getErpContext,
     appendBotMessage,
     exitFlow,
@@ -140,6 +142,8 @@ export async function handleHealthCardChat(params: HealthCardFlowParams) {
     getTTSSummary,
     setActiveFlow,
   } = params;
+
+  const shouldPlayTts = isVoiceTriggered || isTtsSessionActive;
 
   try {
     const response = await runHealthCardChat({
@@ -172,7 +176,7 @@ export async function handleHealthCardChat(params: HealthCardFlowParams) {
         activeTab: "answer",
       });
 
-      if (isVoiceTriggered && (ttsText || answer)) {
+      if (shouldPlayTts && (ttsText || answer)) {
         const textToSpeak =
           (ttsText && ttsText.trim()) || getTTSSummary(answer) || "";
         if (textToSpeak) {
@@ -221,7 +225,7 @@ export async function handleHealthCardChat(params: HealthCardFlowParams) {
     appendBotMessage(botMessage);
 
     const playVoiceResponse = () => {
-      if (!isVoiceTriggered || (!ttsText && !answer)) return;
+      if (!shouldPlayTts || (!ttsText && !answer)) return;
       const idx = Date.now();
       const textToSpeak =
         ttsText != null && ttsText !== ""
