@@ -14,10 +14,7 @@ import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
 import { handleTeacherDiaryChat } from "../flows/teacherDiaryFlow";
 import { handleMarksChat, sendColumnSave } from "../flows/marksFlow";
-import {
-  handleHealthCardChat,
-  sendHealthCardSave,
-} from "../flows/healthCardFlow";
+import { handleHealthCardChat } from "../flows/healthCardFlow";
 import {
   handleAttendanceChat,
   handleAttendanceImageUpload,
@@ -66,6 +63,7 @@ export interface UseChatbotReturn {
   getErpContext: () => { academic_session: string; branch_token: string };
   sessionId: string;
   userId: string;
+  roles: string;
   activeFlowRef: RefObject<FlowType>;
   setIsProcessing: (v: boolean) => void;
   setLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
@@ -3047,6 +3045,7 @@ export function useChatbot({
     getErpContext,
     sessionId,
     userId,
+    roles,
     activeFlowRef,
     setIsProcessing,
     setLeaveApprovalRequests,
