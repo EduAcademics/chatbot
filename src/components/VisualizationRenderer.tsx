@@ -252,6 +252,29 @@ export default function VisualizationRenderer({
         ? boostedPercents.map((p) => (p / boostedTotal) * 100)
         : rawPercents;
 
+    const legendPercents2dp = (() => {
+      if (isAttendanceLike) return null;
+
+      // Represent percentages in 0.01% units (basis points over 100% -> 10000 units).
+      const exactUnits = displayPercents.map((p) => p * 100);
+      const baseUnits = exactUnits.map((u) => Math.floor(u));
+      const sumBase = baseUnits.reduce((a, b) => a + b, 0);
+      let remaining = 10000 - sumBase;
+
+      const order = exactUnits
+        .map((u, i) => ({ i, rem: u - baseUnits[i] }))
+        .sort((a, b) => b.rem - a.rem)
+        .map((x) => x.i);
+
+      const result = [...baseUnits];
+      for (let k = 0; k < order.length && remaining > 0; k++) {
+        result[order[k]] += 1;
+        remaining -= 1;
+      }
+
+      return result.map((u) => `${(u / 100).toFixed(2)}%`);
+    })();
+
     let acc = 0;
     const segments = displayPercents.map((pct, i) => {
       const start = acc;
@@ -276,9 +299,11 @@ export default function VisualizationRenderer({
         Math.round((presentCount / attendanceDenom) * 100),
       );
     } else if (lead) {
-      centerPercentText = String(
-        Math.round(((lead.value as number) / total) * 100),
-      );
+      const leadIdx = pairs.findIndex((p) => p.label === lead.label);
+      centerPercentText =
+        !isAttendanceLike && legendPercents2dp && leadIdx >= 0
+          ? legendPercents2dp[leadIdx].replace("%", "")
+          : String(Math.round(((lead.value as number) / total) * 100));
     }
     const centerLabel =
       isAttendanceLike && attendanceDenom > 0 ? "Present" : lead?.label || "Top";
@@ -321,7 +346,9 @@ export default function VisualizationRenderer({
                   {p.label}
                 </span>
                 <span className="shrink-0 tabular-nums text-slate-600">
-                  {formatPercent(p.value as number)}
+                  {isAttendanceLike
+                    ? formatPercent(p.value as number)
+                    : legendPercents2dp?.[i] ?? formatPercent(p.value as number)}
                 </span>
               </li>
             ))}
