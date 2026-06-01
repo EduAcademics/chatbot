@@ -9,6 +9,11 @@ import {
 } from "../../services/api";
 import { API_BASE_URL } from "../../config/api";
 import { WebRTCAudioService } from "../../services/webrtcAudio";
+import {
+  FULL_VOICE_TURN_DEBOUNCE_MS,
+  FULL_VOICE_DICTATION_DEBOUNCE_MS,
+  buildMicConstraints,
+} from "../../services/voiceConstants";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
@@ -98,6 +103,7 @@ export interface UseChatbotReturn {
     idx: number,
     text: string,
     isQuery?: boolean,
+    uuidQuestion?: string,
   ) => Promise<void>;
   handleSendFeedback: (
     idx: number,
@@ -361,7 +367,9 @@ export function useChatbot({
 
   useEffect(() => {
     const fetchMicrophones = async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: buildMicConstraints(),
+      });
       const devices = await navigator.mediaDevices.enumerateDevices();
       const mics = devices.filter((d) => d.kind === "audioinput");
       setDevices(mics);
@@ -572,11 +580,7 @@ export function useChatbot({
                 text,
               );
 
-              if (currentTTSAudioRef.current) {
-                return;
-              }
-
-              // Interrupt TTS immediately when user speaks (any transcript = user is speaking)
+              // Interrupt TTS immediately when user speaks (barge-in; do not drop transcripts)
               if (useFullVoice) {
                 interruptTTS();
               }
@@ -601,12 +605,12 @@ export function useChatbot({
                 setInputText(displayText);
               }
 
-              // Full-voice flows (attendance, assignment, leave): 3-second auto-submit
-              const useFullVoiceTimer =
+              // Dictation flows: longer debounce while listing names
+              const useDictationDebounce =
                 activeFlow === "full_voice_attendance" ||
                 (activeFlow === "assignment" && useFullVoice) ||
                 (activeFlow === "leave" && useFullVoice);
-              if (useFullVoiceTimer) {
+              if (useDictationDebounce) {
                 setLastVoiceInputTime(Date.now());
 
                 if (fullVoiceAutoSubmitTimer) {
@@ -618,7 +622,6 @@ export function useChatbot({
                   : finalTextRef.current + " " + trimmed;
                 const timer = setTimeout(async () => {
                   const finalInput = currentText.trim();
-                  // Prevent duplicate submission of the same input
                   if (
                     !finalInput ||
                     isProcessing ||
@@ -634,7 +637,7 @@ export function useChatbot({
                   } finally {
                     isVoiceTriggeredRequestRef.current = false;
                   }
-                }, 3000);
+                }, FULL_VOICE_DICTATION_DEBOUNCE_MS);
                 setFullVoiceAutoSubmitTimer(timer);
               }
             };
@@ -658,11 +661,11 @@ export function useChatbot({
           onTurnComplete: () => {
             if (!useFullVoice || !finalTextRef.current.trim() || isProcessing)
               return;
-            // These flows use 3s timer only; skip turn-complete to avoid double submit
-            const useFullVoiceTimer =
+            // Dictation flows use debounce timer only; skip turn-complete to avoid double submit
+            const useDictationDebounce =
               activeFlow === "full_voice_attendance" ||
               (activeFlow === "assignment" && useFullVoice);
-            if (useFullVoiceTimer) return;
+            if (useDictationDebounce) return;
             if (turnCompleteTimerRef.current)
               clearTimeout(turnCompleteTimerRef.current);
             turnCompleteTimerRef.current = setTimeout(async () => {
@@ -678,7 +681,7 @@ export function useChatbot({
               } finally {
                 isVoiceTriggeredRequestRef.current = false;
               }
-            }, 800);
+            }, FULL_VOICE_TURN_DEBOUNCE_MS);
           },
           onVoiceActivity: (isActive: boolean) => {
             setIsVoiceActive(isActive);
@@ -689,6 +692,7 @@ export function useChatbot({
           },
         },
         useFullVoice,
+        selectedDeviceId,
       );
     } catch (error) {
       console.error("Failed to start WebRTC streaming:", error);
@@ -1542,8 +1546,16 @@ export function useChatbot({
             activeVoiceButtonRef.current !== null;
           if (shouldPlayQueryTTS) {
             try {
-              const answerText = data.data?.answer ?? "";
-              void handlePlayTTS(-1, answerText, true);
+              const speakText =
+                (data.data as { tts_text?: string })?.tts_text?.trim() ||
+                data.data?.answer ||
+                "";
+              void handlePlayTTS(
+                -1,
+                speakText,
+                true,
+                data.data?.uuid_question,
+              );
             } catch (ttsErr) {
               console.error("Query TTS playback failed:", ttsErr);
             }
@@ -1563,7 +1575,7 @@ export function useChatbot({
             activeVoiceButtonRef.current !== null;
           if (shouldPlayQueryErrorTTS) {
             try {
-              void handlePlayTTS(-1, data.message, true);
+              void handlePlayTTS(-1, data.message, true, undefined);
             } catch (ttsErr) {
               console.error("Query TTS playback failed:", ttsErr);
             }
@@ -1939,7 +1951,8 @@ export function useChatbot({
   const handlePlayTTS = async (
     idx: number,
     text: string,
-    _isQuery: boolean = false,
+    isQuery: boolean = false,
+    uuidQuestion?: string,
   ) => {
     // Interrupt any currently playing TTS before starting new one
     interruptTTS();
@@ -1955,12 +1968,15 @@ export function useChatbot({
     setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
-      // Generate unique ID to prevent backend cache from returning wrong audio
-      const uniqueId = `tts_${Date.now()}_${thisRequestId}`;
+      // Query flow: use server uuid so TTS reuses insight summary + cached audio
+      const uuidForTts =
+        isQuery && uuidQuestion
+          ? uuidQuestion
+          : `tts_${Date.now()}_${thisRequestId}`;
       const reader = await aiAPI.textToSpeech({
         text,
-        uuid_question: uniqueId,
-        skip_insight: !_isQuery,
+        uuid_question: uuidForTts,
+        skip_insight: !isQuery,
       });
 
       // Check if this request is still the latest (not cancelled by a newer request)

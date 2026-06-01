@@ -1,6 +1,7 @@
 import { PipecatClient, RTVIEvent, type RTVIMessage, type Participant } from '@pipecat-ai/client-js';
 import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport';
 import { BOT_START_URL, BOT_START_PUBLIC_API_KEY, ICE_SERVERS } from '../config/settings';
+import { buildMicConstraints } from './voiceConstants';
 
 export interface WebRTCAudioCallbacks {
   onTranscript: (text: string, isFinal: boolean) => void;
@@ -20,10 +21,21 @@ export class WebRTCAudioService {
   async connect(
     selectedLanguage: string,
     callbacks: WebRTCAudioCallbacks,
-    fullVoiceMode = false
+    fullVoiceMode = false,
+    deviceId?: string,
   ): Promise<void> {
     try {
       this.callbacks = callbacks;
+
+      // Prime mic with AEC/noise suppression before Pipecat acquires the track
+      try {
+        const warmStream = await navigator.mediaDevices.getUserMedia({
+          audio: buildMicConstraints(deviceId),
+        });
+        warmStream.getTracks().forEach((t) => t.stop());
+      } catch (micErr) {
+        console.warn('[WebRTC] Mic constraint warmup failed, continuing:', micErr);
+      }
 
       // Create transport
       //this.transport = new SmallWebRTCTransport();
@@ -51,7 +63,7 @@ export class WebRTCAudioService {
             if (data.text && data.text.trim()) {
               callbacks.onTranscript(data.text, data.final || false);
               if (fullVoiceMode && data.final && callbacks.onTurnComplete) {
-                setTimeout(() => callbacks.onTurnComplete!(), 100);
+                callbacks.onTurnComplete();
               }
             }
           },
