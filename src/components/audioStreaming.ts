@@ -1,5 +1,6 @@
 import React from "react";
 import { WS_BASE } from "./types";
+import { buildMicConstraints } from "../services/voiceConstants";
 
 export const convertFloat32ToInt16 = (buffer: Float32Array): Int16Array => {
   const int16Buffer = new Int16Array(buffer.length);
@@ -35,10 +36,9 @@ export const startStreaming = async (
 
   // Request microphone only when starting recording
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio:
-      selectedDeviceId === "default"
-        ? true
-        : { deviceId: { exact: selectedDeviceId } },
+    audio: buildMicConstraints(
+      selectedDeviceId === "default" ? undefined : selectedDeviceId,
+    ),
   });
   micStreamRef.current = stream;
 
