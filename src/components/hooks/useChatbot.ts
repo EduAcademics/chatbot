@@ -15,6 +15,7 @@ import {
   buildMicConstraints,
 } from "../../services/voiceConstants";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
+import { handleComplaintChat } from "../flows/complaintFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
 import { handleTeacherDiaryChat } from "../flows/teacherDiaryFlow";
@@ -989,6 +990,10 @@ export function useChatbot({
       "dental examination",
       "enter marks",
       "marks entry",
+      "file complaint",
+      "estate complaint",
+      "raise complaint",
+      "estate issue",
     ];
     const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
       userMessage.toLowerCase().includes(keyword),
@@ -1011,12 +1016,15 @@ export function useChatbot({
       activeFlow === "health_card";
     const inMarks =
       activeFlowRef.current === "marks" || activeFlow === "marks";
+    const inComplaint =
+      activeFlowRef.current === "complaint" || activeFlow === "complaint";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
     const inTeacherDiaryFlow = inTeacherDiary && !looksLikeNewRequest;
     const inHealthCardFlow = inHealthCard && !looksLikeNewRequest;
     const inMarksFlow = inMarks && !looksLikeNewRequest;
+    const inComplaintFlow = inComplaint && !looksLikeNewRequest;
 
     console.log("[Routing] Auto-routing check:", {
       autoRouting,
@@ -1032,6 +1040,7 @@ export function useChatbot({
       inTeacherDiaryFlow,
       inHealthCardFlow,
       inMarksFlow,
+      inComplaintFlow,
       looksLikeNewRequest,
       message: userMessage,
     });
@@ -1049,7 +1058,8 @@ export function useChatbot({
       inLeaveApprovalFlow ||
       inTeacherDiaryFlow ||
       inHealthCardFlow ||
-      inMarksFlow
+      inMarksFlow ||
+      inComplaintFlow
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log(
@@ -1169,6 +1179,18 @@ export function useChatbot({
               confidence: 1,
             } as any;
             targetFlow = "health_card" as FlowType;
+          } else if (
+            normalized.includes("complaint") ||
+            normalized.includes("estate")
+          ) {
+            console.log(
+              "[Routing] Lexical override: forcing complaint based on keywords",
+            );
+            classificationResult = {
+              flow: "complaint",
+              confidence: 1,
+            } as any;
+            targetFlow = "complaint" as FlowType;
           } else {
             classificationResult = await classifyQuery(userMessage);  
             console.log("✅ Classification complete:", classificationResult);
@@ -1186,6 +1208,11 @@ export function useChatbot({
             targetFlow = "marks";
           } else if (targetFlow === ("health_card" as any)) {
             targetFlow = "health_card";
+          } else if (
+            targetFlow === ("create_complaint" as any) ||
+            targetFlow === ("complaint" as any)
+          ) {
+            targetFlow = "complaint";
           }
         } catch (error) {
           console.error("❌ Classification error:", error);
@@ -1329,6 +1356,16 @@ export function useChatbot({
       if (targetFlow === "review" && isNewFlowInitialization) {
         activeFlowRef.current = "review";
         setActiveFlow("review");
+      }
+
+      // Initialize complaint flow
+      if (targetFlow === "complaint" && isNewFlowInitialization) {
+        console.log("[Routing] Initializing complaint flow state");
+        activeFlowRef.current = "complaint";
+        setActiveFlow("complaint");
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
       }
 
       // Initialize teacher diary flow
@@ -1689,6 +1726,23 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "complaint") {
+      await handleComplaintChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowPreserveTTS: () =>
+          handleFlowExit({ newSession: false, skipTTSInterrupt: true }),
         exitFlowForManualExit: () =>
           handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,
