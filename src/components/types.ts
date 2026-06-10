@@ -16,6 +16,7 @@ export type FlowType =
   | "health_card"
   | "teacher_diary"
   | "course_progress"
+  | "complaint"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";
 
