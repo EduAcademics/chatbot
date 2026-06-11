@@ -126,3 +126,55 @@
     max-width: 300px;
     word-wrap: break-word;
 }
+
+.paginated-table-wrap {
+    margin-top: 0.75rem;
+}
+
+.paginated-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.paginated-table-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.paginated-table-btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8125rem;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    cursor: pointer;
+    min-height: 36px;
+}
+
+.paginated-table-btn:hover:not(:disabled) {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
+.paginated-table-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.paginated-table-btn-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+.paginated-table-btn-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+}

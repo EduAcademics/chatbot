@@ -22,6 +22,17 @@ export type FlowType =
 export type ChartType = "bar" | "line" | "pie" | "table" | "none";
 
 /** Matches backend query-handler `data.visualization` contract */
+export interface TableMeta {
+  total: number;
+  page_size: number;
+  columns: string[];
+}
+
+export interface TableData {
+  rows: Record<string, unknown>[];
+  table_meta: TableMeta;
+}
+
 export interface Visualization {
   show_chart: boolean;
   chart_type: ChartType;
@@ -63,6 +74,7 @@ export interface ChatMessage {
   classSection?: ClassSectionOption;
   classSectionsOptions?: any[];
   visualization?: Visualization;
+  table_data?: TableData;
 }
 
 export interface ClassInfo {
