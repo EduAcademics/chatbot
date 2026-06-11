@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
+import PaginatedDataTable from "./PaginatedDataTable";
 import VisualizationRenderer from "./VisualizationRenderer";
 import { MarksEntryTable } from "./MarksEntryTable";
 import { HealthCardTable } from "./HealthCardTable";
@@ -1354,12 +1355,18 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                               )
                             ) : (
                               <>
-                                {/* Render answer as Markdown with GFM (tables) - Memoized to prevent refresh */}
+                                {/* Summary text + paginated table for list results */}
                                 <MemoizedAnswer
                                   answer={msg.answer || ""}
                                   messageIdx={idx}
                                   onOpenPreview={onOpenPreview}
                                 />
+                                {msg.table_data?.rows?.length ? (
+                                  <PaginatedDataTable
+                                    tableData={msg.table_data}
+                                    downloadFilename="query-results.csv"
+                                  />
+                                ) : null}
                               </>
                             )}
                             {msg.visualization?.show_chart && msg.visualization ? (

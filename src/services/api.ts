@@ -45,6 +45,14 @@ interface QueryHandlerResponse {
   data?: {
     answer: string;
     references: any[];
+    table_data?: {
+      rows: Record<string, unknown>[];
+      table_meta: {
+        total: number;
+        page_size: number;
+        columns: string[];
+      };
+    } | null;
     mongodbquery: string[];
     uuid_question?: string;
     visualization?: Visualization;
