@@ -227,6 +227,10 @@ export function useChatbot({
       }; // Selected class/section
       visualization?: import("../types").Visualization;
       table_data?: import("../types").TableData;
+      kpi_cards?: import("../types").KpiCard[];
+      findings?: string[];
+      ai_level?: string;
+      catalog_id?: string;
     }[]
   >([]);
 
@@ -1532,6 +1536,10 @@ export function useChatbot({
               activeTab: "answer", // Set initial active tab
               visualization: data.data?.visualization,
               table_data: data.data?.table_data ?? undefined,
+              kpi_cards: data.data?.kpi_cards ?? undefined,
+              findings: data.data?.findings ?? undefined,
+              ai_level: data.data?.ai_level,
+              catalog_id: data.data?.catalog_id,
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response

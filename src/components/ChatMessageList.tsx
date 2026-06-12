@@ -7,6 +7,8 @@ import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
 import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
 import PaginatedDataTable from "./PaginatedDataTable";
+import KpiCardRow from "./KpiCardRow";
+import FindingsList from "./FindingsList";
 import VisualizationRenderer from "./VisualizationRenderer";
 import { MarksEntryTable } from "./MarksEntryTable";
 import { HealthCardTable } from "./HealthCardTable";
@@ -1355,12 +1357,17 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                               )
                             ) : (
                               <>
-                                {/* Summary text + paginated table for list results */}
+                                {msg.kpi_cards?.length ? (
+                                  <KpiCardRow cards={msg.kpi_cards} />
+                                ) : null}
                                 <MemoizedAnswer
                                   answer={msg.answer || ""}
                                   messageIdx={idx}
                                   onOpenPreview={onOpenPreview}
                                 />
+                                {msg.findings?.length ? (
+                                  <FindingsList items={msg.findings} />
+                                ) : null}
                                 {msg.table_data?.rows?.length ? (
                                   <PaginatedDataTable
                                     tableData={msg.table_data}

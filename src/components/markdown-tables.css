@@ -178,3 +178,26 @@
     background: #1d4ed8;
     border-color: #1d4ed8;
 }
+
+.kpi-card-row .kpi-card {
+    background: #fff;
+}
+
+.kpi-card-neutral {
+    border-color: #e2e8f0;
+}
+
+.kpi-card-danger {
+    border-color: #fecaca;
+    background: #fef2f2;
+}
+
+.kpi-card-warning {
+    border-color: #fde68a;
+    background: #fffbeb;
+}
+
+.kpi-card-success {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}

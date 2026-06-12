@@ -33,6 +33,12 @@ export interface TableData {
   table_meta: TableMeta;
 }
 
+export interface KpiCard {
+  label: string;
+  value: string | number;
+  tone?: "neutral" | "danger" | "warning" | "success";
+}
+
 export interface Visualization {
   show_chart: boolean;
   chart_type: ChartType;
@@ -75,6 +81,10 @@ export interface ChatMessage {
   classSectionsOptions?: any[];
   visualization?: Visualization;
   table_data?: TableData;
+  kpi_cards?: KpiCard[];
+  findings?: string[];
+  ai_level?: string;
+  catalog_id?: string;
 }
 
 export interface ClassInfo {
