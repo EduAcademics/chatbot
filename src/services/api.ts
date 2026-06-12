@@ -225,6 +225,32 @@ interface MessageChatResponse {
   message?: string;
 }
 
+interface LibraryChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+interface LibraryChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+    library_data?: {
+      book: string;
+      member_able_type: string;
+      member_able: string;
+      type: string;
+    };
+  };
+  message?: string;
+}
+
 interface ComplaintChatRequest {
   session_id: string;
   user_id?: string;
@@ -748,6 +774,19 @@ export const aiAPI = {
     });
 
     return await parseJsonResponse<MessageChatResponse>(response);
+  },
+
+  // Library chat
+  libraryChat: async (
+    request: LibraryChatRequest,
+  ): Promise<LibraryChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/library-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<LibraryChatResponse>(response);
   },
 
   // Complaint chat

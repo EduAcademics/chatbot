@@ -16,6 +16,7 @@ import {
 } from "../../services/voiceConstants";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleMessageChat } from "../flows/messageFlow";
+import { handleLibraryChat } from "../flows/libraryFlow";
 import { handleComplaintChat } from "../flows/complaintFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
@@ -612,6 +613,7 @@ export function useChatbot({
                 activeFlow === "full_voice_attendance" ||
                 (activeFlow === "assignment" && useFullVoice) ||
                 (activeFlow === "message" && useFullVoice) ||
+                (activeFlow === "library" && useFullVoice) ||
                 (activeFlow === "leave" && useFullVoice);
               if (useDictationDebounce) {
                 setLastVoiceInputTime(Date.now());
@@ -668,7 +670,8 @@ export function useChatbot({
             const useDictationDebounce =
               activeFlow === "full_voice_attendance" ||
               (activeFlow === "assignment" && useFullVoice) ||
-              (activeFlow === "message" && useFullVoice);
+              (activeFlow === "message" && useFullVoice) ||
+              (activeFlow === "library" && useFullVoice);
             if (useDictationDebounce) return;
             if (turnCompleteTimerRef.current)
               clearTimeout(turnCompleteTimerRef.current);
@@ -982,6 +985,13 @@ export function useChatbot({
       "notify staff",
       "notify teachers",
       "broadcast message",
+      "reserve a book",
+      "reserve book",
+      "borrow a book",
+      "borrow book",
+      "library book",
+      "find a book",
+      "search for a book",
       "create diary",
       "diary entry",
       "teacher diary",
@@ -1019,6 +1029,8 @@ export function useChatbot({
       activeFlowRef.current === "assignment" || activeFlow === "assignment";
     const inMessage =
       activeFlowRef.current === "message" || activeFlow === "message";
+    const inLibrary =
+      activeFlowRef.current === "library" || activeFlow === "library";
     const inLeaveApproval =
       activeFlowRef.current === "leave_approval" ||
       activeFlow === "leave_approval";
@@ -1035,6 +1047,7 @@ export function useChatbot({
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
     const inMessageFlow = inMessage && !looksLikeNewRequest;
+    const inLibraryFlow = inLibrary && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
     const inTeacherDiaryFlow = inTeacherDiary && !looksLikeNewRequest;
     const inHealthCardFlow = inHealthCard && !looksLikeNewRequest;
@@ -1052,6 +1065,7 @@ export function useChatbot({
       inLeaveFlow,
       inAssignmentFlow,
       inMessageFlow,
+      inLibraryFlow,
       inLeaveApprovalFlow,
       inTeacherDiaryFlow,
       inHealthCardFlow,
@@ -1072,6 +1086,7 @@ export function useChatbot({
       inLeaveFlow ||
       inAssignmentFlow ||
       inMessageFlow ||
+      inLibraryFlow ||
       inLeaveApprovalFlow ||
       inTeacherDiaryFlow ||
       inHealthCardFlow ||
@@ -1219,6 +1234,8 @@ export function useChatbot({
             targetFlow = "assignment";
           } else if (targetFlow === ("message_create" as any)) {
             targetFlow = "message";
+          } else if (targetFlow === ("library_reserve_book" as any)) {
+            targetFlow = "library";
           } else if (targetFlow === ("assignment_submit" as any)) {
             targetFlow = "submission";
           } else if (targetFlow === ("review_submission" as any)) {
@@ -1367,6 +1384,36 @@ export function useChatbot({
         setRouterMode("llm");
         setAutoRouting(true);
         console.log("[Routing] Processing first message flow message");
+      }
+
+      // Initialize library flow
+      if (targetFlow === "library" && isNewFlowInitialization) {
+        console.log("[Routing] Initializing library flow state");
+        console.log("[Routing] Setting activeFlow to 'library'");
+
+        activeFlowRef.current = "library";
+        setActiveFlow("library");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
+        console.log("[Routing] Processing first library flow message");
       }
 
       // Initialize submission flow
@@ -1792,6 +1839,21 @@ export function useChatbot({
         exitFlow: () => handleFlowExit({ newSession: false }),
         exitFlowPreserveTTS: () =>
           handleFlowExit({ newSession: false, skipTTSInterrupt: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "library") {
+      await handleLibraryChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
         exitFlowForManualExit: () =>
           handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,

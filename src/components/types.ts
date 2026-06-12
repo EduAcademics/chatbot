@@ -11,6 +11,7 @@ export type FlowType =
   | "leave_approval"
   | "assignment"
   | "message"
+  | "library"
   | "submission"
   | "review"
   | "marks"
