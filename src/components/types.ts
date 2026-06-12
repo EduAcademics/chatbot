@@ -10,12 +10,14 @@ export type FlowType =
   | "leave"
   | "leave_approval"
   | "assignment"
+  | "message"
   | "submission"
   | "review"
   | "marks"
   | "health_card"
   | "teacher_diary"
   | "course_progress"
+  | "complaint"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";
 

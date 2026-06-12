@@ -15,6 +15,8 @@ import {
   buildMicConstraints,
 } from "../../services/voiceConstants";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
+import { handleMessageChat } from "../flows/messageFlow";
+import { handleComplaintChat } from "../flows/complaintFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
 import { handleTeacherDiaryChat } from "../flows/teacherDiaryFlow";
@@ -611,6 +613,7 @@ export function useChatbot({
               const useDictationDebounce =
                 activeFlow === "full_voice_attendance" ||
                 (activeFlow === "assignment" && useFullVoice) ||
+                (activeFlow === "message" && useFullVoice) ||
                 (activeFlow === "leave" && useFullVoice);
               if (useDictationDebounce) {
                 setLastVoiceInputTime(Date.now());
@@ -666,7 +669,8 @@ export function useChatbot({
             // Dictation flows use debounce timer only; skip turn-complete to avoid double submit
             const useDictationDebounce =
               activeFlow === "full_voice_attendance" ||
-              (activeFlow === "assignment" && useFullVoice);
+              (activeFlow === "assignment" && useFullVoice) ||
+              (activeFlow === "message" && useFullVoice);
             if (useDictationDebounce) return;
             if (turnCompleteTimerRef.current)
               clearTimeout(turnCompleteTimerRef.current);
@@ -971,6 +975,15 @@ export function useChatbot({
       "create assignment",
       "give assignment",
       "new assignment",
+      "send a message",
+      "send message",
+      "create message",
+      "compose message",
+      "message staff",
+      "message students",
+      "notify staff",
+      "notify teachers",
+      "broadcast message",
       "create diary",
       "diary entry",
       "teacher diary",
@@ -991,6 +1004,10 @@ export function useChatbot({
       "dental examination",
       "enter marks",
       "marks entry",
+      "file complaint",
+      "estate complaint",
+      "raise complaint",
+      "estate issue",
     ];
     const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
       userMessage.toLowerCase().includes(keyword),
@@ -1002,6 +1019,8 @@ export function useChatbot({
     const inLeave = activeFlowRef.current === "leave" || activeFlow === "leave";
     const inAssignment =
       activeFlowRef.current === "assignment" || activeFlow === "assignment";
+    const inMessage =
+      activeFlowRef.current === "message" || activeFlow === "message";
     const inLeaveApproval =
       activeFlowRef.current === "leave_approval" ||
       activeFlow === "leave_approval";
@@ -1013,12 +1032,16 @@ export function useChatbot({
       activeFlow === "health_card";
     const inMarks =
       activeFlowRef.current === "marks" || activeFlow === "marks";
+    const inComplaint =
+      activeFlowRef.current === "complaint" || activeFlow === "complaint";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
+    const inMessageFlow = inMessage && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
     const inTeacherDiaryFlow = inTeacherDiary && !looksLikeNewRequest;
     const inHealthCardFlow = inHealthCard && !looksLikeNewRequest;
     const inMarksFlow = inMarks && !looksLikeNewRequest;
+    const inComplaintFlow = inComplaint && !looksLikeNewRequest;
 
     console.log("[Routing] Auto-routing check:", {
       autoRouting,
@@ -1030,10 +1053,12 @@ export function useChatbot({
       inVoiceAttendanceFlow,
       inLeaveFlow,
       inAssignmentFlow,
+      inMessageFlow,
       inLeaveApprovalFlow,
       inTeacherDiaryFlow,
       inHealthCardFlow,
       inMarksFlow,
+      inComplaintFlow,
       looksLikeNewRequest,
       message: userMessage,
     });
@@ -1048,10 +1073,12 @@ export function useChatbot({
       inVoiceAttendanceFlow ||
       inLeaveFlow ||
       inAssignmentFlow ||
+      inMessageFlow ||
       inLeaveApprovalFlow ||
       inTeacherDiaryFlow ||
       inHealthCardFlow ||
-      inMarksFlow
+      inMarksFlow ||
+      inComplaintFlow
     ) {
       // Stay in current flow if we're in the middle of a multi-step process
       console.log(
@@ -1171,6 +1198,18 @@ export function useChatbot({
               confidence: 1,
             } as any;
             targetFlow = "health_card" as FlowType;
+          } else if (
+            normalized.includes("complaint") ||
+            normalized.includes("estate")
+          ) {
+            console.log(
+              "[Routing] Lexical override: forcing complaint based on keywords",
+            );
+            classificationResult = {
+              flow: "complaint",
+              confidence: 1,
+            } as any;
+            targetFlow = "complaint" as FlowType;
           } else {
             classificationResult = await classifyQuery(userMessage);  
             console.log("✅ Classification complete:", classificationResult);
@@ -1180,6 +1219,8 @@ export function useChatbot({
           // Map backend flow names to frontend flow types
           if (targetFlow === ("assignment_create" as any)) {
             targetFlow = "assignment";
+          } else if (targetFlow === ("message_create" as any)) {
+            targetFlow = "message";
           } else if (targetFlow === ("assignment_submit" as any)) {
             targetFlow = "submission";
           } else if (targetFlow === ("review_submission" as any)) {
@@ -1188,6 +1229,11 @@ export function useChatbot({
             targetFlow = "marks";
           } else if (targetFlow === ("health_card" as any)) {
             targetFlow = "health_card";
+          } else if (
+            targetFlow === ("create_complaint" as any) ||
+            targetFlow === ("complaint" as any)
+          ) {
+            targetFlow = "complaint";
           }
         } catch (error) {
           console.error("❌ Classification error:", error);
@@ -1295,6 +1341,36 @@ export function useChatbot({
         console.log("[Routing] Processing first assignment message");
       }
 
+      // Initialize message flow
+      if (targetFlow === "message" && isNewFlowInitialization) {
+        console.log("[Routing] Initializing message flow state");
+        console.log("[Routing] Setting activeFlow to 'message'");
+
+        activeFlowRef.current = "message";
+        setActiveFlow("message");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
+        console.log("[Routing] Processing first message flow message");
+      }
+
       // Initialize submission flow
       if (targetFlow === "submission" && isNewFlowInitialization) {
         console.log("🔤 Initializing submission flow state");
@@ -1331,6 +1407,16 @@ export function useChatbot({
       if (targetFlow === "review" && isNewFlowInitialization) {
         activeFlowRef.current = "review";
         setActiveFlow("review");
+      }
+
+      // Initialize complaint flow
+      if (targetFlow === "complaint" && isNewFlowInitialization) {
+        console.log("[Routing] Initializing complaint flow state");
+        activeFlowRef.current = "complaint";
+        setActiveFlow("complaint");
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
       }
 
       // Initialize teacher diary flow
@@ -1692,6 +1778,40 @@ export function useChatbot({
         getErpContext,
         appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
         exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "message") {
+      await handleMessageChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowPreserveTTS: () =>
+          handleFlowExit({ newSession: false, skipTTSInterrupt: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "complaint") {
+      await handleComplaintChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowPreserveTTS: () =>
+          handleFlowExit({ newSession: false, skipTTSInterrupt: true }),
         exitFlowForManualExit: () =>
           handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
         setProcessing: setIsProcessing,

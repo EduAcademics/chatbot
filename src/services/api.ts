@@ -201,6 +201,59 @@ interface AssignmentChatResponse {
   message?: string;
 }
 
+interface MessageChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+interface MessageChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+    message_data?: {
+      message_type: string;
+      message_to: string;
+      message_tag: string;
+      subject: string;
+      description: string;
+      departments: string[];
+      employees: string[];
+      students: string[];
+      attachments: string[];
+      is_replied: boolean;
+    };
+  };
+  message?: string;
+}
+
+interface ComplaintChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+  tts_voice?: string;
+}
+
+interface ComplaintChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+  };
+  message?: string;
+}
+
 interface SubmissionChatRequest {
   session_id: string;
   user_id?: string; // Optional: user ID (used directly as student_id)
@@ -692,6 +745,32 @@ export const aiAPI = {
     return await parseJsonResponse<AssignmentChatResponse>(response);
   },
 
+  // Message chat
+  messageChat: async (
+    request: MessageChatRequest,
+  ): Promise<MessageChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/message-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<MessageChatResponse>(response);
+  },
+
+  // Complaint chat
+  complaintChat: async (
+    request: ComplaintChatRequest,
+  ): Promise<ComplaintChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/chat/complaint`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<ComplaintChatResponse>(response);
+  },
+
   // Submission chat
   submissionChat: async (
     request: SubmissionChatRequest,
@@ -789,6 +868,30 @@ export const aiAPI = {
 
     if (!response.ok) {
       throw new Error("Assignment file upload failed");
+    }
+
+    return await parseJsonResponse(response);
+  },
+
+  // Upload message file
+  uploadMessageFile: async (
+    file: File,
+    session_id: string,
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("session_id", session_id);
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/upload-message-file`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Message file upload failed");
     }
 
     return await parseJsonResponse(response);
