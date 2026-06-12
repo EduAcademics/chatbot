@@ -229,6 +229,8 @@ export function useChatbot({
         className?: string;
         sectionName?: string;
       }; // Selected class/section
+      visualization?: import("../types").Visualization;
+      table_data?: import("../types").TableData;
     }[]
   >([]);
 
@@ -1531,6 +1533,7 @@ export function useChatbot({
               mongodbquery: data.data?.mongodbquery,
               activeTab: "answer", // Set initial active tab
               visualization: data.data?.visualization,
+              table_data: data.data?.table_data ?? undefined,
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response
