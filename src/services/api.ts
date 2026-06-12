@@ -56,6 +56,10 @@ interface QueryHandlerResponse {
     mongodbquery: string[];
     uuid_question?: string;
     visualization?: Visualization;
+    kpi_cards?: import("../components/types").KpiCard[];
+    findings?: string[];
+    ai_level?: string;
+    catalog_id?: string;
   };
   message?: string;
 }
