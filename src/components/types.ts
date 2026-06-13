@@ -9,6 +9,7 @@ export type FlowType =
   | "full_voice_attendance"
   | "leave"
   | "leave_approval"
+  | "student_leave_approval"
   | "assignment"
   | "message"
   | "library"

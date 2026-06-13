@@ -472,6 +472,72 @@ interface RejectLeaveRequest {
   branch_token?: string;
 }
 
+interface StudentLeaveApprovalRequest {
+  user_id: string;
+  page?: number;
+  limit?: number;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface StudentLeaveApprovalResponse {
+  message: string;
+  status: number;
+  data: {
+    leaveRequests: Array<{
+      uuid: string;
+      status: string;
+      from_date: string;
+      to_date: string;
+      leave_type: string;
+      leave_for: string;
+      description: string;
+      remarks: string | null;
+      attachments: Array<{
+        uuid: string;
+        name: string;
+        originalname: string;
+        type: string;
+        path: string;
+      }>;
+      student: {
+        fullName: string;
+        admissionNumber: string;
+        class: { name: string; uuid: string };
+        section: { name: string; uuid: string };
+        personalInfo: {
+          firstName: string;
+          admissionNo: string;
+          rollNo: number;
+          studentPhotoDocument?: { path: string; uuid: string };
+        };
+      };
+    }>;
+    meta: {
+      currentPage: number;
+      limit: number;
+      totalPages: number;
+      totalRecords: number;
+    };
+  };
+}
+
+interface ApproveStudentLeaveRequest {
+  leave_request_uuid: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface RejectStudentLeaveRequest {
+  leave_request_uuid: string;
+  reject_reason: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
 interface TextToSpeechRequest {
   text: string;
   // When true, backend will treat this as a query-flow TTS
@@ -589,6 +655,24 @@ export const aiAPI = {
     });
 
     return await parseJsonResponse<QueryHandlerResponse>(response);
+  },
+
+  resolveApprovalDisambiguation: async (request: {
+    reply: string;
+  }): Promise<{ status: string; resolved: "student" | "teacher" | "unclear" }> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/resolve-approval-disambiguation`,
+      {
+        method: "POST",
+        headers: getAIHeaders(),
+        body: JSON.stringify(request),
+      },
+    );
+
+    return await parseJsonResponse<{
+      status: string;
+      resolved: "student" | "teacher" | "unclear";
+    }>(response);
   },
 
   // Chat endpoint (used for multiple purposes)
@@ -1040,6 +1124,123 @@ export const leaveApprovalAPI = {
 
     if (!response.ok) {
       throw new Error("Failed to reject leave request");
+    }
+
+    return await parseJsonResponse(response);
+  },
+};
+
+// Student Leave Approval API
+export const studentLeaveApprovalAPI = {
+  // Fetch pending student leave requests for approval
+  fetchPendingRequests: async (
+    request: StudentLeaveApprovalRequest,
+  ): Promise<StudentLeaveApprovalResponse> => {
+    const params = new URLSearchParams({
+      user_id: request.user_id,
+      page: String(request.page || 1),
+      limit: String(request.limit || 10),
+    });
+
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/student-leave-approval-requests?${params.toString()}`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch student leave approval requests");
+    }
+
+    return await parseJsonResponse<StudentLeaveApprovalResponse>(response);
+  },
+
+  // Approve a student leave request
+  approve: async (request: ApproveStudentLeaveRequest): Promise<any> => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/student-leave-approval/approve`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          leave_request_uuid: request.leave_request_uuid,
+          bearer_token: request.bearer_token,
+          academic_session: request.academic_session,
+          branch_token: request.branch_token,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to approve student leave request");
+    }
+
+    return await parseJsonResponse(response);
+  },
+
+  // Reject a student leave request
+  reject: async (request: RejectStudentLeaveRequest): Promise<any> => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/student-leave-approval/reject`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          leave_request_uuid: request.leave_request_uuid,
+          reject_reason: request.reject_reason,
+          bearer_token: request.bearer_token,
+          academic_session: request.academic_session,
+          branch_token: request.branch_token,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to reject student leave request");
     }
 
     return await parseJsonResponse(response);
