@@ -33,6 +33,14 @@ export interface TableData {
   table_meta: TableMeta;
 }
 
+export interface TtsQueryContext {
+  table_data?: TableData;
+  findings?: string[];
+  kpi_cards?: KpiCard[];
+  /** Ready-to-speak summary from query-handler; skips blocking resolve-tts-text. */
+  backend_tts_text?: string;
+}
+
 export interface KpiCard {
   label: string;
   value: string | number;
@@ -85,6 +93,8 @@ export interface ChatMessage {
   findings?: string[];
   ai_level?: string;
   catalog_id?: string;
+  /** Pre-resolved voice summary from query-handler (instant speaker replay). */
+  tts_text?: string;
 }
 
 export interface ClassInfo {

@@ -44,6 +44,8 @@ export interface ChatMessageListProps {
     idx: number,
     text: string,
     isQuery?: boolean,
+    uuidQuestion?: string,
+    ttsContext?: import("./types").TtsQueryContext,
   ) => Promise<void>;
   handleSendFeedback: (
     idx: number,
@@ -1428,7 +1430,20 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 title="Listen"
                                 disabled={ttsLoading === idx}
                                 onClick={() =>
-                                  handlePlayTTS(idx, msg.answer || "")
+                                  handlePlayTTS(
+                                    idx,
+                                    msg.tts_text?.trim() ||
+                                      msg.answer ||
+                                      "",
+                                    Boolean(msg.answer),
+                                    undefined,
+                                    {
+                                      backend_tts_text: msg.tts_text,
+                                      table_data: msg.table_data,
+                                      findings: msg.findings,
+                                      kpi_cards: msg.kpi_cards,
+                                    },
+                                  )
                                 }
                               >
                                 <FiVolume2 />

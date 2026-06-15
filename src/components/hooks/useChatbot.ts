@@ -2,6 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import type { TabType, FlowType } from "../types";
 import { isExitResponse, generateQueryTTSSummary } from "../utils/chatbotUtils";
 import {
+  mergePttFinalSegment,
+  buildPttLiveDisplay,
+  buildPttSubmitText,
+  isSttFinalDuplicate,
+  normalizeSttText,
+  sameSttUtterance,
+} from "../utils/pttTranscript";
+import {
   aiAPI,
   userAPI,
   leaveApprovalAPI,
@@ -12,7 +20,13 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import {
   FULL_VOICE_TURN_DEBOUNCE_MS,
   FULL_VOICE_DICTATION_DEBOUNCE_MS,
+  PIPELINE_TTS_FALLBACK_MS,
+  TTS_RESOLVE_TIMEOUT_SEC,
+  PTT_WARM_DISCONNECT_MS,
+  VOICE_PREWARM_DELAY_MS,
+  PTT_RELEASE_STT_FLUSH_MS,
   buildMicConstraints,
+  resolveTtsVoice,
 } from "../../services/voiceConstants";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
@@ -104,6 +118,7 @@ export interface UseChatbotReturn {
     text: string,
     isQuery?: boolean,
     uuidQuestion?: string,
+    ttsContext?: import("../types").TtsQueryContext,
   ) => Promise<void>;
   handleSendFeedback: (
     idx: number,
@@ -136,13 +151,18 @@ export interface UseChatbotReturn {
   inputText: string;
   setInputText: React.Dispatch<React.SetStateAction<string>>;
   isRecording: boolean;
+  /** True from mic press until release (includes WebRTC connect time). */
+  isPttCapturing: boolean;
   fullVoiceMode: boolean;
   isFullVoiceConnecting: boolean;
+  isPttConnecting: boolean;
   setFullVoiceMode: (v: boolean) => void;
   isVoiceActive: boolean;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
   startStreaming: (useFullVoice?: boolean) => Promise<void>;
   stopStreaming: (skipSubmit?: boolean, keepWarmConnection?: boolean) => Promise<void>;
+  handlePttDown: () => Promise<void>;
+  handlePttUp: () => Promise<void>;
   pendingClassInfo: ClassInfo | null;
   attendanceFlowState: AttendanceState;
   getAttendanceFlowCallbacks: () => AttendanceFlowCallbacks;
@@ -202,6 +222,15 @@ export function useChatbot({
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Step 1: Add voice mode tracker ref (fixes state timing issue)
   const activeVoiceButtonRef = useRef<"audio" | "mic" | null>(null);
+  /** True while WebRTC warm connection is active for pipeline STT+TTS */
+  const voicePipelineActiveRef = useRef<boolean>(false);
+  /** True for the duration of a PTT voice submit until handleSubmit completes */
+  const voiceSubmitActiveRef = useRef<boolean>(false);
+  const pipelineTtsIdxRef = useRef<number | null>(null);
+  const pipelineTtsStartedRef = useRef<boolean>(false);
+  const pipelineTtsFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -235,6 +264,7 @@ export function useChatbot({
       findings?: string[];
       ai_level?: string;
       catalog_id?: string;
+      tts_text?: string;
     }[]
   >([]);
 
@@ -298,23 +328,54 @@ export function useChatbot({
   const [fullVoiceMode, setFullVoiceMode] = useState<boolean>(false); // Full Voice Mode (Hands-Free)
   const [isFullVoiceConnecting, setIsFullVoiceConnecting] =
     useState<boolean>(false);
+  const [isPttConnecting, setIsPttConnecting] = useState<boolean>(false);
+  const [isPttCapturing, setIsPttCapturing] = useState<boolean>(false);
+  const isPttCapturingRef = useRef(false);
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
   const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
   const warmDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const prewarmInFlightRef = useRef(false);
+  const queryResponseAtRef = useRef<number | null>(null);
+  /** User released PTT before WebRTC connect finished — submit on onConnected. */
+  const pendingPttReleaseRef = useRef(false);
   const turnCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   ); // Debounce turn-complete
   const [_lastVoiceInputTime, setLastVoiceInputTime] = useState<number>(0);
   const activeFlowRef = useRef<FlowType>("none"); // Sync with activeFlow; use in stay-in-flow to avoid stale state // <-- add for tracking last voiceÃ‚Â inputÃ‚Â time
 
+  const clearPipelineTtsFallback = () => {
+    if (pipelineTtsFallbackTimerRef.current) {
+      clearTimeout(pipelineTtsFallbackTimerRef.current);
+      pipelineTtsFallbackTimerRef.current = null;
+    }
+  };
+
   const clearWarmDisconnectTimer = () => {
     if (warmDisconnectTimerRef.current) {
       clearTimeout(warmDisconnectTimerRef.current);
       warmDisconnectTimerRef.current = null;
     }
+  };
+
+  /** Merge finalized + in-flight STT for the text box and submit payload. */
+  const getPttSubmitText = () =>
+    buildPttSubmitText(finalTextRef.current, lastInterimTextRef.current);
+
+  const beginPttCapture = () => {
+    finalTextRef.current = "";
+    lastInterimTextRef.current = "";
+    setInputText("");
+    isPttCapturingRef.current = true;
+    setIsPttCapturing(true);
+  };
+
+  const endPttCapture = () => {
+    isPttCapturingRef.current = false;
+    setIsPttCapturing(false);
   };
 
   // Shared helper: get academic session and branch token dynamically
@@ -387,6 +448,7 @@ export function useChatbot({
   useEffect(() => {
     return () => {
       clearWarmDisconnectTimer();
+      voicePipelineActiveRef.current = false;
       if (webrtcServiceRef.current) {
         void webrtcServiceRef.current.disconnect();
         webrtcServiceRef.current = null;
@@ -453,9 +515,17 @@ export function useChatbot({
 
       // Clear the ref so we know TTS was interrupted
       currentTTSAudioRef.current = null;
+    }
+
+    if (voicePipelineActiveRef.current) {
+      webrtcServiceRef.current?.interruptPipelineTTS();
+    } else {
       webrtcServiceRef.current?.interruptBotAudio();
     }
 
+    clearPipelineTtsFallback();
+    pipelineTtsStartedRef.current = false;
+    pipelineTtsIdxRef.current = null;
     // Clear loading state
     setTtsLoading(null);
   };
@@ -514,6 +584,12 @@ export function useChatbot({
     setIsProcessing(false);
 
     if (options?.newSession) {
+      voicePipelineActiveRef.current = false;
+      clearWarmDisconnectTimer();
+      if (webrtcServiceRef.current) {
+        void webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
+      }
       const newSessionId =
         typeof crypto !== "undefined" && crypto.randomUUID
           ? crypto.randomUUID()
@@ -542,26 +618,37 @@ export function useChatbot({
     handleFlowExit({ newSession: false });
   };
 
-  const startStreaming = async (useFullVoice = false) => {
-    // Step 2: AUDIO BUTTON click handler should set ref for immediate access
-    activeVoiceButtonRef.current = "audio";
-    console.log("[Voice] Audio button - set mode to audio");
+  const startStreaming = async (
+    useFullVoice = false,
+    options?: { prewarmOnly?: boolean },
+  ) => {
+    const prewarmOnly = options?.prewarmOnly === true;
+    if (!prewarmOnly) {
+      activeVoiceButtonRef.current = useFullVoice ? "audio" : "mic";
+      voicePipelineActiveRef.current = true;
+    }
+    console.log(
+      "[Voice] Streaming mode:",
+      prewarmOnly ? "prewarm" : useFullVoice ? "full" : "ptt",
+    );
     try {
       clearWarmDisconnectTimer();
       if (useFullVoice) {
         setIsFullVoiceConnecting(true);
-      } else {
+      } else if (!prewarmOnly) {
         setIsFullVoiceConnecting(false);
       }
-      // Reset text tracking for new recording session
-      lastInterimTextRef.current = "";
-      finalTextRef.current = "";
+      if (!prewarmOnly) {
+        lastInterimTextRef.current = "";
+        finalTextRef.current = "";
+      }
 
-      // Create WebRTC service instance
       const existingService = webrtcServiceRef.current;
       if (existingService?.getIsConnected()) {
-        existingService.enableMic(true);
-        setIsRecording(true);
+        if (!prewarmOnly) {
+          existingService.enableMic(true);
+          setIsRecording(true);
+        }
         setIsFullVoiceConnecting(false);
         return;
       }
@@ -569,49 +656,48 @@ export function useChatbot({
       const webrtcService = new WebRTCAudioService();
       webrtcServiceRef.current = webrtcService;
 
-      // Connect with callbacks; pass useFullVoice for Full Voice Mode
       await webrtcService.connect(
         selectedLanguage,
         {
           onTranscript: (() => {
-            // Track last submitted input to prevent duplicates
             let lastSubmittedInput = "";
             return (text: string, isFinal: boolean) => {
-              const trimmed = text.trim();
+              const trimmed = normalizeSttText(text);
               if (!trimmed) return;
-              // Step 5: Debug log for transcript mode (use ref for immediate value)
               console.log(
                 "Transcript in mode:",
                 activeVoiceButtonRef.current,
                 text,
+                isFinal ? "(final)" : "(interim)",
               );
 
-              // Interrupt TTS immediately when user speaks (barge-in; do not drop transcripts)
-              if (useFullVoice) {
+              if (useFullVoice || voicePipelineActiveRef.current) {
                 interruptTTS();
               }
 
               if (isFinal) {
-                // Final result: add to accumulated final text and clear interim
-                finalTextRef.current = finalTextRef.current
-                  ? finalTextRef.current + " " + trimmed
-                  : trimmed;
+                if (isSttFinalDuplicate(finalTextRef.current, trimmed)) {
+                  lastInterimTextRef.current = "";
+                  setInputText(finalTextRef.current);
+                  return;
+                }
+                finalTextRef.current = mergePttFinalSegment(
+                  finalTextRef.current,
+                  trimmed,
+                );
                 lastInterimTextRef.current = "";
-
-                // Update input with final text only (no interim)
                 setInputText(finalTextRef.current);
               } else {
-                // Interim result: show final text + current interim
+                if (sameSttUtterance(finalTextRef.current, trimmed)) {
+                  setInputText(finalTextRef.current);
+                  return;
+                }
                 lastInterimTextRef.current = trimmed;
-                const displayText = finalTextRef.current
-                  ? finalTextRef.current + " " + trimmed
-                  : trimmed;
-
-                // Update input in real-time with interim
-                setInputText(displayText);
+                setInputText(
+                  buildPttLiveDisplay(finalTextRef.current, trimmed),
+                );
               }
 
-              // Dictation flows: longer debounce while listing names
               const useDictationDebounce =
                 activeFlow === "full_voice_attendance" ||
                 (activeFlow === "assignment" && useFullVoice) ||
@@ -650,11 +736,26 @@ export function useChatbot({
           })(),
           onError: (error: Error) => {
             console.error("WebRTC error:", error);
-            setIsRecording(false);
+            if (!prewarmOnly) {
+              setIsRecording(false);
+              endPttCapture();
+            }
             setIsFullVoiceConnecting(false);
             setIsVoiceActive(false);
           },
           onConnected: () => {
+            if (prewarmOnly) {
+              voicePipelineActiveRef.current = true;
+              setIsFullVoiceConnecting(false);
+              console.log("[Voice] Pre-warm connection ready");
+              return;
+            }
+            if (pendingPttReleaseRef.current) {
+              pendingPttReleaseRef.current = false;
+              setIsFullVoiceConnecting(false);
+              void stopStreaming(false, true);
+              return;
+            }
             setIsRecording(true);
             setIsFullVoiceConnecting(false);
           },
@@ -667,7 +768,6 @@ export function useChatbot({
           onTurnComplete: () => {
             if (!useFullVoice || !finalTextRef.current.trim() || isProcessing)
               return;
-            // Dictation flows use debounce timer only; skip turn-complete to avoid double submit
             const useDictationDebounce =
               activeFlow === "full_voice_attendance" ||
               (activeFlow === "assignment" && useFullVoice);
@@ -691,20 +791,68 @@ export function useChatbot({
           },
           onVoiceActivity: (isActive: boolean) => {
             setIsVoiceActive(isActive);
-            // Interrupt TTS when voice activity is detected
-            if (isActive && useFullVoice) {
+            if (isActive && (useFullVoice || voicePipelineActiveRef.current)) {
               interruptTTS();
             }
           },
+          onBotStoppedSpeaking: () => {
+            if (pipelineTtsIdxRef.current !== null) {
+              setTtsLoading(null);
+              pipelineTtsIdxRef.current = null;
+            }
+          },
+          onBotStartedSpeaking: () => {
+            pipelineTtsStartedRef.current = true;
+            clearPipelineTtsFallback();
+            if (queryResponseAtRef.current != null) {
+              console.log(
+                `[Voice/Latency] query-response → pipeline-audio: ${Date.now() - queryResponseAtRef.current}ms`,
+              );
+            }
+          },
         },
-        useFullVoice,
-        selectedDeviceId,
+        {
+          fullVoiceMode: useFullVoice,
+          pushToTalkMode: !useFullVoice,
+          deviceId: selectedDeviceId,
+          enableMicInitially: useFullVoice && !prewarmOnly,
+        },
       );
+
+      if (!useFullVoice && !prewarmOnly) {
+        webrtcService.enableMic(true);
+      } else if (prewarmOnly) {
+        webrtcService.enableMic(false);
+      }
     } catch (error) {
       console.error("Failed to start WebRTC streaming:", error);
-      setIsRecording(false);
+      if (!prewarmOnly) {
+        setIsRecording(false);
+      }
       setIsFullVoiceConnecting(false);
       setIsVoiceActive(false);
+    }
+  };
+
+  const prewarmVoicePipeline = async () => {
+    if (
+      prewarmInFlightRef.current ||
+      isRecording ||
+      isPttConnecting ||
+      fullVoiceMode ||
+      webrtcServiceRef.current?.getIsConnected()
+    ) {
+      return;
+    }
+    prewarmInFlightRef.current = true;
+    try {
+      await startStreaming(false, { prewarmOnly: true });
+      voicePipelineActiveRef.current = true;
+      console.log("[Voice] WebRTC pipeline pre-warmed");
+    } catch (err) {
+      console.warn("[Voice] Pre-warm failed:", err);
+    } finally {
+      prewarmInFlightRef.current = false;
     }
   };
 
@@ -712,8 +860,12 @@ export function useChatbot({
     skipSubmit = false,
     keepWarmConnection = false,
   ) => {
-    // Step 4: Reset voice mode tracker when stopping
+    const wasPttSession =
+      isPttCapturingRef.current ||
+      activeVoiceButtonRef.current === "mic" ||
+      isRecording;
     activeVoiceButtonRef.current = null;
+    endPttCapture();
     if (turnCompleteTimerRef.current) {
       clearTimeout(turnCompleteTimerRef.current);
       turnCompleteTimerRef.current = null;
@@ -723,25 +875,64 @@ export function useChatbot({
       setFullVoiceAutoSubmitTimer(null);
     }
     setIsFullVoiceConnecting(false);
+
+    const finalInput = getPttSubmitText();
+    if (finalInput) {
+      setInputText(finalInput);
+    }
+
     if (keepWarmConnection && webrtcServiceRef.current?.getIsConnected()) {
       webrtcServiceRef.current.enableMic(false);
       setIsRecording(false);
       setIsVoiceActive(false);
 
+      // Let STT finalize the last words after the mic gate closes.
+      await new Promise((r) => setTimeout(r, PTT_RELEASE_STT_FLUSH_MS));
+
+      const flushedInput = getPttSubmitText();
+      if (flushedInput) {
+        setInputText(flushedInput);
+      }
+
       clearWarmDisconnectTimer();
       warmDisconnectTimerRef.current = setTimeout(async () => {
+        voicePipelineActiveRef.current = false;
         if (webrtcServiceRef.current) {
           await webrtcServiceRef.current.disconnect();
           webrtcServiceRef.current = null;
         }
         warmDisconnectTimerRef.current = null;
-      }, 20000);
+        void prewarmVoicePipeline();
+      }, PTT_WARM_DISCONNECT_MS);
+
+      lastInterimTextRef.current = "";
+      finalTextRef.current = "";
 
       if (skipSubmit) return;
+      if (!flushedInput) {
+        if (wasPttSession) {
+          void handlePlayTTS(
+            -1,
+            "I didn't catch that. Please try again.",
+          );
+        }
+        return;
+      }
+
+      isVoiceTriggeredRequestRef.current = true;
+      voiceSubmitActiveRef.current = true;
+      try {
+        await handleSubmit(flushedInput);
+      } finally {
+        isVoiceTriggeredRequestRef.current = false;
+        voiceSubmitActiveRef.current = false;
+      }
+      return;
     }
 
     if (webrtcServiceRef.current) {
       clearWarmDisconnectTimer();
+      voicePipelineActiveRef.current = false;
       await webrtcServiceRef.current.disconnect();
       webrtcServiceRef.current = null;
     }
@@ -752,13 +943,87 @@ export function useChatbot({
     setIsVoiceActive(false);
 
     if (skipSubmit) return;
+    if (!finalInput) {
+      if (wasPttSession) {
+        void handlePlayTTS(-1, "I didn't catch that. Please try again.");
+      }
+      return;
+    }
 
     isVoiceTriggeredRequestRef.current = true;
+    voiceSubmitActiveRef.current = true;
     try {
-      await handleSubmit();
+      await handleSubmit(finalInput);
     } finally {
       isVoiceTriggeredRequestRef.current = false;
+      voiceSubmitActiveRef.current = false;
     }
+  };
+
+  const handlePttDown = async () => {
+    if (isPttConnecting || isPttCapturingRef.current) return;
+    beginPttCapture();
+    pendingPttReleaseRef.current = false;
+    activeVoiceButtonRef.current = "mic";
+    voicePipelineActiveRef.current = true;
+    clearWarmDisconnectTimer();
+    interruptTTS();
+
+    if (webrtcServiceRef.current?.getIsConnected()) {
+      if (pendingPttReleaseRef.current) {
+        pendingPttReleaseRef.current = false;
+        void stopStreaming(false, true);
+        return;
+      }
+      webrtcServiceRef.current.enableMic(true);
+      setIsRecording(true);
+      return;
+    }
+
+    // First PTT while background pre-warm is still connecting — wait briefly.
+    if (prewarmInFlightRef.current) {
+      setIsPttConnecting(true);
+      try {
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          if (webrtcServiceRef.current?.getIsConnected()) {
+            if (pendingPttReleaseRef.current) {
+              pendingPttReleaseRef.current = false;
+              void stopStreaming(false, true);
+              return;
+            }
+            webrtcServiceRef.current.enableMic(true);
+            setIsRecording(true);
+            return;
+          }
+          if (!prewarmInFlightRef.current) break;
+        }
+      } finally {
+        setIsPttConnecting(false);
+      }
+      if (webrtcServiceRef.current?.getIsConnected()) return;
+    }
+
+    setIsPttConnecting(true);
+    try {
+      await startStreaming(false);
+    } catch {
+      setIsRecording(false);
+      activeVoiceButtonRef.current = null;
+      voicePipelineActiveRef.current = false;
+      endPttCapture();
+    } finally {
+      setIsPttConnecting(false);
+    }
+  };
+
+  const handlePttUp = async () => {
+    if (!isPttCapturingRef.current) return;
+    if (isPttConnecting) {
+      pendingPttReleaseRef.current = true;
+      return;
+    }
+    await stopStreaming(false, true);
   };
 
   // --- Upload file handler for attendance flow ---
@@ -847,6 +1112,21 @@ export function useChatbot({
     }
   };
 
+  /** Voice PTT: skip classify LLM hop for obvious information/list queries. */
+  const looksLikeInformationQuery = (message: string): boolean => {
+    const n = message.toLowerCase().trim();
+    if (!n || n.length > 220) return false;
+    const hasQueryVerb =
+      /\b(show|list|get|find|fetch|display|tell me|what|which|who|how many|count|give me)\b/.test(
+        n,
+      );
+    const hasDataNoun =
+      /\b(record|student|teacher|role|class|section|subject|employee|staff|mark|fee|salary|attendance)\b/.test(
+        n,
+      );
+    return hasQueryVerb || (hasDataNoun && n.includes("?"));
+  };
+
   /**
    * Classify user query to determine appropriate flow
    */
@@ -891,6 +1171,13 @@ export function useChatbot({
       return { flow: "query", confidence: 0.8, entities: {} };
     }
   };
+
+  const isActiveVoiceSession = (voiceTriggeredSnapshot = false) =>
+    voiceTriggeredSnapshot ||
+    voicePipelineActiveRef.current ||
+    voiceSubmitActiveRef.current ||
+    attendanceVoiceInitiatedRef.current ||
+    leaveVoiceInitiatedRef.current;
 
   const handleSubmit = async (overrideMessage?: string) => {
     const userMessage = (overrideMessage ?? inputText).trim(); // captures user question here
@@ -1067,6 +1354,25 @@ export function useChatbot({
           : activeFlow;
       // Don't show old detection when in multi-step flow
       setDetectedFlow(null);
+    } else if (
+      (activeFlowRef.current === "query" ||
+        activeFlowRef.current === "faq" ||
+        activeFlow === "query" ||
+        activeFlow === "faq") &&
+      !looksLikeNewRequest
+    ) {
+      targetFlow =
+        activeFlowRef.current === "faq" || activeFlow === "faq" ? "faq" : "query";
+      setDetectedFlow(targetFlow);
+      console.log("[Routing] Skipping classify — already in query/faq flow");
+    } else if (
+      isVoiceTriggeredForThisRequest &&
+      looksLikeInformationQuery(userMessage) &&
+      !looksLikeNewRequest
+    ) {
+      targetFlow = "query";
+      setDetectedFlow("query");
+      console.log("[Routing] Voice PTT — skipping classify for information query");
     } else if (autoRouting) {
       // Skip classification for short confirmation words and common flow responses (save API call)
       const simpleResponses = [
@@ -1457,10 +1763,7 @@ export function useChatbot({
           userId,
           userRoles: roles ? roles.split(",").map((r) => r.trim()).filter(Boolean) : [],
           isVoiceTriggered: isVoiceTriggeredForThisRequest,
-          isTtsSessionActive:
-            fullVoiceMode ||
-            isVoiceActive ||
-            activeVoiceButtonRef.current !== null,
+          isTtsSessionActive: isActiveVoiceSession(isVoiceTriggeredForThisRequest),
           getErpContext,
           appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
           exitFlow: healthCardExitFlow,
@@ -1542,6 +1845,7 @@ export function useChatbot({
               findings: data.data?.findings ?? undefined,
               ai_level: data.data?.ai_level,
               catalog_id: data.data?.catalog_id,
+              tts_text: data.data?.tts_text,
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response
@@ -1551,14 +1855,14 @@ export function useChatbot({
             setActiveFlow((data.data as any).flow_name as FlowType);
           }
           // Information-based query: play summarized TTS (backend generates voice-friendly summary)
-          const shouldPlayQueryTTS =
-            isVoiceTriggeredForThisRequest ||
-            fullVoiceMode ||
-            activeVoiceButtonRef.current !== null;
+          const shouldPlayQueryTTS = isActiveVoiceSession(
+            isVoiceTriggeredForThisRequest,
+          );
           if (shouldPlayQueryTTS) {
             try {
+              queryResponseAtRef.current = Date.now();
               const speakText =
-                (data.data as { tts_text?: string })?.tts_text?.trim() ||
+                data.data?.tts_text?.trim() ||
                 data.data?.answer ||
                 "";
               void handlePlayTTS(
@@ -1566,6 +1870,12 @@ export function useChatbot({
                 speakText,
                 true,
                 data.data?.uuid_question,
+                {
+                  backend_tts_text: data.data?.tts_text,
+                  table_data: data.data?.table_data ?? undefined,
+                  findings: data.data?.findings,
+                  kpi_cards: data.data?.kpi_cards,
+                },
               );
             } catch (ttsErr) {
               console.error("Query TTS playback failed:", ttsErr);
@@ -1580,10 +1890,9 @@ export function useChatbot({
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
-          const shouldPlayQueryErrorTTS =
-            isVoiceTriggeredForThisRequest ||
-            fullVoiceMode ||
-            activeVoiceButtonRef.current !== null;
+          const shouldPlayQueryErrorTTS = isActiveVoiceSession(
+            isVoiceTriggeredForThisRequest,
+          );
           if (shouldPlayQueryErrorTTS) {
             try {
               void handlePlayTTS(-1, data.message, true, undefined);
@@ -1600,10 +1909,9 @@ export function useChatbot({
           if (isExitResponse(data)) {
             handleFrontendExit();
           }
-          const shouldPlayNoResponseTTS =
-            isVoiceTriggeredForThisRequest ||
-            fullVoiceMode ||
-            activeVoiceButtonRef.current !== null;
+          const shouldPlayNoResponseTTS = isActiveVoiceSession(
+            isVoiceTriggeredForThisRequest,
+          );
           if (shouldPlayNoResponseTTS) {
             try {
               void handlePlayTTS(-1, "No response from AI.", true);
@@ -1622,10 +1930,9 @@ export function useChatbot({
           },
         ]);
         try {
-          const shouldPlayQueryExceptionTTS =
-            isVoiceTriggeredForThisRequest ||
-            fullVoiceMode ||
-            activeVoiceButtonRef.current !== null;
+          const shouldPlayQueryExceptionTTS = isActiveVoiceSession(
+            isVoiceTriggeredForThisRequest,
+          );
           if (shouldPlayQueryExceptionTTS) {
             void handlePlayTTS(-1, errorMessage, true);
           }
@@ -1954,32 +2261,17 @@ export function useChatbot({
     }
   };
 
-  // TTS playback function - supports interruption in Full Voice Mode
-  // Uses request ID to ensure only the latest TTS request plays
-  // `isQuery` marks whether this is a query-flow TTS (true) or an
-  // action-flow / system message TTS (false). Backend uses this flag
-  // to decide whether to generate a summarized TTS or speak raw text.
-  const handlePlayTTS = async (
-    idx: number,
+  // TTS playback: pipeline (low-latency) with REST fallback for reliability.
+  const playRestTTS = async (
+    _idx: number,
     text: string,
-    isQuery: boolean = false,
-    uuidQuestion?: string,
+    isQuery: boolean,
+    uuidQuestion: string | undefined,
+    thisRequestId: number,
+    skipInsight = false,
   ) => {
-    // Interrupt any currently playing TTS before starting new one
-    interruptTTS();
-
-    // Increment request ID - this marks any previous in-flight requests as stale
-    ttsRequestIdRef.current += 1;
-    const thisRequestId = ttsRequestIdRef.current;
-
-    console.log(
-      `[TTS] Request #${thisRequestId} started for: "${text.substring(0, 50)}..."`,
-    );
-
-    setTtsLoading(idx);
     let audioUrl: string | null = null;
     try {
-      // Query flow: use server uuid so TTS reuses insight summary + cached audio
       const uuidForTts =
         isQuery && uuidQuestion
           ? uuidQuestion
@@ -1987,14 +2279,11 @@ export function useChatbot({
       const reader = await aiAPI.textToSpeech({
         text,
         uuid_question: uuidForTts,
-        skip_insight: !isQuery,
+        skip_insight: skipInsight || !isQuery,
+        voice: resolveTtsVoice(selectedLanguage),
       });
 
-      // Check if this request is still the latest (not cancelled by a newer request)
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(
-          `[TTS] Request #${thisRequestId} cancelled (newer request #${ttsRequestIdRef.current} exists)`,
-        );
         setTtsLoading(null);
         return;
       }
@@ -2006,22 +2295,13 @@ export function useChatbot({
         const { value, done: streamDone } = await reader.read();
         if (value) audioChunks.push(value);
         done = streamDone;
-
-        // Check again during streaming if request is still valid
         if (ttsRequestIdRef.current !== thisRequestId) {
-          console.log(
-            `[TTS] Request #${thisRequestId} cancelled during streaming`,
-          );
           setTtsLoading(null);
           return;
         }
       }
 
-      // Final check before creating audio
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(
-          `[TTS] Request #${thisRequestId} cancelled before playback`,
-        );
         setTtsLoading(null);
         return;
       }
@@ -2031,15 +2311,10 @@ export function useChatbot({
       });
       audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
-
-      // Store URL and request ID on audio element for cleanup
       (audio as any)._ttsUrl = audioUrl;
       (audio as any)._requestId = thisRequestId;
-
-      // Store audio reference for interruption
       currentTTSAudioRef.current = audio;
 
-      // Handle cleanup when audio ends naturally
       audio.onended = () => {
         if (currentTTSAudioRef.current === audio) {
           currentTTSAudioRef.current = null;
@@ -2052,9 +2327,7 @@ export function useChatbot({
         setTtsLoading(null);
       };
 
-      // Handle errors during playback
-      audio.onerror = (error) => {
-        console.error("TTS audio error:", error);
+      audio.onerror = () => {
         if (currentTTSAudioRef.current === audio) {
           currentTTSAudioRef.current = null;
         }
@@ -2066,49 +2339,141 @@ export function useChatbot({
         setTtsLoading(null);
       };
 
-      // Final check right before playing
       if (ttsRequestIdRef.current !== thisRequestId) {
-        console.log(
-          `[TTS] Request #${thisRequestId} cancelled right before play`,
-        );
         URL.revokeObjectURL(audioUrl);
         setTtsLoading(null);
         return;
       }
 
-      // Play audio and handle play promise rejection
-      console.log(`[TTS] Request #${thisRequestId} playing`);
-      try {
-        await audio.play();
-      } catch (playError) {
-        console.error("TTS playback error:", playError);
-        if (currentTTSAudioRef.current === audio) {
-          currentTTSAudioRef.current = null;
-        }
-        if (audioUrl) {
-          URL.revokeObjectURL(audioUrl);
-        }
-        setTtsLoading(null);
-      }
+      console.log(`[TTS] REST request #${thisRequestId} playing`);
+      await audio.play();
     } catch (err) {
       console.error("TTS generation error:", err);
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-      }
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
       currentTTSAudioRef.current = null;
       setTtsLoading(null);
-      // Don't show alert for cancelled requests
-      if (ttsRequestIdRef.current === thisRequestId) {
-        console.error("Failed to play audio:", err);
-      }
     }
   };
 
+  const handlePlayTTS = async (
+    idx: number,
+    text: string,
+    isQuery: boolean = false,
+    uuidQuestion?: string,
+    ttsContext?: import("../types").TtsQueryContext,
+  ) => {
+    if (!text?.trim()) return;
+
+    interruptTTS();
+
+    let speechText = text;
+    let summaryAlreadyResolved = false;
+    const preResolved = ttsContext?.backend_tts_text?.trim();
+
+    if (isQuery) {
+      if (preResolved) {
+        speechText = preResolved;
+        summaryAlreadyResolved = true;
+        if (queryResponseAtRef.current != null) {
+          console.log(
+            `[Voice/Latency] query-response → speak-ready: ${Date.now() - queryResponseAtRef.current}ms (pre-resolved)`,
+          );
+        }
+        // Warm insight cache in background; do not block or re-speak (v1).
+        void aiAPI
+          .resolveTtsText({
+            text,
+            uuid_question: uuidQuestion,
+            timeout_seconds: 5,
+            table_data: ttsContext?.table_data ?? undefined,
+            findings: ttsContext?.findings,
+            kpi_cards: ttsContext?.kpi_cards,
+          })
+          .catch((err) => {
+            console.debug("[TTS] background resolve-tts-text:", err);
+          });
+      } else {
+        try {
+          const resolved = await aiAPI.resolveTtsText({
+            text,
+            uuid_question: uuidQuestion,
+            timeout_seconds: TTS_RESOLVE_TIMEOUT_SEC,
+            table_data: ttsContext?.table_data ?? undefined,
+            findings: ttsContext?.findings,
+            kpi_cards: ttsContext?.kpi_cards,
+          });
+          const backendSummary = resolved.data?.tts_text?.trim();
+          if (backendSummary) {
+            speechText = backendSummary;
+            summaryAlreadyResolved = true;
+          } else {
+            speechText = generateQueryTTSSummary(text) || text;
+          }
+        } catch (err) {
+          console.warn("[TTS] resolve-tts-text failed, using client summary:", err);
+          speechText = generateQueryTTSSummary(text) || text;
+        }
+      }
+    }
+
+    ttsRequestIdRef.current += 1;
+    const thisRequestId = ttsRequestIdRef.current;
+    setTtsLoading(idx);
+
+    const webrtc = webrtcServiceRef.current;
+    const usePipeline =
+      idx === -1 &&
+      isActiveVoiceSession() &&
+      voicePipelineActiveRef.current &&
+      webrtc?.getIsConnected();
+
+    const restSkipInsight = summaryAlreadyResolved;
+
+    if (usePipeline) {
+      pipelineTtsIdxRef.current = idx;
+      pipelineTtsStartedRef.current = false;
+      clearPipelineTtsFallback();
+
+      console.log(
+        `[TTS] Pipeline speak #${thisRequestId}: "${speechText.substring(0, 50)}..."`,
+      );
+
+      pipelineTtsFallbackTimerRef.current = setTimeout(() => {
+        if (
+          !pipelineTtsStartedRef.current &&
+          ttsRequestIdRef.current === thisRequestId
+        ) {
+          console.log("[TTS] Pipeline timeout — falling back to REST");
+          void playRestTTS(
+            idx,
+            speechText,
+            isQuery,
+            uuidQuestion,
+            thisRequestId,
+            restSkipInsight,
+          );
+        }
+      }, PIPELINE_TTS_FALLBACK_MS);
+
+      webrtc!.speakText(speechText, true);
+      return;
+    }
+
+    console.log(
+      `[TTS] REST request #${thisRequestId} started for: "${speechText.substring(0, 50)}..."`,
+    );
+    await playRestTTS(
+      idx,
+      speechText,
+      isQuery,
+      uuidQuestion,
+      thisRequestId,
+      restSkipInsight,
+    );
+  };
+
   const speakHealthCardBotMessage = (text: string) => {
-    const shouldSpeak =
-      fullVoiceMode ||
-      isVoiceActive ||
-      activeVoiceButtonRef.current !== null;
+    const shouldSpeak = isActiveVoiceSession();
     if (!shouldSpeak || !text?.trim()) return;
     const cleaned = generateQueryTTSSummary(text);
     if (cleaned) void handlePlayTTS(-1, cleaned);
@@ -2946,8 +3311,7 @@ export function useChatbot({
 
       // Marks save can happen from table clicks while voice mode is active,
       // so explicitly speak backend-provided TTS for save confirmations.
-      const shouldSpeakSaveMessage =
-        fullVoiceMode || isVoiceActive || activeVoiceButtonRef.current !== null;
+      const shouldSpeakSaveMessage = isActiveVoiceSession();
       if (shouldSpeakSaveMessage && isExpectedSaveResponse) {
         const ttsFromBackend = result?.data?.tts_text;
         const textToSpeakRaw =
@@ -3008,6 +3372,48 @@ export function useChatbot({
       }
     };
   }, [isMenuOpen]);
+
+  // Pre-warm WebRTC on mount / language change so first PTT avoids cold connect.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled || isRecording || isPttConnecting || fullVoiceMode) return;
+      if (webrtcServiceRef.current?.getIsConnected()) {
+        await webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
+      }
+      if (!cancelled) await prewarmVoicePipeline();
+    }, VOICE_PREWARM_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [userId, selectedLanguage, selectedDeviceId]);
+
+  // Re-prewarm when user returns to the tab after idle disconnect.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (isRecording || isPttConnecting || fullVoiceMode) return;
+      if (webrtcServiceRef.current?.getIsConnected()) return;
+      void prewarmVoicePipeline();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isRecording, isPttConnecting, fullVoiceMode]);
+
+  // Disconnect voice pipeline on unmount.
+  useEffect(() => {
+    return () => {
+      clearWarmDisconnectTimer();
+      clearPipelineTtsFallback();
+      if (webrtcServiceRef.current) {
+        void webrtcServiceRef.current.disconnect();
+        webrtcServiceRef.current = null;
+      }
+    };
+  }, []);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -3114,13 +3520,17 @@ export function useChatbot({
     inputText,
     setInputText,
     isRecording,
+    isPttCapturing,
     fullVoiceMode,
     isFullVoiceConnecting,
+    isPttConnecting,
     setFullVoiceMode,
     isVoiceActive,
     handleSubmit,
     startStreaming,
     stopStreaming,
+    handlePttDown,
+    handlePttUp,
     pendingClassInfo,
     attendanceFlowState,
     getAttendanceFlowCallbacks,
