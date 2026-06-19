@@ -724,10 +724,12 @@ export function useChatbot({
                   setFullVoiceAutoSubmitTimer(null);
                   setInputText(finalInput);
                   isVoiceTriggeredRequestRef.current = true;
+                  voiceSubmitActiveRef.current = true;
                   try {
                     await handleSubmit(finalInput);
                   } finally {
                     isVoiceTriggeredRequestRef.current = false;
+                    voiceSubmitActiveRef.current = false;
                   }
                 }, FULL_VOICE_DICTATION_DEBOUNCE_MS);
                 setFullVoiceAutoSubmitTimer(timer);
@@ -782,10 +784,12 @@ export function useChatbot({
               finalTextRef.current = "";
               setInputText(finalInput);
               isVoiceTriggeredRequestRef.current = true;
+              voiceSubmitActiveRef.current = true;
               try {
                 await handleSubmit(finalInput);
               } finally {
                 isVoiceTriggeredRequestRef.current = false;
+                voiceSubmitActiveRef.current = false;
               }
             }, FULL_VOICE_TURN_DEBOUNCE_MS);
           },
@@ -1172,9 +1176,12 @@ export function useChatbot({
     }
   };
 
+  // NOTE: Do NOT include voicePipelineActiveRef here. The pipeline is kept warm
+  // via pre-warming (on mount/tab-focus) for low-latency PTT, so it is true even
+  // when the user never spoke. Gating TTS on it would speak replies to typed
+  // questions. Only treat a request as voice when it was actually submitted by voice.
   const isActiveVoiceSession = (voiceTriggeredSnapshot = false) =>
     voiceTriggeredSnapshot ||
-    voicePipelineActiveRef.current ||
     voiceSubmitActiveRef.current ||
     attendanceVoiceInitiatedRef.current ||
     leaveVoiceInitiatedRef.current;
