@@ -33,6 +33,20 @@ export interface TableData {
   table_meta: TableMeta;
 }
 
+export interface TtsQueryContext {
+  table_data?: TableData;
+  findings?: string[];
+  kpi_cards?: KpiCard[];
+  /** Ready-to-speak summary from query-handler; skips blocking resolve-tts-text. */
+  backend_tts_text?: string;
+}
+
+export interface KpiCard {
+  label: string;
+  value: string | number;
+  tone?: "neutral" | "danger" | "warning" | "success";
+}
+
 export interface Visualization {
   show_chart: boolean;
   chart_type: ChartType;
@@ -75,6 +89,12 @@ export interface ChatMessage {
   classSectionsOptions?: any[];
   visualization?: Visualization;
   table_data?: TableData;
+  kpi_cards?: KpiCard[];
+  findings?: string[];
+  ai_level?: string;
+  catalog_id?: string;
+  /** Pre-resolved voice summary from query-handler (instant speaker replay). */
+  tts_text?: string;
 }
 
 export interface ClassInfo {
