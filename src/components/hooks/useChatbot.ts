@@ -1149,7 +1149,7 @@ export function useChatbot({
         body: JSON.stringify({
           query: message,
           user_id: userId,
-          user_roles: roles ? roles.split(",") : [],
+          user_roles: roles || "",
         }),
       });
 
