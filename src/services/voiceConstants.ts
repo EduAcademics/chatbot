@@ -10,11 +10,15 @@ export const PIPELINE_TTS_FALLBACK_MS = 1200;
 /** Max seconds to block on resolve-tts-text when no pre-resolved summary exists. */
 export const TTS_RESOLVE_TIMEOUT_SEC = 1.0;
 
-/** Keep WebRTC warm after PTT release before disconnecting. */
-export const PTT_WARM_DISCONNECT_MS = 20_000;
+/** Keep WebRTC warm after PTT release before disconnecting.
+ *  Long window so repeated PTT presses reuse the live connection (instant mic,
+ *  no "Connecting microphone…"). Mic is muted between turns so STT stays idle. */
+export const PTT_WARM_DISCONNECT_MS = 300_000;
 
-/** Wait after mic off so STT can emit the last final transcript before submit. */
-export const PTT_RELEASE_STT_FLUSH_MS = 200;
+/** Wait after mic off so STT can emit the last final transcript before submit.
+ *  Azure's final segment can lag the mic gate; keep this generous so trailing
+ *  words aren't dropped on release. */
+export const PTT_RELEASE_STT_FLUSH_MS = 450;
 
 /** Delay before background WebRTC pre-warm on chatbot mount. */
 export const VOICE_PREWARM_DELAY_MS = 500;

@@ -270,7 +270,7 @@ export function useChatbot({
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("default");
-  const [selectedLanguage, setSelectedLanguage] = useState<string>("auto");
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en-IN");
   const [ttsLoading, setTtsLoading] = useState<number | null>(null);
   const [feedbackComment, setFeedbackComment] = useState<{
     [idx: number]: string;
@@ -406,12 +406,7 @@ export function useChatbot({
   // const [classificationConfidence, setClassificationConfidence] =
   //   useState<number>(0);
 
-  const languages = [
-    { label: "Auto Detect", value: "auto" },
-    { label: "English (US)", value: "en-US" },
-    { label: "Hindi (India)", value: "hi-IN" },
-    { label: "Marathi (India)", value: "mr-IN" },
-  ];
+  const languages = [{ label: "English (India)", value: "en-IN" }];
 
   useEffect(() => {
     if (chatHistory.length === 0) {
@@ -898,6 +893,14 @@ export function useChatbot({
         setInputText(flushedInput);
       }
 
+      console.log("[PTT] release (warm path):", {
+        finalInput,
+        flushedInput,
+        willSubmit: !skipSubmit && !!flushedInput,
+        finalRef: finalTextRef.current,
+        interimRef: lastInterimTextRef.current,
+      });
+
       clearWarmDisconnectTimer();
       warmDisconnectTimerRef.current = setTimeout(async () => {
         voicePipelineActiveRef.current = false;
@@ -945,6 +948,11 @@ export function useChatbot({
     finalTextRef.current = "";
     setIsRecording(false);
     setIsVoiceActive(false);
+
+    console.log("[PTT] release (cold path):", {
+      finalInput,
+      willSubmit: !skipSubmit && !!finalInput,
+    });
 
     if (skipSubmit) return;
     if (!finalInput) {
@@ -1022,6 +1030,11 @@ export function useChatbot({
   };
 
   const handlePttUp = async () => {
+    console.log("[PTT] handlePttUp:", {
+      isPttCapturing: isPttCapturingRef.current,
+      isPttConnecting,
+      connected: webrtcServiceRef.current?.getIsConnected(),
+    });
     if (!isPttCapturingRef.current) return;
     if (isPttConnecting) {
       pendingPttReleaseRef.current = true;

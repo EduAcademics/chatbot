@@ -95,12 +95,15 @@ export default function ChatInputArea({
   const handlePttPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     releasePttPointer(e);
-    if (isPttCapturing) void handlePttUp();
+    // Call unconditionally: handlePttUp self-guards via isPttCapturingRef.
+    // Gating on the isPttCapturing STATE here can skip submit on a fast
+    // press→release because state lags a render behind the ref.
+    void handlePttUp();
   };
 
   const handlePttPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
     releasePttPointer(e);
-    if (isPttCapturing) void handlePttUp();
+    void handlePttUp();
   };
 
   const inputPlaceholder = isPttBusy
