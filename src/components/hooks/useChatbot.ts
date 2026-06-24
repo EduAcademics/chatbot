@@ -803,6 +803,9 @@ export function useChatbot({
           onBotStartedSpeaking: () => {
             pipelineTtsStartedRef.current = true;
             clearPipelineTtsFallback();
+            // Recover from a pre-warm autoplay block: the audio element may have
+            // been left paused when the track started without a user gesture.
+            webrtcServiceRef.current?.resumeBotAudio();
             if (queryResponseAtRef.current != null) {
               console.log(
                 `[Voice/Latency] query-response → pipeline-audio: ${Date.now() - queryResponseAtRef.current}ms`,
@@ -980,6 +983,9 @@ export function useChatbot({
     voicePipelineActiveRef.current = true;
     clearWarmDisconnectTimer();
     interruptTTS();
+    // PTT press is a guaranteed user gesture — unlock the (pre-warmed) bot audio
+    // element so the TTS reply is audible even if autoplay was blocked at connect.
+    webrtcServiceRef.current?.resumeBotAudio();
 
     if (webrtcServiceRef.current?.getIsConnected()) {
       if (pendingPttReleaseRef.current) {
