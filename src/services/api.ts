@@ -55,7 +55,13 @@ interface QueryHandlerResponse {
     } | null;
     mongodbquery: string[];
     uuid_question?: string;
+    /** Pre-resolved voice summary (table-aware); speak immediately in PTT flow. */
+    tts_text?: string;
     visualization?: Visualization;
+    kpi_cards?: import("../components/types").KpiCard[];
+    findings?: string[];
+    ai_level?: string;
+    catalog_id?: string;
   };
   message?: string;
 }
@@ -463,6 +469,28 @@ interface TextToSpeechRequest {
   is_query?: boolean;
   uuid_question?: string;
   skip_insight?: boolean;
+  voice?: string;
+}
+
+interface ResolveTtsTextRequest {
+  text: string;
+  uuid_question?: string;
+  timeout_seconds?: number;
+  table_data?: {
+    rows: Record<string, unknown>[];
+    table_meta: {
+      total: number;
+      page_size: number;
+      columns: string[];
+    };
+  } | null;
+  findings?: string[];
+  kpi_cards?: import("../components/types").KpiCard[];
+}
+
+interface ResolveTtsTextResponse {
+  status: string;
+  data?: { tts_text?: string };
 }
 
 interface FeedbackRequest {
@@ -708,6 +736,18 @@ export const aiAPI = {
     }
 
     return response.body?.getReader() || null;
+  },
+
+  /** Resolve LLM voice summary for query responses (pipeline TTS). */
+  resolveTtsText: async (
+    request: ResolveTtsTextRequest,
+  ): Promise<ResolveTtsTextResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/resolve-tts-text`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+    return await parseJsonResponse<ResolveTtsTextResponse>(response);
   },
 
   // Feedback

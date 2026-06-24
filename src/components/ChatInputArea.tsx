@@ -1,7 +1,8 @@
 /**
- * Chat input area: file upload, text input, voice buttons, send.
- * Extracted from AudioStreamerChatBot to reduce main file size.
+ * Chat input area: file upload, text input, push-to-talk mic, send.
+ * PTT: hold mic → live transcript in text box → release → auto-send.
  */
+import { useRef } from "react";
 import { motion } from "framer-motion";
 import { FiLoader, FiMic, FiSend, FiUpload } from "react-icons/fi";
 import type { FlowType } from "./types";
@@ -20,16 +21,12 @@ export interface ChatInputAreaProps {
   inputText: string;
   setInputText: (v: string | ((prev: string) => string)) => void;
   isRecording: boolean;
-  fullVoiceMode: boolean;
-  isFullVoiceConnecting: boolean;
-  setFullVoiceMode: (v: boolean) => void;
+  isPttCapturing: boolean;
+  isPttConnecting: boolean;
   isVoiceActive: boolean;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
-  startStreaming: (useFullVoice?: boolean) => Promise<void>;
-  stopStreaming: (
-    skipSubmit?: boolean,
-    keepWarmConnection?: boolean,
-  ) => Promise<void>;
+  handlePttDown: () => Promise<void>;
+  handlePttUp: () => Promise<void>;
   setChatHistory: React.Dispatch<React.SetStateAction<any[]>>;
   sessionId: string;
   userId: string;
@@ -55,13 +52,12 @@ export default function ChatInputArea({
   inputText,
   setInputText,
   isRecording,
-  fullVoiceMode,
-  isFullVoiceConnecting,
-  setFullVoiceMode,
-  isVoiceActive: _isVoiceActive,
+  isPttCapturing,
+  isPttConnecting,
+  isVoiceActive,
   handleSubmit,
-  startStreaming,
-  stopStreaming,
+  handlePttDown,
+  handlePttUp,
   setChatHistory,
   sessionId,
   userId,
@@ -79,6 +75,48 @@ export default function ChatInputArea({
 }: ChatInputAreaProps) {
   const isAttendanceFlow =
     activeFlow === "attendance" || activeFlow === "voice_attendance";
+  const pttBtnRef = useRef<HTMLButtonElement>(null);
+  const isPttBusy = isPttCapturing || isRecording;
+  const pttConnectingOnly = isPttConnecting && !isRecording;
+
+  const releasePttPointer = (e: React.PointerEvent) => {
+    const btn = pttBtnRef.current;
+    if (btn?.hasPointerCapture(e.pointerId)) {
+      btn.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const handlePttPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (isPttConnecting && !isPttCapturing) return;
+    pttBtnRef.current?.setPointerCapture(e.pointerId);
+    void handlePttDown();
+  };
+
+  const handlePttPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    releasePttPointer(e);
+    // Call unconditionally: handlePttUp self-guards via isPttCapturingRef.
+    // Gating on the isPttCapturing STATE here can skip submit on a fast
+    // press→release because state lags a render behind the ref.
+    void handlePttUp();
+  };
+
+  const handlePttPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
+    releasePttPointer(e);
+    void handlePttUp();
+  };
+
+  const inputPlaceholder = isPttBusy
+    ? isVoiceActive
+      ? "Listening… speak now"
+      : pttConnectingOnly
+        ? "Connecting microphone…"
+        : "Hold mic and speak… release to send"
+    : isAttendanceFlow
+      ? "Class info, student names, or type here..."
+      : "Ask me anything!";
+
   return (
     <div
       className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}
@@ -260,52 +298,65 @@ export default function ChatInputArea({
         </motion.label>
       </div>
 
-      <input
-        type="text"
-        placeholder={
-          fullVoiceMode
-            ? "Speak naturally — I'll respond when you finish..."
-            : isAttendanceFlow
-              ? "Class info, student names, or type here..."
-              : "Ask me anything!"
-        }
-        value={inputText}
-        onChange={(e) => setInputText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && !isRecording && handleSubmit()}
-        className="chatbot-input text-base sm:text-lg px-3 py-2 sm:px-4 sm:py-3 min-h-[40px] sm:min-h-[48px]"
-        disabled={isRecording && fullVoiceMode}
-      />
-      <button
-        onClick={() => {
-          if (isFullVoiceConnecting) return;
-          activeVoiceButtonRef.current = "audio";
-          if (fullVoiceMode) {
-            setFullVoiceMode(false);
-            stopStreaming(true, true);
-          } else {
-            setFullVoiceMode(true);
-            startStreaming(true);
+      <div className="chatbot-input-wrap flex-1 min-w-0 relative">
+        <input
+          type="text"
+          placeholder={inputPlaceholder}
+          value={inputText}
+          onChange={(e) => {
+            if (!isPttBusy) setInputText(e.target.value);
+          }}
+          onKeyDown={(e) =>
+            e.key === "Enter" && !isPttBusy && void handleSubmit()
           }
-        }}
-        className={`chatbot-btn chatbot-btn-full-voice w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center ${
-          fullVoiceMode ? " full-voice-active" : ""
-        } ${isFullVoiceConnecting ? " full-voice-connecting" : ""}`}
-        title={
-          isFullVoiceConnecting
-            ? "Connecting Full Voice Mode..."
-            : fullVoiceMode
-            ? "Exit Full Voice Mode (Hands-Free)"
-            : "Full Voice Mode — Mic always on, auto turn detection"
-        }
-        disabled={isFullVoiceConnecting}
-      >
-        {isFullVoiceConnecting ? <FiLoader /> : <FiMic />}
-      </button>
+          readOnly={isPttBusy}
+          aria-live={isPttBusy ? "polite" : "off"}
+          aria-label={
+            isPttBusy ? "Live voice transcript" : "Message input"
+          }
+          className={`chatbot-input text-base sm:text-lg px-3 py-2 sm:px-4 sm:py-3 min-h-[40px] sm:min-h-[48px] w-full${
+            isPttBusy ? " ptt-input-capturing" : ""
+          }${isVoiceActive ? " ptt-input-voice-active" : ""}`}
+        />
+        {isPttBusy && (
+          <span
+            className={`ptt-live-badge${isVoiceActive ? " ptt-live-badge-active" : ""}`}
+            aria-hidden="true"
+          >
+            {isVoiceActive ? "● Live" : isRecording ? "Mic on" : "…"}
+          </span>
+        )}
+      </div>
+
       <button
-        onClick={() => handleSubmit()}
+        ref={pttBtnRef}
+        type="button"
+        className={`chatbot-btn chatbot-btn-ptt w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center${
+          isPttBusy ? " ptt-active" : ""
+        }${pttConnectingOnly ? " ptt-connecting" : ""}${
+          isVoiceActive ? " ptt-voice-active" : ""
+        }`}
+        title={
+          pttConnectingOnly
+            ? "Connecting microphone…"
+            : isPttBusy
+              ? "Release to send"
+              : "Hold to speak (Push-to-Talk)"
+        }
+        aria-pressed={isPttBusy}
+        onPointerDown={handlePttPointerDown}
+        onPointerUp={handlePttPointerUp}
+        onPointerCancel={handlePttPointerCancel}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        {pttConnectingOnly ? <FiLoader /> : <FiMic />}
+      </button>
+
+      <button
+        onClick={() => void handleSubmit()}
         className="chatbot-btn send"
         title="Send Message"
-        disabled={isRecording && fullVoiceMode}
+        disabled={isPttBusy}
       >
         <FiSend />
       </button>

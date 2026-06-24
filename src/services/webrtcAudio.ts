@@ -10,6 +10,16 @@ export interface WebRTCAudioCallbacks {
   onDisconnected: () => void;
   onTurnComplete?: () => void;
   onVoiceActivity?: (isActive: boolean) => void;
+  onBotStartedSpeaking?: () => void;
+  onBotStoppedSpeaking?: () => void;
+}
+
+export interface WebRTCConnectOptions {
+  fullVoiceMode?: boolean;
+  pushToTalkMode?: boolean;
+  deviceId?: string;
+  /** Mic on at connect time (full voice). PTT keeps mic off until enableMic(true). */
+  enableMicInitially?: boolean;
 }
 
 export class WebRTCAudioService {
@@ -21,9 +31,15 @@ export class WebRTCAudioService {
   async connect(
     selectedLanguage: string,
     callbacks: WebRTCAudioCallbacks,
-    fullVoiceMode = false,
-    deviceId?: string,
+    options: WebRTCConnectOptions = {},
   ): Promise<void> {
+    const {
+      fullVoiceMode = false,
+      pushToTalkMode = false,
+      deviceId,
+      enableMicInitially = fullVoiceMode,
+    } = options;
+
     try {
       this.callbacks = callbacks;
 
@@ -37,18 +53,13 @@ export class WebRTCAudioService {
         console.warn('[WebRTC] Mic constraint warmup failed, continuing:', micErr);
       }
 
-      // Create transport
-      //this.transport = new SmallWebRTCTransport();
-      // Create transport with ICE servers from config (.env)
       this.transport = new SmallWebRTCTransport({
         iceServers: ICE_SERVERS,
       });
 
-
-      // Create client
       this.client = new PipecatClient({
         transport: this.transport,
-        enableMic: true,
+        enableMic: enableMicInitially,
         enableCam: false,
         callbacks: {
           onConnected: () => {
@@ -70,12 +81,18 @@ export class WebRTCAudioService {
           onError: (error: RTVIMessage) => {
             callbacks.onError(new Error(String(error)));
           },
+          onBotStartedSpeaking: () => {
+            callbacks.onBotStartedSpeaking?.();
+          },
+          onBotStoppedSpeaking: () => {
+            callbacks.onBotStoppedSpeaking?.();
+          },
         },
       });
 
       this.setupAudioTracks();
 
-      const connectParams: any = {
+      const connectParams: Record<string, unknown> = {
         endpoint: BOT_START_URL,
         requestData: {
           createDailyRoom: false,
@@ -83,6 +100,7 @@ export class WebRTCAudioService {
           transport: 'webrtc',
           language: selectedLanguage,
           full_voice_mode: fullVoiceMode,
+          push_to_talk_mode: pushToTalkMode,
         },
       };
 
@@ -92,7 +110,7 @@ export class WebRTCAudioService {
         });
       }
 
-      await this.client.connect(connectParams);
+      await this.client.connect(connectParams as Parameters<PipecatClient['connect']>[0]);
     } catch (error) {
       console.error('WebRTC connection error:', error);
       callbacks.onError(error instanceof Error ? error : new Error(String(error)));
@@ -111,7 +129,11 @@ export class WebRTCAudioService {
         botAudioElement.autoplay = true;
         botAudioElement.srcObject = new MediaStream([track]);
         document.body.appendChild(botAudioElement);
-        (this.client as any)._botAudioElement = botAudioElement;
+        void botAudioElement.play().catch((err) => {
+          console.warn('[WebRTC] Bot audio autoplay blocked:', err);
+        });
+        (this.client as PipecatClient & { _botAudioElement?: HTMLAudioElement })._botAudioElement =
+          botAudioElement;
       }
     });
 
@@ -128,9 +150,22 @@ export class WebRTCAudioService {
     });
   }
 
+  /** Stream TTS through the WebRTC pipeline (low-latency). */
+  speakText(text: string, interrupt = true): void {
+    if (!this.client || !text.trim()) return;
+    this.client.sendClientMessage('speak-tts', { text: text.trim(), interrupt });
+  }
+
+  /** Interrupt in-flight pipeline TTS. */
+  interruptPipelineTTS(): void {
+    this.client?.sendClientMessage('interrupt-tts', {});
+    this.interruptBotAudio();
+  }
+
   interruptBotAudio(): void {
     if (this.client) {
-      const el = (this.client as any)._botAudioElement;
+      const el = (this.client as PipecatClient & { _botAudioElement?: HTMLAudioElement })
+        ._botAudioElement;
       if (el && !el.paused) {
         el.pause();
         el.currentTime = 0;
@@ -140,6 +175,12 @@ export class WebRTCAudioService {
 
   async disconnect(): Promise<void> {
     if (this.client) {
+      const el = (this.client as PipecatClient & { _botAudioElement?: HTMLAudioElement })
+        ._botAudioElement;
+      if (el) {
+        el.pause();
+        el.remove();
+      }
       await this.client.disconnect();
       this.client = null;
     }
