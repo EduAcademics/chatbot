@@ -20,6 +20,8 @@ import { WebRTCAudioService } from "../../services/webrtcAudio";
 import {
   FULL_VOICE_TURN_DEBOUNCE_MS,
   FULL_VOICE_DICTATION_DEBOUNCE_MS,
+  VOICE_SUBMIT_DEDUPE_MS,
+  SUBMIT_DEDUPE_MS,
   PIPELINE_TTS_FALLBACK_MS,
   TTS_RESOLVE_TIMEOUT_SEC,
   PTT_WARM_DISCONNECT_MS,
@@ -402,6 +404,58 @@ export function useChatbot({
     setIsPttCapturing(false);
   };
 
+  /** Last voice utterance handed to handleSubmit, for cross-path de-duplication. */
+  const lastVoiceSubmitRef = useRef<{ text: string; at: number }>({
+    text: "",
+    at: 0,
+  });
+
+  /** Guards handleSubmit against duplicate fires of the same message (e.g. two
+   *  voice timers racing, or a touch + mouse event both releasing PTT). Tracks
+   *  the last accepted (message, time) pair so a near-simultaneous repeat of the
+   *  same text is dropped. */
+  const lastSubmitRef = useRef<{ text: string; at: number }>({
+    text: "",
+    at: 0,
+  });
+
+  /**
+   * Single entry point for every voice-originated submit (PTT release, VAD
+   * turn-complete, dictation debounce). Guards against the same utterance being
+   * sent twice when two of those paths race: it rejects a submit while another
+   * voice submit is still in flight, and de-dupes the same text within a short
+   * window. Returns true only when the text was actually submitted.
+   */
+  const submitVoiceInput = async (rawInput: string): Promise<boolean> => {
+    const finalInput = rawInput.trim();
+    if (!finalInput) return false;
+
+    // A voice submit is already running — don't fire a second one.
+    if (voiceSubmitActiveRef.current) return false;
+
+    // The same utterance was just submitted by another path — ignore the echo.
+    const now = Date.now();
+    const last = lastVoiceSubmitRef.current;
+    if (
+      now - last.at < VOICE_SUBMIT_DEDUPE_MS &&
+      sameSttUtterance(last.text, finalInput)
+    ) {
+      return false;
+    }
+
+    lastVoiceSubmitRef.current = { text: finalInput, at: now };
+    isVoiceTriggeredRequestRef.current = true;
+    voiceSubmitActiveRef.current = true;
+    try {
+      await handleSubmit(finalInput);
+      return true;
+    } finally {
+      isVoiceTriggeredRequestRef.current = false;
+      voiceSubmitActiveRef.current = false;
+      lastVoiceSubmitRef.current = { text: finalInput, at: Date.now() };
+    }
+  };
+
   // Shared helper: get academic session and branch token dynamically
   const getErpContext = () => {
     const academic_session =
@@ -745,23 +799,11 @@ export function useChatbot({
                   : finalTextRef.current + " " + trimmed;
                 const timer = setTimeout(async () => {
                   const finalInput = currentText.trim();
-                  if (
-                    !finalInput ||
-                    isProcessing ||
-                    finalInput === lastSubmittedInput
-                  )
-                    return;
+                  if (!finalInput || finalInput === lastSubmittedInput) return;
                   lastSubmittedInput = finalInput;
                   setFullVoiceAutoSubmitTimer(null);
                   setInputText(finalInput);
-                  isVoiceTriggeredRequestRef.current = true;
-                  voiceSubmitActiveRef.current = true;
-                  try {
-                    await handleSubmit(finalInput);
-                  } finally {
-                    isVoiceTriggeredRequestRef.current = false;
-                    voiceSubmitActiveRef.current = false;
-                  }
+                  await submitVoiceInput(finalInput);
                 }, FULL_VOICE_DICTATION_DEBOUNCE_MS);
                 setFullVoiceAutoSubmitTimer(timer);
               }
@@ -799,29 +841,25 @@ export function useChatbot({
             console.log("WebRTC disconnected");
           },
           onTurnComplete: () => {
-            if (!useFullVoice || !finalTextRef.current.trim() || isProcessing)
-              return;
+            if (!useFullVoice || !finalTextRef.current.trim()) return;
+            // Dictation flows auto-submit via the transcript debounce above;
+            // skip the turn-complete submit so the same utterance isn't sent
+            // twice (must mirror the dictation-debounce flow list).
             const useDictationDebounce =
               activeFlow === "full_voice_attendance" ||
-              (activeFlow === "assignment" && useFullVoice);
+              (activeFlow === "assignment" && useFullVoice) ||
+              (activeFlow === "leave" && useFullVoice);
             if (useDictationDebounce) return;
             if (turnCompleteTimerRef.current)
               clearTimeout(turnCompleteTimerRef.current);
             turnCompleteTimerRef.current = setTimeout(async () => {
               turnCompleteTimerRef.current = null;
               const finalInput = finalTextRef.current.trim();
-              if (!finalInput || isProcessing) return;
+              if (!finalInput) return;
               lastInterimTextRef.current = "";
               finalTextRef.current = "";
               setInputText(finalInput);
-              isVoiceTriggeredRequestRef.current = true;
-              voiceSubmitActiveRef.current = true;
-              try {
-                await handleSubmit(finalInput);
-              } finally {
-                isVoiceTriggeredRequestRef.current = false;
-                voiceSubmitActiveRef.current = false;
-              }
+              await submitVoiceInput(finalInput);
             }, FULL_VOICE_TURN_DEBOUNCE_MS);
           },
           onVoiceActivity: (isActive: boolean) => {
@@ -988,14 +1026,7 @@ export function useChatbot({
         return;
       }
 
-      isVoiceTriggeredRequestRef.current = true;
-      voiceSubmitActiveRef.current = true;
-      try {
-        await handleSubmit(flushedInput);
-      } finally {
-        isVoiceTriggeredRequestRef.current = false;
-        voiceSubmitActiveRef.current = false;
-      }
+      await submitVoiceInput(flushedInput);
       return;
     }
 
@@ -1025,14 +1056,7 @@ export function useChatbot({
       return;
     }
 
-    isVoiceTriggeredRequestRef.current = true;
-    voiceSubmitActiveRef.current = true;
-    try {
-      await handleSubmit(finalInput);
-    } finally {
-      isVoiceTriggeredRequestRef.current = false;
-      voiceSubmitActiveRef.current = false;
-    }
+    await submitVoiceInput(finalInput);
   };
 
   const handlePttDown = async () => {
@@ -1268,6 +1292,20 @@ export function useChatbot({
   const handleSubmit = async (overrideMessage?: string) => {
     const userMessage = (overrideMessage ?? inputText).trim(); // captures user question here
     if (!userMessage) return;
+
+    // Backstop against duplicate submits of the same message (voice timers
+    // racing, double touch/mouse PTT release, etc.). Near-simultaneous repeats
+    // of the exact same text within this window are dropped so the user's input
+    // is never sent — or echoed in the chat — twice.
+    const submitAt = Date.now();
+    if (
+      lastSubmitRef.current.text === userMessage &&
+      submitAt - lastSubmitRef.current.at < SUBMIT_DEDUPE_MS
+    ) {
+      console.log("[Submit] duplicate suppressed:", userMessage);
+      return;
+    }
+    lastSubmitRef.current = { text: userMessage, at: submitAt };
 
     // Snapshot request-level voice source before any flow/exit handlers mutate refs.
     const isVoiceTriggeredForThisRequest =
