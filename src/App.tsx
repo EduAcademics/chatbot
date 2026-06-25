@@ -45,7 +45,7 @@ function App() {
           });
           if (response.status === "success" && response.user_id) {
             setUserId(response.user_id);
-            setRoles(response.user_roles || "");
+            setRoles(Array.isArray(response.user_roles) ? response.user_roles.join(",") : response.user_roles || "");
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {
             throw new Error(response.message || "Unable to fetch user details.");
