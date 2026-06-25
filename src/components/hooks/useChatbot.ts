@@ -1228,7 +1228,7 @@ export function useChatbot({
         body: JSON.stringify({
           query: message,
           user_id: userId,
-          user_roles: roles ? roles.split(",").map(r => r.trim()) : [],
+          user_roles: roles ? (Array.isArray(roles) ? roles : roles.split(",").map(r => r.trim())) : [],
         }),
       });
 
@@ -1847,7 +1847,7 @@ export function useChatbot({
           userMessage,
           sessionId,
           userId,
-          userRoles: roles ? roles.split(",").map((r) => r.trim()).filter(Boolean) : [],
+          userRoles: roles ? (Array.isArray(roles) ? roles : roles.split(",").map((r) => r.trim()).filter(Boolean)) : [],
           isVoiceTriggered: isVoiceTriggeredForThisRequest,
           isTtsSessionActive: isActiveVoiceSession(isVoiceTriggeredForThisRequest),
           getErpContext,
