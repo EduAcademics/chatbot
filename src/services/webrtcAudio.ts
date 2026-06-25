@@ -27,6 +27,7 @@ export class WebRTCAudioService {
   private transport: SmallWebRTCTransport | null = null;
   private isConnected = false;
   private callbacks: WebRTCAudioCallbacks | null = null;
+  private botAudioElement: HTMLAudioElement | null = null;
 
   async connect(
     selectedLanguage: string,
@@ -121,33 +122,52 @@ export class WebRTCAudioService {
   private setupAudioTracks(): void {
     if (!this.client) return;
 
-    let botAudioElement: HTMLAudioElement | null = null;
-
     this.client.on(RTVIEvent.TrackStarted, (track: MediaStreamTrack, participant?: Participant) => {
       if (!participant?.local && track.kind === 'audio') {
-        botAudioElement = document.createElement('audio');
-        botAudioElement.autoplay = true;
-        botAudioElement.srcObject = new MediaStream([track]);
-        document.body.appendChild(botAudioElement);
-        void botAudioElement.play().catch((err) => {
-          console.warn('[WebRTC] Bot audio autoplay blocked:', err);
+        // Reuse a single element so a track started during (gesture-less) pre-warm
+        // can still be played once the user interacts with the page.
+        if (!this.botAudioElement) {
+          this.botAudioElement = document.createElement('audio');
+          this.botAudioElement.autoplay = true;
+          this.botAudioElement.setAttribute('playsinline', 'true');
+          document.body.appendChild(this.botAudioElement);
+        }
+        this.botAudioElement.srcObject = new MediaStream([track]);
+        // The pipeline is pre-warmed without a user gesture, so this first play()
+        // can be blocked by the browser's autoplay policy. resumeBotAudio() retries
+        // it after a user gesture (PTT press) / when the bot starts speaking.
+        void this.botAudioElement.play().catch((err) => {
+          console.warn('[WebRTC] Bot audio autoplay blocked (will retry on gesture):', err);
         });
-        (this.client as PipecatClient & { _botAudioElement?: HTMLAudioElement })._botAudioElement =
-          botAudioElement;
       }
     });
 
     this.client.on(RTVIEvent.UserStartedSpeaking, () => {
       this.callbacks?.onVoiceActivity?.(true);
-      if (botAudioElement && !botAudioElement.paused) {
-        botAudioElement.pause();
-        botAudioElement.currentTime = 0;
+      if (this.botAudioElement && !this.botAudioElement.paused) {
+        this.botAudioElement.pause();
+        this.botAudioElement.currentTime = 0;
       }
     });
 
     this.client.on(RTVIEvent.UserStoppedSpeaking, () => {
       this.callbacks?.onVoiceActivity?.(false);
     });
+  }
+
+  /**
+   * (Re)start playback of the bot audio element. Safe to call from a user gesture
+   * (e.g. PTT press) or when the bot starts speaking to recover from an autoplay
+   * block that happened while the pipeline was pre-warmed without interaction.
+   */
+  resumeBotAudio(): void {
+    const el = this.botAudioElement;
+    if (!el || !el.srcObject) return;
+    if (el.paused) {
+      void el.play().catch((err) => {
+        console.warn('[WebRTC] resumeBotAudio play() failed:', err);
+      });
+    }
   }
 
   /** Stream TTS through the WebRTC pipeline (low-latency). */
@@ -163,24 +183,21 @@ export class WebRTCAudioService {
   }
 
   interruptBotAudio(): void {
-    if (this.client) {
-      const el = (this.client as PipecatClient & { _botAudioElement?: HTMLAudioElement })
-        ._botAudioElement;
-      if (el && !el.paused) {
-        el.pause();
-        el.currentTime = 0;
-      }
+    const el = this.botAudioElement;
+    if (el && !el.paused) {
+      el.pause();
+      el.currentTime = 0;
     }
   }
 
   async disconnect(): Promise<void> {
+    if (this.botAudioElement) {
+      this.botAudioElement.pause();
+      this.botAudioElement.srcObject = null;
+      this.botAudioElement.remove();
+      this.botAudioElement = null;
+    }
     if (this.client) {
-      const el = (this.client as PipecatClient & { _botAudioElement?: HTMLAudioElement })
-        ._botAudioElement;
-      if (el) {
-        el.pause();
-        el.remove();
-      }
       await this.client.disconnect();
       this.client = null;
     }

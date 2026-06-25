@@ -4,20 +4,29 @@ export const FULL_VOICE_TURN_DEBOUNCE_MS = 500;
 /** Longer pause for flows where users list names (attendance, assignment, leave). */
 export const FULL_VOICE_DICTATION_DEBOUNCE_MS = 1200;
 
-/** Wait before REST TTS if WebRTC pipeline does not signal audio start. */
-export const PIPELINE_TTS_FALLBACK_MS = 1200;
+/** Wait before REST TTS if WebRTC pipeline does not signal audio start.
+ *  Must stay above the real pipeline TTS time-to-first-byte (~1.4s observed for
+ *  Azure) so a healthy pipeline isn't raced by the REST fallback (which caused
+ *  double playback). Mutual-exclusion guards correctness; this only tunes latency. */
+export const PIPELINE_TTS_FALLBACK_MS = 2500;
 
 /** Max seconds to block on resolve-tts-text when no pre-resolved summary exists. */
 export const TTS_RESOLVE_TIMEOUT_SEC = 1.0;
 
-/** Keep WebRTC warm after PTT release before disconnecting. */
-export const PTT_WARM_DISCONNECT_MS = 20_000;
+/** Keep WebRTC warm after PTT release before disconnecting.
+ *  Long window so repeated PTT presses reuse the live connection (instant mic,
+ *  no "Connecting microphone…"). Mic is muted between turns so STT stays idle. */
+export const PTT_WARM_DISCONNECT_MS = 300_000;
 
-/** Wait after mic off so STT can emit the last final transcript before submit. */
-export const PTT_RELEASE_STT_FLUSH_MS = 200;
+/** Wait after mic off so STT can emit the last final transcript before submit.
+ *  Azure's final segment can lag the mic gate; keep this generous so trailing
+ *  words aren't dropped on release. */
+export const PTT_RELEASE_STT_FLUSH_MS = 450;
 
-/** Delay before background WebRTC pre-warm on chatbot mount. */
-export const VOICE_PREWARM_DELAY_MS = 500;
+/** Delay before background WebRTC pre-warm on chatbot mount. Kept minimal so the
+ *  connection is ready before the first push-to-talk press (the handshake itself
+ *  still takes ~1–3s, so starting ASAP maximizes the chance it is warm in time). */
+export const VOICE_PREWARM_DELAY_MS = 0;
 
 /** Matches backend webrtc_bot _TTS_VOICE_MAP for consistent REST + pipeline voice. */
 export const TTS_VOICE_BY_LANGUAGE: Record<string, string> = {

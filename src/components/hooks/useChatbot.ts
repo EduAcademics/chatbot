@@ -185,6 +185,13 @@ export function useChatbot({
   const webrtcServiceRef = useRef<WebRTCAudioService | null>(null);
   const lastInterimTextRef = useRef<string>(""); // Track last interim text to replace it with final
   const finalTextRef = useRef<string>(""); // Track accumulated final text (completed sentences)
+  // Mirror of the text actually shown in the input during the current PTT capture.
+  // Used as the source of truth for submission so anything the user saw is always
+  // submitted, even if the interim/final refs get cleared by a race on release.
+  const pttDisplayTextRef = useRef<string>("");
+  // Monotonic id for each PTT capture so a stale release (after a new press began)
+  // can detect it no longer owns the session and bail out.
+  const pttSessionRef = useRef<number>(0);
 
   // Local lifecycle-scoped flag to mark a single request as voice-triggered.
   // This is intentionally a request-scoped ref (not global/shared) and will
@@ -231,6 +238,13 @@ export function useChatbot({
   const pipelineTtsFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  /** Which TTS path (pipeline vs REST) has committed to play for a given request
+   *  id. Guarantees exactly one source is audible and prevents double playback
+   *  when the pipeline and the REST fallback race. */
+  const ttsPathCommittedRef = useRef<{
+    id: number;
+    path: "pipeline" | "rest";
+  } | null>(null);
 
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -270,7 +284,7 @@ export function useChatbot({
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("default");
-  const [selectedLanguage, setSelectedLanguage] = useState<string>("auto");
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en-IN");
   const [ttsLoading, setTtsLoading] = useState<number | null>(null);
   const [feedbackComment, setFeedbackComment] = useState<{
     [idx: number]: string;
@@ -338,6 +352,9 @@ export function useChatbot({
     null,
   );
   const prewarmInFlightRef = useRef(false);
+  /** True only during the brief pre-warm mic-priming window so stray STT
+   *  transcripts captured while warming the mic track are ignored. */
+  const micWarmingRef = useRef(false);
   const queryResponseAtRef = useRef<number | null>(null);
   /** User released PTT before WebRTC connect finished — submit on onConnected. */
   const pendingPttReleaseRef = useRef(false);
@@ -368,10 +385,17 @@ export function useChatbot({
   const beginPttCapture = () => {
     finalTextRef.current = "";
     lastInterimTextRef.current = "";
+    pttDisplayTextRef.current = "";
+    pttSessionRef.current += 1;
     setInputText("");
     isPttCapturingRef.current = true;
     setIsPttCapturing(true);
   };
+
+  /** Resolve the text to submit on PTT release. Falls back to the mirror of what
+   *  was displayed so a visible transcript is never silently dropped. */
+  const resolvePttSubmitText = () =>
+    getPttSubmitText() || pttDisplayTextRef.current.trim();
 
   const endPttCapture = () => {
     isPttCapturingRef.current = false;
@@ -406,12 +430,7 @@ export function useChatbot({
   // const [classificationConfidence, setClassificationConfidence] =
   //   useState<number>(0);
 
-  const languages = [
-    { label: "Auto Detect", value: "auto" },
-    { label: "English (US)", value: "en-US" },
-    { label: "Hindi (India)", value: "hi-IN" },
-    { label: "Marathi (India)", value: "mr-IN" },
-  ];
+  const languages = [{ label: "English (India)", value: "en-IN" }];
 
   useEffect(() => {
     if (chatHistory.length === 0) {
@@ -526,6 +545,7 @@ export function useChatbot({
     clearPipelineTtsFallback();
     pipelineTtsStartedRef.current = false;
     pipelineTtsIdxRef.current = null;
+    ttsPathCommittedRef.current = null;
     // Clear loading state
     setTtsLoading(null);
   };
@@ -664,6 +684,9 @@ export function useChatbot({
             return (text: string, isFinal: boolean) => {
               const trimmed = normalizeSttText(text);
               if (!trimmed) return;
+              // Drop any audio captured while the mic track is being primed during
+              // pre-warm (before the user has pressed PTT).
+              if (micWarmingRef.current) return;
               console.log(
                 "Transcript in mode:",
                 activeVoiceButtonRef.current,
@@ -678,6 +701,8 @@ export function useChatbot({
               if (isFinal) {
                 if (isSttFinalDuplicate(finalTextRef.current, trimmed)) {
                   lastInterimTextRef.current = "";
+                  if (finalTextRef.current)
+                    pttDisplayTextRef.current = finalTextRef.current;
                   setInputText(finalTextRef.current);
                   return;
                 }
@@ -686,16 +711,22 @@ export function useChatbot({
                   trimmed,
                 );
                 lastInterimTextRef.current = "";
+                pttDisplayTextRef.current = finalTextRef.current;
                 setInputText(finalTextRef.current);
               } else {
                 if (sameSttUtterance(finalTextRef.current, trimmed)) {
+                  if (finalTextRef.current)
+                    pttDisplayTextRef.current = finalTextRef.current;
                   setInputText(finalTextRef.current);
                   return;
                 }
                 lastInterimTextRef.current = trimmed;
-                setInputText(
-                  buildPttLiveDisplay(finalTextRef.current, trimmed),
+                const display = buildPttLiveDisplay(
+                  finalTextRef.current,
+                  trimmed,
                 );
+                pttDisplayTextRef.current = display;
+                setInputText(display);
               }
 
               const useDictationDebounce =
@@ -807,7 +838,19 @@ export function useChatbot({
           },
           onBotStartedSpeaking: () => {
             pipelineTtsStartedRef.current = true;
+            const id = ttsRequestIdRef.current;
+            const committed = ttsPathCommittedRef.current;
+            // If the REST fallback already claimed this request, the pipeline lost
+            // the race — suppress its audio so the summary isn't spoken twice.
+            if (committed && committed.id === id && committed.path === "rest") {
+              webrtcServiceRef.current?.interruptPipelineTTS();
+              return;
+            }
+            ttsPathCommittedRef.current = { id, path: "pipeline" };
             clearPipelineTtsFallback();
+            // Recover from a pre-warm autoplay block: the audio element may have
+            // been left paused when the track started without a user gesture.
+            webrtcServiceRef.current?.resumeBotAudio();
             if (queryResponseAtRef.current != null) {
               console.log(
                 `[Voice/Latency] query-response → pipeline-audio: ${Date.now() - queryResponseAtRef.current}ms`,
@@ -819,14 +862,18 @@ export function useChatbot({
           fullVoiceMode: useFullVoice,
           pushToTalkMode: !useFullVoice,
           deviceId: selectedDeviceId,
-          enableMicInitially: useFullVoice && !prewarmOnly,
+          // Acquire the mic track during pre-warm too, so the first PTT press is an
+          // instant track un-mute instead of a (slow) first-time getUserMedia.
+          enableMicInitially: useFullVoice || prewarmOnly,
         },
       );
 
       if (!useFullVoice && !prewarmOnly) {
         webrtcService.enableMic(true);
       } else if (prewarmOnly) {
+        // Mic track is now acquired/warm — mute it until the user presses PTT.
         webrtcService.enableMic(false);
+        micWarmingRef.current = false;
       }
     } catch (error) {
       console.error("Failed to start WebRTC streaming:", error);
@@ -849,6 +896,7 @@ export function useChatbot({
       return;
     }
     prewarmInFlightRef.current = true;
+    micWarmingRef.current = true;
     try {
       await startStreaming(false, { prewarmOnly: true });
       voicePipelineActiveRef.current = true;
@@ -857,6 +905,7 @@ export function useChatbot({
       console.warn("[Voice] Pre-warm failed:", err);
     } finally {
       prewarmInFlightRef.current = false;
+      micWarmingRef.current = false;
     }
   };
 
@@ -868,6 +917,7 @@ export function useChatbot({
       isPttCapturingRef.current ||
       activeVoiceButtonRef.current === "mic" ||
       isRecording;
+    const releaseSession = pttSessionRef.current;
     activeVoiceButtonRef.current = null;
     endPttCapture();
     if (turnCompleteTimerRef.current) {
@@ -880,7 +930,7 @@ export function useChatbot({
     }
     setIsFullVoiceConnecting(false);
 
-    const finalInput = getPttSubmitText();
+    const finalInput = resolvePttSubmitText();
     if (finalInput) {
       setInputText(finalInput);
     }
@@ -893,10 +943,24 @@ export function useChatbot({
       // Let STT finalize the last words after the mic gate closes.
       await new Promise((r) => setTimeout(r, PTT_RELEASE_STT_FLUSH_MS));
 
-      const flushedInput = getPttSubmitText();
+      // A new PTT capture started while we were flushing — this release is stale.
+      // Bail out so we don't submit/clear or play "didn't catch" over the new turn.
+      if (pttSessionRef.current !== releaseSession) {
+        return;
+      }
+
+      const flushedInput = resolvePttSubmitText();
       if (flushedInput) {
         setInputText(flushedInput);
       }
+
+      console.log("[PTT] release (warm path):", {
+        finalInput,
+        flushedInput,
+        willSubmit: !skipSubmit && !!flushedInput,
+        finalRef: finalTextRef.current,
+        interimRef: lastInterimTextRef.current,
+      });
 
       clearWarmDisconnectTimer();
       warmDisconnectTimerRef.current = setTimeout(async () => {
@@ -911,6 +975,7 @@ export function useChatbot({
 
       lastInterimTextRef.current = "";
       finalTextRef.current = "";
+      pttDisplayTextRef.current = "";
 
       if (skipSubmit) return;
       if (!flushedInput) {
@@ -943,8 +1008,14 @@ export function useChatbot({
 
     lastInterimTextRef.current = "";
     finalTextRef.current = "";
+    pttDisplayTextRef.current = "";
     setIsRecording(false);
     setIsVoiceActive(false);
+
+    console.log("[PTT] release (cold path):", {
+      finalInput,
+      willSubmit: !skipSubmit && !!finalInput,
+    });
 
     if (skipSubmit) return;
     if (!finalInput) {
@@ -972,6 +1043,9 @@ export function useChatbot({
     voicePipelineActiveRef.current = true;
     clearWarmDisconnectTimer();
     interruptTTS();
+    // PTT press is a guaranteed user gesture — unlock the (pre-warmed) bot audio
+    // element so the TTS reply is audible even if autoplay was blocked at connect.
+    webrtcServiceRef.current?.resumeBotAudio();
 
     if (webrtcServiceRef.current?.getIsConnected()) {
       if (pendingPttReleaseRef.current) {
@@ -1022,6 +1096,11 @@ export function useChatbot({
   };
 
   const handlePttUp = async () => {
+    console.log("[PTT] handlePttUp:", {
+      isPttCapturing: isPttCapturingRef.current,
+      isPttConnecting,
+      connected: webrtcServiceRef.current?.getIsConnected(),
+    });
     if (!isPttCapturingRef.current) return;
     if (isPttConnecting) {
       pendingPttReleaseRef.current = true;
@@ -2346,7 +2425,13 @@ export function useChatbot({
         setTtsLoading(null);
       };
 
-      if (ttsRequestIdRef.current !== thisRequestId) {
+      const committed = ttsPathCommittedRef.current;
+      if (
+        ttsRequestIdRef.current !== thisRequestId ||
+        (committed && committed.id === thisRequestId && committed.path === "pipeline")
+      ) {
+        // Superseded by a newer request, or the pipeline won the race — don't
+        // play this REST audio (prevents double playback).
         URL.revokeObjectURL(audioUrl);
         setTtsLoading(null);
         return;
@@ -2447,19 +2532,30 @@ export function useChatbot({
 
       pipelineTtsFallbackTimerRef.current = setTimeout(() => {
         if (
-          !pipelineTtsStartedRef.current &&
-          ttsRequestIdRef.current === thisRequestId
+          pipelineTtsStartedRef.current ||
+          ttsRequestIdRef.current !== thisRequestId
         ) {
-          console.log("[TTS] Pipeline timeout — falling back to REST");
-          void playRestTTS(
-            idx,
-            speechText,
-            isQuery,
-            uuidQuestion,
-            thisRequestId,
-            restSkipInsight,
-          );
+          return;
         }
+        // Pipeline hasn't produced audio in time. Claim the REST path for this
+        // request and cancel any still-pending pipeline TTS so a late
+        // onBotStartedSpeaking cannot play a second (duplicate) summary.
+        const committed = ttsPathCommittedRef.current;
+        if (committed && committed.id === thisRequestId) {
+          if (committed.path === "pipeline") return; // pipeline already won
+        } else {
+          ttsPathCommittedRef.current = { id: thisRequestId, path: "rest" };
+        }
+        console.log("[TTS] Pipeline timeout — falling back to REST");
+        webrtc?.interruptPipelineTTS();
+        void playRestTTS(
+          idx,
+          speechText,
+          isQuery,
+          uuidQuestion,
+          thisRequestId,
+          restSkipInsight,
+        );
       }, PIPELINE_TTS_FALLBACK_MS);
 
       webrtc!.speakText(speechText, true);
