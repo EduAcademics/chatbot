@@ -77,6 +77,15 @@ export default function ChatInputArea({
   const pttBtnRef = useRef<HTMLButtonElement>(null);
   const isPttBusy = isPttCapturing || isRecording;
   const pttConnectingOnly = isPttConnecting && !isRecording;
+  // Show the send icon only when the user has TYPED text. During push-to-talk the
+  // box fills with the live transcript, so we keep the mic icon while capturing.
+  const showSend = inputText.trim().length > 0 && !isPttBusy;
+  // The upload icon only does something in these flows; hide it otherwise so the
+  // default view shows just the mic (file-upload functionality is unchanged).
+  const canUpload =
+    activeFlow === "attendance" ||
+    activeFlow === "assignment" ||
+    activeFlow === "submission";
 
   const releasePttPointer = (e: React.PointerEvent) => {
     const btn = pttBtnRef.current;
@@ -221,6 +230,7 @@ export default function ChatInputArea({
             e.target.value = "";
           }}
         />
+        {canUpload && (
         <motion.label
           htmlFor={
             activeFlow === "attendance" ||
@@ -272,6 +282,7 @@ export default function ChatInputArea({
         >
           <FiUpload />
         </motion.label>
+        )}
       </div>
 
       <div className="chatbot-input-wrap flex-1 min-w-0 relative">
@@ -304,38 +315,40 @@ export default function ChatInputArea({
         )}
       </div>
 
-      <button
-        ref={pttBtnRef}
-        type="button"
-        className={`chatbot-btn chatbot-btn-ptt w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center${
-          isPttBusy ? " ptt-active" : ""
-        }${pttConnectingOnly ? " ptt-connecting" : ""}${
-          isVoiceActive ? " ptt-voice-active" : ""
-        }`}
-        title={
-          pttConnectingOnly
-            ? "Connecting microphone…"
-            : isPttBusy
-              ? "Release to send"
-              : "Hold to speak (Push-to-Talk)"
-        }
-        aria-pressed={isPttBusy}
-        onPointerDown={handlePttPointerDown}
-        onPointerUp={handlePttPointerUp}
-        onPointerCancel={handlePttPointerCancel}
-        onContextMenu={(e) => e.preventDefault()}
-      >
-        {pttConnectingOnly ? <FiLoader /> : <FiMic />}
-      </button>
-
-      <button
-        onClick={() => void handleSubmit()}
-        className="chatbot-btn send"
-        title="Send Message"
-        disabled={isPttBusy}
-      >
-        <FiSend />
-      </button>
+      {showSend ? (
+        <button
+          onClick={() => void handleSubmit()}
+          className="chatbot-btn send"
+          title="Send Message"
+          disabled={isPttBusy}
+        >
+          <FiSend />
+        </button>
+      ) : (
+        <button
+          ref={pttBtnRef}
+          type="button"
+          className={`chatbot-btn chatbot-btn-ptt w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center${
+            isPttBusy ? " ptt-active" : ""
+          }${pttConnectingOnly ? " ptt-connecting" : ""}${
+            isVoiceActive ? " ptt-voice-active" : ""
+          }`}
+          title={
+            pttConnectingOnly
+              ? "Connecting microphone…"
+              : isPttBusy
+                ? "Release to send"
+                : "Hold to speak (Push-to-Talk)"
+          }
+          aria-pressed={isPttBusy}
+          onPointerDown={handlePttPointerDown}
+          onPointerUp={handlePttPointerUp}
+          onPointerCancel={handlePttPointerCancel}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {pttConnectingOnly ? <FiLoader /> : <FiMic />}
+        </button>
+      )}
     </div>
   );
 }

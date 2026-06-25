@@ -20,6 +20,19 @@ export function sameSttUtterance(a: string, b: string): boolean {
   return false;
 }
 
+/**
+ * True when `inner` appears as a whole-word phrase inside `outer` (e.g. Azure
+ * re-sends or revises a partial by prepending words). Word-boundary aware so
+ * short tokens like "is" inside "this" do not falsely match.
+ */
+function phraseContains(outer: string, inner: string): boolean {
+  const o = sttCoreText(outer);
+  const i = sttCoreText(inner);
+  if (!o || !i) return false;
+  if (o === i) return true;
+  return ` ${o} `.includes(` ${i} `);
+}
+
 /** True when incoming adds nothing new to existing finalized text. */
 export function isSttFinalDuplicate(
   accumulated: string,
@@ -31,6 +44,8 @@ export function isSttFinalDuplicate(
   if (!current) return false;
   if (sameSttUtterance(current, next)) return true;
   if (current.endsWith(next)) return true;
+  // Incoming is already wholly contained in what we have — adds nothing new.
+  if (phraseContains(current, next)) return true;
   return false;
 }
 
@@ -52,6 +67,10 @@ export function mergePttFinalSegment(
   if (current === next || current.endsWith(next)) return current;
   if (next.startsWith(current)) return next;
   if (current.startsWith(next)) return current;
+  // Revision that prepends/wraps existing text (e.g. "my role" → "what is my role").
+  if (next.endsWith(current)) return next;
+  if (phraseContains(next, current)) return next;
+  if (phraseContains(current, next)) return current;
   return `${current} ${next}`;
 }
 
@@ -71,6 +90,10 @@ export function buildPttLiveDisplay(
   if (f.endsWith(i)) return f;
   if (i.startsWith(f)) return i;
   if (f.startsWith(i)) return f;
+  // Interim revises by prepending/wrapping the finalized text.
+  if (i.endsWith(f)) return i;
+  if (phraseContains(i, f)) return i;
+  if (phraseContains(f, i)) return f;
   return `${f} ${i}`;
 }
 
