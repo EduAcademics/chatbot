@@ -49,14 +49,7 @@ export default function ChatHeaderWithMenu(props: ChatHeaderWithMenuProps) {
   } = props;
   return (
     <div className="chatbot-header-section">
-      <h1 className="chatbot-header-title">
-        <img
-          src="/sofisto-img.png"
-          alt="Sofisto Robot"
-          className="robot-icon"
-        />
-        Chat with Sofisto
-      </h1>
+      <h1 className="chatbot-header-title">Sofisto</h1>
       <div className="three-dot-menu-container" ref={menuRef}>
         <motion.button
           onClick={() => setIsMenuOpen(!isMenuOpen)}

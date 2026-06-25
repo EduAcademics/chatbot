@@ -2,9 +2,8 @@
  * Chat message list: attendance step indicator, message map (user/bot, attendance table, leave approval, etc.), processing indicator.
  * Extracted from AudioStreamerChatBot to reduce main file size.
  */
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
-import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
 import VisualizationRenderer from "./VisualizationRenderer";
 import { MarksEntryTable } from "./MarksEntryTable";
@@ -209,8 +208,22 @@ export default function ChatMessageList(props: ChatMessageListProps) {
       {/* Removed separate editable component - editing is now inline in the table */}
 
       <div className="chatbot-messages">
+        <AnimatePresence initial={false}>
         {chatHistory.map((msg, idx) => (
-          <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
+          <motion.div
+            key={idx}
+            className={`chatbot-msg-row ${msg.type}`}
+            initial={
+              msg.type === "user"
+                ? { opacity: 0, y: 16, x: 12 }
+                : { opacity: 0, y: 16, x: -12 }
+            }
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            transition={{
+              duration: 0.35,
+              ease: [0.25, 0.46, 0.45, 0.94],
+            }}
+          >
             {msg.type === "user" ? (
               <>
                 <span className="chatbot-msg-bubble user">{msg.text}</span>
@@ -220,10 +233,28 @@ export default function ChatMessageList(props: ChatMessageListProps) {
               </>
             ) : (
               <>
-                {/* <span className="chatbot-msg-icon">
-                  <FiCpu />
-                </span> */}
-                <div className="chatbot-msg-bubble bot relative">
+                <div className="bot-msg-group">
+                  <div className="bot-msg-meta">
+                    <div className="bot-avatar">
+                      <img src="/sofisto-img.png" alt="" />
+                    </div>
+                    <span className="bot-meta-text">
+                      <span className="bot-meta-name">Sofisto</span>
+                    </span>
+                  </div>
+                <div className={`chatbot-msg-bubble bot relative ${
+                  (msg as any).isProcessing ||
+                  msg.courseProgress ||
+                  msg.attendanceData ||
+                  msg.leaveApproval ||
+                  msg.marksEntry ||
+                  msg.health_card_sections ||
+                  msg.healthCardData ||
+                  msg.buttons?.length ||
+                  msg.visualization
+                    ? "has-rich-content"
+                    : ""
+                }`}>
                   {/* Processing indicator for image processing */}
                   {(msg as any).isProcessing && (
                     <div className="flex items-center gap-2 mb-2 p-2 rounded-md bg-gray-200 border border-gray-300">
@@ -1528,40 +1559,44 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                     </>
                   )}
                 </div>
+                </div>
               </>
             )}
-          </div>
+          </motion.div>
         ))}
+        </AnimatePresence>
+        <AnimatePresence>
         {isProcessing && (
-          <div className="chatbot-msg-row bot">
-            {/* <span className="chatbot-msg-icon">
-              <FiCpu />
-            </span> */}
+          <motion.div
+            className="chatbot-msg-row bot"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.3 }}
+          >
+            <div className="bot-msg-group">
+              <div className="bot-msg-meta">
+                <div className="bot-avatar">
+                  <img src="/sofisto-img.png" alt="" />
+                </div>
+                <span className="bot-meta-text">
+                  <span className="bot-meta-name">Sofisto</span>
+                </span>
+              </div>
             <div className="chatbot-msg-bubble bot processing-bubble flex">
               <div className="processing-indicator flex gap-2 items-center justify-center">
-                <motion.div
-                  className="cloud-thinking-icon"
-                  animate={{
-                    scale: [1, 1.2, 1],
-                    opacity: [0.7, 1, 0.7],
-                    y: [0, -5, 0],
-                  }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                >
-                  <SlBubbles />
-                </motion.div>
-                {/* <div className="animate-bounce">
-                  <SlBubbles  />
-                </div> */}
-                <span className="thinking-text italic">Thinking...</span>
+                <div className="typing-dots" aria-label="Thinking">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <span className="thinking-text">Thinking</span>
               </div>
             </div>
-          </div>
+            </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </div>
     </div>
   );

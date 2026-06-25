@@ -133,6 +133,8 @@ export interface UseChatbotReturn {
   isFullVoiceConnecting: boolean;
   setFullVoiceMode: (v: boolean) => void;
   isVoiceActive: boolean;
+  voiceFinalText: string;
+  voiceInterimText: string;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
   startStreaming: (useFullVoice?: boolean) => Promise<void>;
   stopStreaming: (skipSubmit?: boolean, keepWarmConnection?: boolean) => Promise<void>;
@@ -199,6 +201,8 @@ export function useChatbot({
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [inputText, setInputText] = useState("");
+  const [voiceFinalText, setVoiceFinalText] = useState("");
+  const [voiceInterimText, setVoiceInterimText] = useState("");
   const [chatHistory, setChatHistory] = useState<
     {
       type: "user" | "bot";
@@ -528,9 +532,11 @@ export function useChatbot({
   };
 
   const startStreaming = async (useFullVoice = false) => {
-    // Step 2: AUDIO BUTTON click handler should set ref for immediate access
-    activeVoiceButtonRef.current = "audio";
-    console.log("[Voice] Audio button - set mode to audio");
+    activeVoiceButtonRef.current = useFullVoice ? "audio" : "mic";
+    console.log(
+      `[Voice] ${useFullVoice ? "Full voice" : "Push-to-talk"} — mode:`,
+      activeVoiceButtonRef.current,
+    );
     try {
       clearWarmDisconnectTimer();
       if (useFullVoice) {
@@ -541,6 +547,8 @@ export function useChatbot({
       // Reset text tracking for new recording session
       lastInterimTextRef.current = "";
       finalTextRef.current = "";
+      setVoiceFinalText("");
+      setVoiceInterimText("");
 
       // Create WebRTC service instance
       const existingService = webrtcServiceRef.current;
@@ -581,22 +589,20 @@ export function useChatbot({
               }
 
               if (isFinal) {
-                // Final result: add to accumulated final text and clear interim
                 finalTextRef.current = finalTextRef.current
                   ? finalTextRef.current + " " + trimmed
                   : trimmed;
                 lastInterimTextRef.current = "";
-
-                // Update input with final text only (no interim)
+                setVoiceFinalText(finalTextRef.current);
+                setVoiceInterimText("");
                 setInputText(finalTextRef.current);
               } else {
-                // Interim result: show final text + current interim
                 lastInterimTextRef.current = trimmed;
                 const displayText = finalTextRef.current
                   ? finalTextRef.current + " " + trimmed
                   : trimmed;
-
-                // Update input in real-time with interim
+                setVoiceFinalText(finalTextRef.current);
+                setVoiceInterimText(trimmed);
                 setInputText(displayText);
               }
 
@@ -735,8 +741,19 @@ export function useChatbot({
       webrtcServiceRef.current = null;
     }
 
+    const messageToSubmit = [
+      finalTextRef.current,
+      lastInterimTextRef.current,
+    ]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
     lastInterimTextRef.current = "";
     finalTextRef.current = "";
+    setVoiceFinalText("");
+    setVoiceInterimText("");
     setIsRecording(false);
     setIsVoiceActive(false);
 
@@ -744,7 +761,12 @@ export function useChatbot({
 
     isVoiceTriggeredRequestRef.current = true;
     try {
-      await handleSubmit();
+      if (messageToSubmit) {
+        setInputText(messageToSubmit);
+        await handleSubmit(messageToSubmit);
+      } else {
+        await handleSubmit();
+      }
     } finally {
       isVoiceTriggeredRequestRef.current = false;
     }
@@ -3089,6 +3111,8 @@ export function useChatbot({
     isFullVoiceConnecting,
     setFullVoiceMode,
     isVoiceActive,
+    voiceFinalText,
+    voiceInterimText,
     handleSubmit,
     startStreaming,
     stopStreaming,

@@ -1,9 +1,10 @@
 /**
- * Chat input area: file upload, text input, voice buttons, send.
- * Extracted from AudioStreamerChatBot to reduce main file size.
+ * Chat input area: text input, push-to-talk mic, send on typed text.
  */
-import { motion } from "framer-motion";
-import { FiLoader, FiMic, FiSend, FiUpload } from "react-icons/fi";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { FiMic, FiSend } from "react-icons/fi";
+import PushToTalkOverlay, { type PttPhase } from "./PushToTalkOverlay";
 import type { FlowType } from "./types";
 import type {
   AttendanceFlowCallbacks,
@@ -23,6 +24,8 @@ export interface ChatInputAreaProps {
   isFullVoiceConnecting: boolean;
   setFullVoiceMode: (v: boolean) => void;
   isVoiceActive: boolean;
+  voiceFinalText: string;
+  voiceInterimText: string;
   handleSubmit: (overrideMessage?: string) => Promise<void>;
   startStreaming: (useFullVoice?: boolean) => Promise<void>;
   stopStreaming: (
@@ -54,10 +57,12 @@ export default function ChatInputArea({
   inputText,
   setInputText,
   isRecording,
-  fullVoiceMode,
+  fullVoiceMode: _fullVoiceMode,
   isFullVoiceConnecting,
-  setFullVoiceMode,
-  isVoiceActive: _isVoiceActive,
+  setFullVoiceMode: _setFullVoiceMode,
+  isVoiceActive,
+  voiceFinalText,
+  voiceInterimText,
   handleSubmit,
   startStreaming,
   stopStreaming,
@@ -78,213 +83,317 @@ export default function ChatInputArea({
 }: ChatInputAreaProps) {
   const isAttendanceFlow =
     activeFlow === "attendance" || activeFlow === "voice_attendance";
+  const [isMicHeld, setIsMicHeld] = useState(false);
+  const [isSendingVoice, setIsSendingVoice] = useState(false);
+  const [overlayContainer, setOverlayContainer] = useState<HTMLElement | null>(
+    null,
+  );
+  const [snapshotText, setSnapshotText] = useState({
+    final: "",
+    interim: "",
+  });
+
+  const isPtTSessionRef = useRef(false);
+  const endInProgressRef = useRef(false);
+  const releaseListenerRef = useRef<(() => void) | null>(null);
+
+  const showSend = inputText.trim().length > 0 && !isMicHeld && !isSendingVoice;
+  const showPttOverlay = isMicHeld || isSendingVoice;
+
+  const pttPhase: PttPhase = isSendingVoice
+    ? "sending"
+    : isRecording
+      ? "listening"
+      : "connecting";
+
+  const overlayFinalText = isSendingVoice
+    ? snapshotText.final
+    : voiceFinalText;
+  const overlayInterimText = isSendingVoice
+    ? snapshotText.interim
+    : voiceInterimText;
+
+  useEffect(() => {
+    setOverlayContainer(
+      document.querySelector(".chatbot-container") as HTMLElement | null,
+    );
+  }, []);
+
+  const detachReleaseListeners = useCallback(() => {
+    if (releaseListenerRef.current) {
+      releaseListenerRef.current();
+      releaseListenerRef.current = null;
+    }
+  }, []);
+
+  const endPushToTalk = useCallback(async () => {
+    if (!isMicHeld || endInProgressRef.current) return;
+    detachReleaseListeners();
+    endInProgressRef.current = true;
+    setIsMicHeld(false);
+
+    setSnapshotText({
+      final: voiceFinalText,
+      interim: voiceInterimText,
+    });
+    setIsSendingVoice(true);
+
+    await new Promise((r) => setTimeout(r, 320));
+
+    try {
+      await stopStreaming(false);
+    } finally {
+      isPtTSessionRef.current = false;
+      await new Promise((r) => setTimeout(r, 450));
+      setIsSendingVoice(false);
+      setSnapshotText({ final: "", interim: "" });
+      endInProgressRef.current = false;
+    }
+  }, [
+    detachReleaseListeners,
+    isMicHeld,
+    stopStreaming,
+    voiceFinalText,
+    voiceInterimText,
+  ]);
+
+  const beginPushToTalk = useCallback(async () => {
+    if (isMicHeld || isSendingVoice || isFullVoiceConnecting) return;
+
+    isPtTSessionRef.current = true;
+    setIsMicHeld(true);
+    setInputText("");
+    activeVoiceButtonRef.current = "mic";
+
+    const onRelease = () => {
+      void endPushToTalk();
+    };
+
+    window.addEventListener("pointerup", onRelease);
+    window.addEventListener("pointercancel", onRelease);
+    releaseListenerRef.current = () => {
+      window.removeEventListener("pointerup", onRelease);
+      window.removeEventListener("pointercancel", onRelease);
+    };
+
+    try {
+      await startStreaming(false);
+    } catch {
+      detachReleaseListeners();
+      isPtTSessionRef.current = false;
+      setIsMicHeld(false);
+      activeVoiceButtonRef.current = null;
+    }
+  }, [
+    activeVoiceButtonRef,
+    detachReleaseListeners,
+    endPushToTalk,
+    isFullVoiceConnecting,
+    isMicHeld,
+    isSendingVoice,
+    setInputText,
+    startStreaming,
+  ]);
+
+  useEffect(() => {
+    const onWindowBlur = () => {
+      if (isMicHeld) void endPushToTalk();
+    };
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      detachReleaseListeners();
+    };
+  }, [detachReleaseListeners, endPushToTalk, isMicHeld]);
+
+  const canUpload =
+    activeFlow === "attendance" ||
+    activeFlow === "assignment" ||
+    activeFlow === "submission";
+
+  const placeholder = isAttendanceFlow
+    ? "Class info or student names…"
+    : "Message";
+
   return (
-    <div
-      className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}
-    >
-      <div className="relative">
-        <input
-          type="file"
-          accept={
-            activeFlow === "assignment" || activeFlow === "submission"
-              ? ".pdf,.doc,.docx,image/*"
-              : ".xlsx,.xls,.csv,image/*"
-          }
-          id="file-upload-input"
-          className="hidden"
-          disabled={
-            activeFlow !== "attendance" &&
-            activeFlow !== "assignment" &&
-            activeFlow !== "submission"
-          }
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
+    <>
+      {showPttOverlay && (
+        <PushToTalkOverlay
+          phase={pttPhase}
+          finalText={overlayFinalText}
+          interimText={overlayInterimText}
+          isVoiceActive={isVoiceActive}
+          containerEl={overlayContainer}
+        />
+      )}
 
-            if (activeFlow === "attendance") {
-              setChatHistory((prev) => [
-                ...prev,
-                {
-                  type: "user",
-                  text: `Uploaded ${
-                    file.type.startsWith("image/") ? "image" : "file"
-                  }: ${file.name}`,
-                },
-              ]);
+      <div
+        className={`chatbot-input-wrapper ${showPttOverlay ? "chatbot-input-wrapper--hidden" : ""}`}
+      >
+        <div
+          className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}
+        >
+          <input
+            type="file"
+            accept={
+              activeFlow === "assignment" || activeFlow === "submission"
+                ? ".pdf,.doc,.docx,image/*"
+                : ".xlsx,.xls,.csv,image/*"
+            }
+            id="file-upload-input"
+            className="sr-only"
+            disabled={!canUpload}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
 
-              try {
-                if (file.type.startsWith("image/")) {
-                  const existingClassInfo =
-                    classInfo ||
-                    pendingClassInfo ||
-                    attendanceFlowState.classInfo;
-
-                  if (existingClassInfo) {
-                    await handleAttendanceImageUpload({
-                      file,
-                      sessionId: sessionId || userId || "",
-                      userId,
-                      classInfo: existingClassInfo,
-                      isVoiceTriggered: false,
-                      callbacks: getAttendanceFlowCallbacks(),
-                    });
-                  } else {
-                    setPendingImageFile(file);
-                    setShowClassInfoModal(true);
-                  }
-                } else if (attendanceStep === "student_details") {
-                  const result = await uploadFile(file);
-                  setChatHistory((prev) => [
-                    ...prev,
-                    {
-                      type: "bot",
-                      text: result.message || "File processing completed.",
-                    },
-                  ]);
-                } else if (attendanceStep === "class_info") {
-                  setChatHistory((prev) => [
-                    ...prev,
-                    {
-                      type: "bot",
-                      text: "Please provide class information first before uploading student data files.",
-                    },
-                  ]);
-                }
-              } catch (err) {
+              if (activeFlow === "attendance") {
                 setChatHistory((prev) => [
                   ...prev,
                   {
-                    type: "bot",
-                    text: `File upload failed: ${(err as Error).message}`,
+                    type: "user",
+                    text: `Uploaded ${
+                      file.type.startsWith("image/") ? "image" : "file"
+                    }: ${file.name}`,
                   },
                 ]);
-              }
-            } else if (activeFlow === "assignment") {
-              await handleAssignmentFileUpload({
-                file,
-                sessionId,
-                userId,
-                getErpContext,
-                appendBotMessage: (msg) =>
-                  setChatHistory((prev) => [...prev, msg]),
-              });
-            } else if (activeFlow === "submission") {
-              await handleSubmissionFileUpload({
-                file,
-                sessionId,
-                userId,
-                getErpContext,
-                isVoiceTriggered: activeVoiceButtonRef.current !== null,
-                appendBotMessage: (msg) =>
-                  setChatHistory((prev) => [...prev, msg]),
-                playTTS: (idx, text) => void handlePlayTTS(idx, text, true),
-              });
-            }
-            e.target.value = "";
-          }}
-        />
-        <motion.label
-          htmlFor={
-            activeFlow === "attendance" ||
-            activeFlow === "assignment" ||
-            activeFlow === "submission"
-              ? "file-upload-input"
-              : undefined
-          }
-          className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${
-            activeFlow === "attendance" ||
-            activeFlow === "assignment" ||
-            activeFlow === "submission"
-              ? "cursor-pointer"
-              : "cursor-not-allowed"
-          }`}
-          whileHover={
-            activeFlow === "attendance" ||
-            activeFlow === "assignment" ||
-            activeFlow === "submission"
-              ? { scale: 1.08, y: -2 }
-              : {}
-          }
-          whileTap={
-            activeFlow === "attendance" ||
-            activeFlow === "assignment" ||
-            activeFlow === "submission"
-              ? { scale: 0.95 }
-              : {}
-          }
-          title={
-            activeFlow === "attendance"
-              ? "Upload Excel or Image"
-              : activeFlow === "assignment"
-                ? "Upload Assignment File (PDF, DOCX, Image)"
-                : activeFlow === "submission"
-                  ? "Upload Submission File"
-                  : "Enable assignment or attendance flow to upload"
-          }
-          onClick={(e) => {
-            if (
-              activeFlow !== "attendance" &&
-              activeFlow !== "assignment" &&
-              activeFlow !== "submission"
-            ) {
-              e.preventDefault();
-              e.stopPropagation();
-            }
-          }}
-        >
-          <FiUpload />
-        </motion.label>
-      </div>
 
-      <input
-        type="text"
-        placeholder={
-          fullVoiceMode
-            ? "Speak naturally — I'll respond when you finish..."
-            : isAttendanceFlow
-              ? "Class info, student names, or type here..."
-              : "Ask me anything!"
-        }
-        value={inputText}
-        onChange={(e) => setInputText(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && !isRecording && handleSubmit()}
-        className="chatbot-input text-base sm:text-lg px-3 py-2 sm:px-4 sm:py-3 min-h-[40px] sm:min-h-[48px]"
-        disabled={isRecording && fullVoiceMode}
-      />
-      <button
-        onClick={() => {
-          if (isFullVoiceConnecting) return;
-          activeVoiceButtonRef.current = "audio";
-          if (fullVoiceMode) {
-            setFullVoiceMode(false);
-            stopStreaming(true, true);
-          } else {
-            setFullVoiceMode(true);
-            startStreaming(true);
-          }
-        }}
-        className={`chatbot-btn chatbot-btn-full-voice w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center ${
-          fullVoiceMode ? " full-voice-active" : ""
-        } ${isFullVoiceConnecting ? " full-voice-connecting" : ""}`}
-        title={
-          isFullVoiceConnecting
-            ? "Connecting Full Voice Mode..."
-            : fullVoiceMode
-            ? "Exit Full Voice Mode (Hands-Free)"
-            : "Full Voice Mode — Mic always on, auto turn detection"
-        }
-        disabled={isFullVoiceConnecting}
-      >
-        {isFullVoiceConnecting ? <FiLoader /> : <FiMic />}
-      </button>
-      <button
-        onClick={() => handleSubmit()}
-        className="chatbot-btn send"
-        title="Send Message"
-        disabled={isRecording && fullVoiceMode}
-      >
-        <FiSend />
-      </button>
-    </div>
+                try {
+                  if (file.type.startsWith("image/")) {
+                    const existingClassInfo =
+                      classInfo ||
+                      pendingClassInfo ||
+                      attendanceFlowState.classInfo;
+
+                    if (existingClassInfo) {
+                      await handleAttendanceImageUpload({
+                        file,
+                        sessionId: sessionId || userId || "",
+                        userId,
+                        classInfo: existingClassInfo,
+                        isVoiceTriggered: false,
+                        callbacks: getAttendanceFlowCallbacks(),
+                      });
+                    } else {
+                      setPendingImageFile(file);
+                      setShowClassInfoModal(true);
+                    }
+                  } else if (attendanceStep === "student_details") {
+                    const result = await uploadFile(file);
+                    setChatHistory((prev) => [
+                      ...prev,
+                      {
+                        type: "bot",
+                        text: result.message || "File processing completed.",
+                      },
+                    ]);
+                  } else if (attendanceStep === "class_info") {
+                    setChatHistory((prev) => [
+                      ...prev,
+                      {
+                        type: "bot",
+                        text: "Please provide class information first before uploading student data files.",
+                      },
+                    ]);
+                  }
+                } catch (err) {
+                  setChatHistory((prev) => [
+                    ...prev,
+                    {
+                      type: "bot",
+                      text: `File upload failed: ${(err as Error).message}`,
+                    },
+                  ]);
+                }
+              } else if (activeFlow === "assignment") {
+                await handleAssignmentFileUpload({
+                  file,
+                  sessionId,
+                  userId,
+                  getErpContext,
+                  appendBotMessage: (msg) =>
+                    setChatHistory((prev) => [...prev, msg]),
+                });
+              } else if (activeFlow === "submission") {
+                await handleSubmissionFileUpload({
+                  file,
+                  sessionId,
+                  userId,
+                  getErpContext,
+                  isVoiceTriggered: activeVoiceButtonRef.current !== null,
+                  appendBotMessage: (msg) =>
+                    setChatHistory((prev) => [...prev, msg]),
+                  playTTS: (idx, text) => void handlePlayTTS(idx, text, true),
+                });
+              }
+              e.target.value = "";
+            }}
+          />
+
+          <div className="chatbot-input-row">
+            <div className="chatbot-input-pill">
+              <input
+                type="text"
+                placeholder={placeholder}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && !isRecording && handleSubmit()
+                }
+                className="chatbot-input"
+              />
+            </div>
+
+            <div className="chatbot-action-slot">
+              <AnimatePresence initial={false}>
+                {showSend ? (
+                  <motion.button
+                    key="send"
+                    onClick={() => handleSubmit()}
+                    className="chatbot-action-btn send"
+                    initial={{ opacity: 0, scale: 0.88, rotate: -30 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.88, rotate: 30 }}
+                    transition={{ duration: 0.14, ease: [0.32, 0.72, 0, 1] }}
+                    whileHover={{
+                      scale: 1.05,
+                      transition: { duration: 0.1 },
+                    }}
+                    whileTap={{ scale: 0.92, transition: { duration: 0.07 } }}
+                    title="Send message"
+                  >
+                    <FiSend size={22} />
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    key="mic"
+                    className={`chatbot-action-btn mic ${isMicHeld ? "mic-held" : ""}`}
+                    initial={{ opacity: 0, scale: 0.88 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.88 }}
+                    transition={{ duration: 0.14, ease: [0.32, 0.72, 0, 1] }}
+                    whileHover={{
+                      scale: 1.05,
+                      transition: { duration: 0.1 },
+                    }}
+                    whileTap={{ scale: 0.92, transition: { duration: 0.07 } }}
+                    title="Hold to speak"
+                    disabled={isFullVoiceConnecting || isSendingVoice}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      void beginPushToTalk();
+                    }}
+                    onContextMenu={(e) => e.preventDefault()}
+                    style={{ touchAction: "none" }}
+                  >
+                    <FiMic size={22} />
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

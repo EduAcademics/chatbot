@@ -70,21 +70,28 @@ function App() {
 
   if (!isAuthResolved || isAutoFetching) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f8f6f3] via-[#faf8f6] to-[#efeae4] px-4 py-6">
+      <div className="h-dvh max-h-dvh overflow-hidden flex items-center justify-center bg-[#f5f5f7] px-4">
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
+          initial={{ opacity: 0, scale: 0.92 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.4 }}
-          className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/60 px-8 py-6 md:px-10 md:py-8 flex flex-col items-center gap-4"
+          className="bg-white/90 backdrop-blur-2xl rounded-3xl shadow-[0_8px_32px_rgba(60,64,67,0.12)] border border-black/[0.06] px-8 py-6 md:px-10 md:py-8 flex flex-col items-center gap-4"
         >
-          <img 
-            src="/sofisto-img.png" 
-            alt="Sofisto Robot" 
+          <motion.img
+            src="/sofisto-img.png"
+            alt="Sofisto Robot"
             className="w-16 h-16 md:w-20 md:h-20 object-contain"
+            animate={{ y: [0, -6, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
           />
-          <p className="text-[#8B7355] text-sm md:text-base font-medium">
+          <p className="text-[#5f6368] text-sm md:text-base font-medium">
             Preparing your chat experience...
           </p>
+          <div className="typing-dots">
+            <span />
+            <span />
+            <span />
+          </div>
         </motion.div>
       </div>
     );
@@ -141,7 +148,7 @@ const MainLayout = ({
   onLogout: () => void;
 }) => {
   return (
-    <>
+    <div className="h-dvh max-h-dvh overflow-hidden relative flex flex-col bg-[#f5f5f7]">
       <NavigationButtons onLogout={onLogout} />
       {!userId ? (
         <UserInfoBox
@@ -156,20 +163,20 @@ const MainLayout = ({
           loginId={loginId}
         />
       )}
-    </>
+    </div>
   );
 };
 
 // Navigation buttons component
 const NavigationButtons = ({ onLogout }: { onLogout: () => void }) => {
   return (
-    <div className="absolute top-4 right-4 z-10 flex gap-2.5">
+    <div className="absolute top-[calc(0.75rem+env(safe-area-inset-top,0px))] right-3 z-50 flex gap-2">
       <motion.button
         onClick={onLogout}
-        className="w-11 h-11 bg-[#C9A882] text-white border-none rounded-full cursor-pointer flex items-center justify-center text-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)] transition-all hover:scale-110 hover:bg-red-100 hover:text-red-600 hover:shadow-[0_4px_12px_rgba(220,38,38,0.2)]"
+        className="w-10 h-10 bg-white text-[#374151] border-none rounded-full cursor-pointer flex items-center justify-center text-lg shadow-[0_1px_4px_rgba(0,0,0,0.08)] transition-all hover:scale-105 hover:bg-red-50 hover:text-red-600"
         title="Logout"
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.95 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.92 }}
       >
         <FiLogOut />
       </motion.button>

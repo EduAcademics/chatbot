@@ -53,15 +53,15 @@ const UserInfoBox = ({
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f8f6f3] via-[#faf8f6] to-[#efeae4] px-4 py-6 md:py-10 relative overflow-hidden">
+    <div className="h-full flex-1 min-h-0 flex flex-col items-center justify-center bg-[#f8f9fc] px-4 relative overflow-hidden">
       {/* Sofisto AI Header */}
-      <div className="absolute top-4 left-4 z-10 flex items-center gap-3 bg-[#C9A882] px-4 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
-        <img 
-          src="/sofisto-img.png" 
-          alt="Sofisto" 
-          className="w-10 h-10 md:w-12 md:h-12 object-contain"
+      <div className="absolute top-[calc(0.75rem+env(safe-area-inset-top,0px))] left-3 z-10 flex items-center gap-2.5 bg-white/90 backdrop-blur-md px-3.5 py-2 rounded-2xl shadow-[0_2px_12px_rgba(60,64,67,0.08)] border border-black/[0.06]">
+        <img
+          src="/sofisto-img.png"
+          alt="Sofisto"
+          className="w-9 h-9 md:w-10 md:h-10 object-contain"
         />
-        <h2 className="m-0 text-[clamp(0.9rem,2vw,1.1rem)] text-white font-semibold tracking-[-0.3px]">
+        <h2 className="m-0 text-[clamp(0.9rem,2vw,1.05rem)] text-[#1f1f1f] font-semibold tracking-[-0.3px]">
           Sofisto AI
         </h2>
       </div>
@@ -69,7 +69,7 @@ const UserInfoBox = ({
       {/* Animated background elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div
-          className="absolute top-1/4 left-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-[#D4A574]/20 to-[#C9A882]/10 rounded-full blur-3xl"
+          className="absolute top-1/4 left-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-violet-200/30 to-purple-100/20 rounded-full blur-3xl"
           animate={{
             x: [0, 30, 0],
             y: [0, -20, 0],
@@ -82,7 +82,7 @@ const UserInfoBox = ({
           }}
         />
         <motion.div
-          className="absolute bottom-1/4 right-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-[#C9A882]/20 to-[#D4A574]/10 rounded-full blur-3xl"
+          className="absolute bottom-1/4 right-1/4 w-64 h-64 md:w-96 md:h-96 bg-gradient-to-br from-amber-100/30 to-orange-50/20 rounded-full blur-3xl"
           animate={{
             x: [0, -30, 0],
             y: [0, 20, 0],
@@ -102,7 +102,7 @@ const UserInfoBox = ({
         initial={{ opacity: 0, y: 25, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
-        className="w-full max-w-md bg-white/75 backdrop-blur-2xl rounded-3xl md:rounded-[2rem] shadow-2xl border border-white/60 px-6 py-10 md:px-10 md:py-12 z-10"
+        className="w-full max-w-md bg-white/90 backdrop-blur-2xl rounded-3xl shadow-[0_8px_32px_rgba(60,64,67,0.12)] border border-black/[0.06] px-6 py-10 md:px-10 md:py-12 z-10"
       >
         {/* Header */}
         <div className="text-center mb-5">
@@ -118,10 +118,10 @@ const UserInfoBox = ({
               className="w-full h-full object-contain"
             />
           </motion.div>
-          <h2 className="text-2xl md:text-3xl font-semibold bg-gradient-to-r from-[#D4A574] via-[#C9A882] to-[#D4A574] bg-clip-text text-transparent mb-1.5">
-            Welcome to <span className="text-[#b5895b]">Sofisto</span>
+          <h2 className="text-2xl md:text-3xl font-semibold text-[#1f1f1f] mb-1.5">
+            Welcome to <span className="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">Sofisto</span>
           </h2>
-          <p className="text-[#7a6a58] text-sm md:text-base">
+          <p className="text-[#5f6368] text-sm md:text-base">
             Enter your Admission No / Employee ID to continue
           </p>
         </div>
@@ -151,16 +151,16 @@ const UserInfoBox = ({
             }
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            className={`w-full pl-4 pr-10 py-3 rounded-xl text-base outline-none transition-all
+            className={`w-full pl-4 pr-10 py-3.5 rounded-2xl text-base outline-none transition-all
               ${
                 error
-                  ? "border border-red-500 focus:ring-2 focus:ring-red-300"
+                  ? "border border-red-400 focus:ring-2 focus:ring-red-200"
                   : isValid
-                  ? "border border-green-500 focus:ring-2 focus:ring-green-200"
+                  ? "border border-emerald-400 focus:ring-2 focus:ring-emerald-100"
                   : isFocused
-                  ? "border border-[#d4a574] focus:ring-2 focus:ring-[#d4a574]/30"
-                  : "border border-[#e5ded2]"
-              } bg-white/70 text-[#5a4a3a] placeholder:text-[#a89c8e] shadow-inner`}
+                  ? "border border-violet-300 focus:ring-2 focus:ring-violet-100"
+                  : "border border-black/[0.08]"
+              } bg-[#f1f3f4] text-[#1f1f1f] placeholder:text-[#5f6368]/60`}
           />
         </div>
 
@@ -176,11 +176,11 @@ const UserInfoBox = ({
           whileTap={
             loginId.trim() && !isLoading && isValid ? { scale: 0.97 } : undefined
           }
-          className={`w-full py-3.5 rounded-xl font-semibold text-lg transition-all shadow-md flex items-center justify-center
+          className={`w-full py-3.5 rounded-2xl font-semibold text-base transition-all shadow-md flex items-center justify-center
             ${
               loginId.trim() && !isLoading && isValid
-                ? "bg-gradient-to-r from-[#d4a574] to-[#c69457] text-white hover:shadow-lg"
-                : "bg-[#e9dfd2] text-white cursor-not-allowed"
+                ? "bg-gradient-to-r from-violet-600 to-purple-600 text-white hover:shadow-lg hover:shadow-violet-200"
+                : "bg-[#e8eaed] text-[#9aa0a6] cursor-not-allowed"
             }`}
         >
           {isLoading ? (

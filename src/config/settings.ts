@@ -12,7 +12,7 @@ export const API_BASE_URL =
   env.VITE_API_BASE_URL ||
   env.VITE_LIVE_URL ||
   env.VITE_LOCAL_URL ||
-  "https://aiapi.schoolforschools.ai";
+  "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
 // ERP API (course progress, class sections, etc.)

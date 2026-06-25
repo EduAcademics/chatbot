@@ -5,7 +5,7 @@
 /* src/index.css */
 
 :root {
-  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Google Sans', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.6;
   font-weight: 400;
   color-scheme: light;
@@ -14,12 +14,46 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Gemini-inspired design tokens */
+  --gem-bg: #f5f5f7;
+  --gem-surface: #ffffff;
+  --gem-surface-elevated: rgba(255, 255, 255, 0.92);
+  --gem-border: rgba(60, 64, 67, 0.08);
+  --gem-text: #1f1f1f;
+  --gem-text-secondary: #5f6368;
+  --gem-accent: #8b5cf6;
+  --gem-accent-soft: #a78bfa;
+  --gem-accent-warm: #d4a574;
+  --gem-user-bubble: #f0f4ff;
+  --gem-bot-bubble: #ffffff;
+  --gem-input-bg: #f1f3f4;
+  --gem-shadow-sm: 0 1px 3px rgba(60, 64, 67, 0.08);
+  --gem-shadow-md: 0 4px 16px rgba(60, 64, 67, 0.1);
+  --gem-shadow-lg: 0 8px 32px rgba(60, 64, 67, 0.12);
+  --gem-radius-pill: 28px;
+  --gem-radius-bubble: 20px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 body {
-  margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  background: var(--gem-bg);
 }
 
 h1, h2, h3 {
@@ -34,5 +68,40 @@ h1, h2, h3 {
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Shared typing dots (loading + chat) */
+.typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+}
+
+.typing-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6 0%, #d4a574 100%);
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
   }
 }
