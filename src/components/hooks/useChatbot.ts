@@ -347,8 +347,19 @@ export function useChatbot({
   const [isPttConnecting, setIsPttConnecting] = useState<boolean>(false);
   const [isPttCapturing, setIsPttCapturing] = useState<boolean>(false);
   const isPttCapturingRef = useRef(false);
+  // True from PTT press through the post-release STT-flush window until the turn
+  // is finalized/submitted. Used to drop STALE STT segments that Azure emits
+  // after release (common while its recognizer is still warming up on the first
+  // turns) — those would otherwise re-fill the input box and interrupt the
+  // reply's TTS that already started playing.
+  const pttTurnActiveRef = useRef(false);
   const [isVoiceActive, setIsVoiceActive] = useState<boolean>(false); // Voice activity indicator
   const currentTTSAudioRef = useRef<HTMLAudioElement | null>(null); // Track current TTS audio for interruption
+  // Single reusable <audio> element for REST TTS. iOS/Android WebViews only allow
+  // programmatic play() on an element that was first played inside a user gesture,
+  // so we prime ONE element on PTT press and reuse it for every REST TTS playback.
+  const ttsAudioElRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAudioUnlockedRef = useRef<boolean>(false);
   const ttsRequestIdRef = useRef<number>(0); // Track TTS request ID to cancel stale requests
   const warmDisconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -389,6 +400,7 @@ export function useChatbot({
     lastInterimTextRef.current = "";
     pttDisplayTextRef.current = "";
     pttSessionRef.current += 1;
+    pttTurnActiveRef.current = true;
     setInputText("");
     isPttCapturingRef.current = true;
     setIsPttCapturing(true);
@@ -557,6 +569,50 @@ export function useChatbot({
   useEffect(() => {
     classInfoRef.current = classInfo;
   }, [classInfo]);
+
+  // Lazily create the single reusable REST-TTS audio element. Configured for
+  // inline playback so mobile WebViews don't hijack it into a fullscreen player.
+  const getTtsAudioEl = (): HTMLAudioElement => {
+    if (!ttsAudioElRef.current) {
+      const el = document.createElement("audio");
+      el.setAttribute("playsinline", "true");
+      // @ts-expect-error non-standard but honored by iOS WebKit
+      el.playsInline = true;
+      el.preload = "auto";
+      ttsAudioElRef.current = el;
+    }
+    return ttsAudioElRef.current;
+  };
+
+  // Must be called from a real user gesture (PTT press). Plays a tiny silent clip
+  // once so iOS/Android WebViews will subsequently allow programmatic play() of
+  // TTS audio that arrives a few seconds later (after the network round-trip).
+  const unlockTtsAudio = () => {
+    if (ttsAudioUnlockedRef.current) return;
+    const el = getTtsAudioEl();
+    try {
+      // 44-byte empty-data WAV — valid, silent, decodes instantly everywhere.
+      el.src =
+        "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+      el.muted = true;
+      const p = el.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          el.pause();
+          el.currentTime = 0;
+          el.muted = false;
+          ttsAudioUnlockedRef.current = true;
+        }).catch(() => {
+          el.muted = false;
+        });
+      } else {
+        el.muted = false;
+        ttsAudioUnlockedRef.current = true;
+      }
+    } catch {
+      el.muted = false;
+    }
+  };
 
   // Helper function to interrupt any playing TTS and cancel in-flight requests
   const interruptTTS = () => {
@@ -741,6 +797,11 @@ export function useChatbot({
               // Drop any audio captured while the mic track is being primed during
               // pre-warm (before the user has pressed PTT).
               if (micWarmingRef.current) return;
+              // PTT only: ignore stale STT segments that land after the turn was
+              // already submitted (e.g. a slow first-turn Azure final). Processing
+              // them would wipe the input box and interrupt the reply's TTS.
+              // Full-voice is hands-free/continuous, so it is exempt.
+              if (!useFullVoice && !pttTurnActiveRef.current) return;
               console.log(
                 "Transcript in mode:",
                 activeVoiceButtonRef.current,
@@ -814,6 +875,7 @@ export function useChatbot({
             if (!prewarmOnly) {
               setIsRecording(false);
               endPttCapture();
+              pttTurnActiveRef.current = false;
             }
             setIsFullVoiceConnecting(false);
             setIsVoiceActive(false);
@@ -983,9 +1045,15 @@ export function useChatbot({
 
       // A new PTT capture started while we were flushing — this release is stale.
       // Bail out so we don't submit/clear or play "didn't catch" over the new turn.
+      // (beginPttCapture already re-armed pttTurnActiveRef for the new turn.)
       if (pttSessionRef.current !== releaseSession) {
         return;
       }
+
+      // Turn finalized: flush window elapsed and this is still the active release.
+      // Any STT segment after this point is stale and must be ignored so it can't
+      // wipe the box or interrupt the reply's TTS.
+      pttTurnActiveRef.current = false;
 
       const flushedInput = resolvePttSubmitText();
       if (flushedInput) {
@@ -1030,6 +1098,9 @@ export function useChatbot({
       return;
     }
 
+    // Cold release: connection is being torn down, no further STT will arrive.
+    pttTurnActiveRef.current = false;
+
     if (webrtcServiceRef.current) {
       clearWarmDisconnectTimer();
       voicePipelineActiveRef.current = false;
@@ -1070,6 +1141,9 @@ export function useChatbot({
     // PTT press is a guaranteed user gesture — unlock the (pre-warmed) bot audio
     // element so the TTS reply is audible even if autoplay was blocked at connect.
     webrtcServiceRef.current?.resumeBotAudio();
+    // Prime the REST-TTS fallback element within this gesture so iOS/Android
+    // WebViews allow it to play the reply that arrives seconds later.
+    unlockTtsAudio();
 
     if (webrtcServiceRef.current?.getIsConnected()) {
       if (pendingPttReleaseRef.current) {
@@ -2434,7 +2508,11 @@ export function useChatbot({
         type: "audio/wav",
       });
       audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
+      // Reuse the single gesture-unlocked element so iOS/Android WebViews allow
+      // playback; fall back to a fresh element on desktop if it isn't primed yet.
+      const audio = getTtsAudioEl();
+      audio.muted = false;
+      audio.src = audioUrl;
       (audio as any)._ttsUrl = audioUrl;
       (audio as any)._requestId = thisRequestId;
       currentTTSAudioRef.current = audio;

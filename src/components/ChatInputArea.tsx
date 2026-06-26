@@ -97,7 +97,14 @@ export default function ChatInputArea({
   const handlePttPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     if (isPttConnecting && !isPttCapturing) return;
-    pttBtnRef.current?.setPointerCapture(e.pointerId);
+    // Pointer capture keeps pointerup/cancel on this button even if the finger
+    // slides. Some Android/iOS WebViews throw or no-op here — PTT must still work,
+    // so guard it and rely on the up/cancel/lost-capture handlers below.
+    try {
+      pttBtnRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture unsupported in this WebView — ignore */
+    }
     void handlePttDown();
   };
 
@@ -112,6 +119,14 @@ export default function ChatInputArea({
 
   const handlePttPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
     releasePttPointer(e);
+    void handlePttUp();
+  };
+
+  // Safety net: if a WebView drops pointer capture without firing pointerup
+  // (observed on some Android/iOS in-app browsers), still release so the mic
+  // can never get stuck on. handlePttUp self-guards, so this is a no-op after a
+  // normal release.
+  const handlePttLostCapture = () => {
     void handlePttUp();
   };
 
@@ -344,6 +359,7 @@ export default function ChatInputArea({
           onPointerDown={handlePttPointerDown}
           onPointerUp={handlePttPointerUp}
           onPointerCancel={handlePttPointerCancel}
+          onLostPointerCapture={handlePttLostCapture}
           onContextMenu={(e) => e.preventDefault()}
         >
           {pttConnectingOnly ? <FiLoader /> : <FiMic />}
