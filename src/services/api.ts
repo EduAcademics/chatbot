@@ -207,6 +207,27 @@ interface AssignmentChatResponse {
   message?: string;
 }
 
+interface ComplaintChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+  tts_voice?: string;
+}
+
+interface ComplaintChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+  };
+  message?: string;
+}
+
 interface SubmissionChatRequest {
   session_id: string;
   user_id?: string; // Optional: user ID (used directly as student_id)
@@ -730,6 +751,19 @@ export const aiAPI = {
     });
 
     return await parseJsonResponse<AssignmentChatResponse>(response);
+  },
+
+  // Complaint chat
+  complaintChat: async (
+    request: ComplaintChatRequest,
+  ): Promise<ComplaintChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/chat/complaint`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<ComplaintChatResponse>(response);
   },
 
   // Submission chat
