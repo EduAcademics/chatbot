@@ -465,6 +465,7 @@ interface FeedbackRequest {
   message_index: number;
   feedback: "Approved" | "Rejected";
   comment?: string;
+  uuid_question?: string;
 }
 
 interface FeedbackResponse {
