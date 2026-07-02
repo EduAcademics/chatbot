@@ -1,0 +1,831 @@
+/* SchoolOS AI UI — Home / Voice screens, mascot, waves, glass controls */
+
+.chatbot-screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chatbot-glass-btn,
+.chatbot-glass-btn-placeholder {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  background: var(--ai-glass-bg, rgba(255, 255, 255, 0.45));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--ai-text-primary, #3d2817);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(245, 130, 31, 0.1);
+  flex-shrink: 0;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.chatbot-glass-btn:hover {
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.58));
+}
+
+.chatbot-glass-btn:active {
+  transform: scale(0.95);
+}
+
+.chatbot-glass-btn-placeholder {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.chatbot-screen-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  padding: calc(0.5rem + env(safe-area-inset-top, 0px)) 1rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.chatbot-screen-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--ai-text-primary, #3d2817);
+  font-family: "Poppins", sans-serif;
+  grid-column: 2;
+}
+
+.chatbot-screen-title-spacer {
+  grid-column: 2;
+}
+
+/* Home */
+.home-view {
+  position: relative;
+}
+
+.home-bottom-stack {
+  flex-shrink: 0;
+  padding-bottom: 0.25rem;
+  overflow-y: auto;
+  max-height: 42vh;
+}
+
+.home-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(0.5rem + env(safe-area-inset-top, 0px)) 1rem 0.25rem;
+  flex-shrink: 0;
+}
+
+.home-header {
+  padding: 0.5rem 2rem 0;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.home-greeting {
+  margin: 0.5rem 0 0;
+  font-size: clamp(1.5rem, 5vw, 1.75rem);
+  font-weight: 700;
+  color: var(--ai-text-primary, #3d2817);
+  font-family: "Poppins", sans-serif;
+}
+
+.home-subtitle {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--ai-text-secondary, rgba(61, 40, 23, 0.78));
+  font-family: "Poppins", sans-serif;
+}
+
+.home-mascot-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0.5rem 0;
+}
+
+.quick-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  padding: 0 1rem;
+  margin-top: 0.5rem;
+}
+
+.quick-action-card {
+  min-height: 100px;
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.58));
+  backdrop-filter: blur(12px);
+  border-radius: 18px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.625rem;
+  color: var(--ai-text-primary, #3d2817);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(245, 130, 31, 0.08);
+  font-family: "Poppins", sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.quick-action-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(245, 130, 31, 0.14);
+}
+
+.quick-action-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, #ffab5c 0%, #f5821f 55%, #e8720a 100%);
+  box-shadow: 0 3px 10px rgba(245, 130, 31, 0.32);
+  flex-shrink: 0;
+}
+
+.quick-action-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ai-text-primary, #3d2817);
+  line-height: 1.3;
+}
+
+.quick-action-desc {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  line-height: 1.35;
+}
+
+.home-section-label {
+  margin: 1.25rem 0 0.5rem;
+  padding: 0 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  font-family: "Poppins", sans-serif;
+}
+
+.suggested-prompts-scroll {
+  display: flex;
+  gap: 0.625rem;
+  overflow-x: auto;
+  padding: 0.25rem 1rem 0.5rem;
+  scrollbar-width: none;
+}
+
+.suggested-prompts-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.suggested-prompt-chip {
+  flex-shrink: 0;
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  background: var(--ai-glass-bg, rgba(255, 255, 255, 0.45));
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+  padding: 0.625rem 1rem;
+  color: var(--ai-text-secondary, rgba(61, 40, 23, 0.78));
+  font-size: 0.8125rem;
+  font-family: "Poppins", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.suggested-prompt-chip:hover {
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.58));
+}
+
+/* Mascot */
+.ai-mascot {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-mascot-glow {
+  position: absolute;
+  background: linear-gradient(
+    160deg,
+    rgba(255, 171, 92, 0.5),
+    rgba(245, 130, 31, 0.4),
+    rgba(242, 198, 165, 0.35)
+  );
+  opacity: 0.5;
+  overflow: hidden;
+}
+
+.ai-mascot-ring {
+  position: absolute;
+  border: 2px solid var(--ai-orange, #f5821f);
+  opacity: 0.35;
+}
+
+.ai-mascot-body {
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 8px 16px rgba(245, 130, 31, 0.35));
+}
+
+.ai-mascot-svg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Bottom control bar */
+.bottom-control-footer {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+.bottom-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  padding: 0.75rem 1.5rem 0.25rem;
+}
+
+.bottom-control-side-btn,
+.bottom-control-side-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.58));
+  backdrop-filter: blur(12px);
+  color: var(--ai-text-primary, #3d2817);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(245, 130, 31, 0.1);
+  flex-shrink: 0;
+}
+
+.bottom-control-side-placeholder {
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.bottom-control-mic-btn {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #ffd4a8 0%, #f5821f 50%, #f48120 100%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(245, 130, 31, 0.45);
+  touch-action: none;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.bottom-control-mic-btn--active {
+  transform: scale(1.08);
+  background: linear-gradient(135deg, #f5821f 0%, #d96e12 55%, #c45f0a 100%);
+  box-shadow: 0 8px 28px rgba(245, 130, 31, 0.55);
+}
+
+.bottom-control-mic-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+/* Voice screen */
+.voice-view-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.voice-view-hint {
+  text-align: center;
+  margin: 0 0 1.75rem;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  font-size: 1rem;
+  font-family: "Poppins", sans-serif;
+}
+
+.voice-view-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0 2rem;
+}
+
+.voice-view-instruction {
+  margin: 0;
+  text-align: center;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ai-text-secondary, rgba(61, 40, 23, 0.78));
+  font-family: "Poppins", sans-serif;
+  max-width: 320px;
+}
+
+/* Voice active panel */
+.voice-active-panel {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.voice-active-label {
+  position: relative;
+  z-index: 2;
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-style: italic;
+  font-weight: 500;
+  color: var(--ai-orange, #f5821f);
+  font-family: "Poppins", sans-serif;
+}
+
+.voice-transcript-wrap {
+  position: relative;
+  z-index: 2;
+  max-width: 520px;
+  padding: 0 1.75rem;
+}
+
+.voice-transcript-text {
+  margin: 0;
+  text-align: center;
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  line-height: 1.45;
+  font-family: "Poppins", sans-serif;
+  color: var(--ai-text-primary, #3d2817);
+  font-weight: 600;
+}
+
+.voice-transcript-cursor {
+  display: inline-block;
+  width: 3px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--ai-orange, #f5821f);
+  animation: schoolos-cursor-blink 1s step-end infinite;
+}
+
+@keyframes schoolos-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.voice-waves {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.voice-wave-ring {
+  position: absolute;
+  border: 1.5px solid var(--ai-wave, rgba(245, 130, 31, 0.3));
+  border-radius: 50%;
+  opacity: 0;
+  animation: voiceWaveExpand 2s ease-out infinite;
+}
+
+@keyframes voiceWaveExpand {
+  0% { transform: scale(0.6); opacity: 0.55; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.waveform-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 32px;
+  margin-bottom: 0.5rem;
+}
+
+.waveform-bar {
+  width: 4px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--ai-orange, #f5821f);
+  opacity: 0.35;
+}
+
+.waveform-bars--active .waveform-bar {
+  animation: waveformPulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes waveformPulse {
+  0% { height: 8px; opacity: 0.45; }
+  100% { height: 28px; opacity: 1; }
+}
+
+/* Chat glass input bar */
+.chatbot-input-wrapper {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  background: transparent;
+  border-top: none;
+  box-shadow: none;
+}
+
+.chatbot-input-glass {
+  flex: 1;
+  min-width: 0;
+  min-height: 56px;
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.58));
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  border-radius: 28px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 4px 20px rgba(245, 130, 31, 0.1);
+}
+
+.chatbot-input-inner {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  padding: 6px 6px 6px 16px;
+  gap: 8px;
+}
+
+.chatbot-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.chatbot-action-slot {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+}
+
+.chatbot-action-btn {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  background: linear-gradient(135deg, #ffd4a8 0%, #f5821f 50%, #f48120 100%);
+  box-shadow: 0 3px 12px rgba(245, 130, 31, 0.35);
+}
+
+.chatbot-action-btn.send {
+  background: linear-gradient(135deg, #ffab5c 0%, #f5821f 55%, #e8720a 100%);
+}
+
+.chatbot-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.chatbot-action-btn.mic-held,
+.chatbot-btn-ptt.ptt-active {
+  transform: scale(1.08);
+  background: linear-gradient(135deg, #f5821f 0%, #d96e12 55%, #c45f0a 100%) !important;
+}
+
+.chatbot-header-back-btn {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.typing-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ai-orange, #f5821f);
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(1) { opacity: 0.4; }
+.typing-dots span:nth-child(2) { animation-delay: 0.16s; opacity: 0.7; }
+.typing-dots span:nth-child(3) { animation-delay: 0.32s; opacity: 1; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+.thinking-text {
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  font-style: italic;
+  font-size: 0.8125rem;
+  font-family: "Poppins", sans-serif;
+}
+
+.cloud-thinking-icon {
+  display: none;
+}
+
+/* Screen transitions */
+.chatbot-screen-motion {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chatbot-screen-motion--chat {
+  min-height: 0;
+}
+
+/* Bottom mic hint */
+.bottom-control-hint {
+  margin: 0 0 0.35rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  font-family: "Poppins", sans-serif;
+  min-height: 1.25rem;
+}
+
+.bottom-control-side-btn:hover {
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.72));
+  transform: scale(1.04);
+}
+
+.bottom-control-side-btn:active {
+  transform: scale(0.96);
+}
+
+/* Voice steps */
+.voice-view-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.voice-view-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 20px;
+  background: var(--ai-glass-bg, rgba(255, 255, 255, 0.45));
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  font-size: 0.8125rem;
+  color: var(--ai-text-secondary, rgba(61, 40, 23, 0.78));
+  font-family: "Poppins", sans-serif;
+}
+
+.voice-view-step strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--ai-orange, #f5821f);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+/* Voice screen: processing + response */
+.voice-processing {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.voice-response-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.voice-question-row {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.voice-question-bubble {
+  display: inline-block;
+  max-width: 85%;
+  padding: 0.6rem 0.95rem;
+  border-radius: 18px 18px 4px 18px;
+  background: linear-gradient(135deg, #ffab5c 0%, #f5821f 55%, #ef7a15 100%);
+  color: #fff;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  font-family: "Poppins", sans-serif;
+  box-shadow: 0 4px 14px rgba(245, 130, 31, 0.28);
+  word-break: break-word;
+}
+
+.voice-processing--inline {
+  margin: 0.25rem auto 0.5rem;
+  width: 100%;
+  max-width: 640px;
+  justify-content: flex-start;
+}
+
+.voice-response-card {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.62));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  border-radius: 20px;
+  box-shadow: 0 6px 22px rgba(245, 130, 31, 0.12);
+  padding: 1rem 1.15rem;
+}
+
+.voice-response-question {
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgba(245, 130, 31, 0.14);
+  font-size: 0.875rem;
+  font-style: italic;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  font-family: "Poppins", sans-serif;
+}
+
+.voice-response-body {
+  color: var(--ai-text-primary, #3d2817);
+  font-family: "Poppins", sans-serif;
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+
+.voice-response-actions {
+  margin-top: 0.85rem;
+}
+
+/* Chat welcome panel */
+.chat-welcome-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 1.25rem 1rem;
+  margin: 0.5rem auto 1rem;
+  max-width: 420px;
+}
+
+.chat-welcome-title {
+  margin: 1rem 0 0.35rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--ai-text-primary, #3d2817);
+  font-family: "Poppins", sans-serif;
+}
+
+.chat-welcome-subtitle {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--ai-text-secondary, rgba(61, 40, 23, 0.78));
+  font-family: "Poppins", sans-serif;
+}
+
+.chat-welcome-tips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.chat-welcome-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 16px;
+  background: var(--ai-glass-bg, rgba(255, 255, 255, 0.45));
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  font-size: 0.75rem;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.55));
+  font-family: "Poppins", sans-serif;
+}
+
+.chat-welcome-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 1.25rem;
+}
+
+.chat-welcome-prompt-btn {
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--ai-glass-border, rgba(255, 255, 255, 0.65));
+  background: var(--ai-glass-bg-strong, rgba(255, 255, 255, 0.58));
+  backdrop-filter: blur(10px);
+  color: var(--ai-text-secondary, rgba(61, 40, 23, 0.78));
+  font-size: 0.875rem;
+  font-family: "Poppins", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.chat-welcome-prompt-btn:hover {
+  background: rgba(255, 255, 255, 0.72);
+  transform: translateY(-1px);
+}
+
+.chat-welcome-prompt-btn:active {
+  transform: scale(0.98);
+}
+
+/* Chat input mic hint */
+.chat-input-mic-hint {
+  margin: 0.35rem 0 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--ai-text-muted, rgba(61, 40, 23, 0.5));
+  font-family: "Poppins", sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+/* Better focus visibility for keyboard users */
+.chatbot-glass-btn:focus-visible,
+.bottom-control-side-btn:focus-visible,
+.bottom-control-mic-btn:focus-visible,
+.quick-action-card:focus-visible,
+.suggested-prompt-chip:focus-visible,
+.chat-welcome-prompt-btn:focus-visible,
+.chatbot-action-btn:focus-visible {
+  outline: 2px solid var(--ai-orange, #f5821f);
+  outline-offset: 2px;
+}
+
+.chatbot-input:focus-visible {
+  outline: none;
+}
+
+.chatbot-input-glass:focus-within {
+  box-shadow: 0 0 0 3px rgba(245, 130, 31, 0.22);
+  border-color: rgba(245, 130, 31, 0.35);
+}

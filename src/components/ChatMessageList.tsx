@@ -2,9 +2,7 @@
  * Chat message list: attendance step indicator, message map (user/bot, attendance table, leave approval, etc.), processing indicator.
  * Extracted from AudioStreamerChatBot to reduce main file size.
  */
-import { motion } from "framer-motion";
 import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
-import { SlBubbles } from "react-icons/sl";
 import MemoizedAnswer from "./MemoizedAnswer";
 import PaginatedDataTable from "./PaginatedDataTable";
 import KpiCardRow from "./KpiCardRow";
@@ -13,6 +11,7 @@ import VisualizationRenderer from "./VisualizationRenderer";
 import { MarksEntryTable } from "./MarksEntryTable";
 import { HealthCardTable } from "./HealthCardTable";
 import { HealthCardSelector } from "./HealthCardSelector";
+import ChatWelcomePanel from "./chatbot-ui/ChatWelcomePanel";
 import type { FlowType } from "./types";
 import { getThumbsUpClass, getThumbsDownClass } from "./utils/chatbotUtils";
 import { leaveApprovalAPI } from "../services/api";
@@ -90,6 +89,7 @@ export interface ChatMessageListProps {
   handleSubmit: (overrideMessage?: string) => Promise<void>;
   userRoles: string[];
   speakHealthCardBotMessage: (text: string) => void;
+  onSelectPrompt?: (prompt: string) => void;
 }
 
 export default function ChatMessageList(props: ChatMessageListProps) {
@@ -128,7 +128,19 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     handleSubmit,
     userRoles,
     speakHealthCardBotMessage,
+    onSelectPrompt,
   } = props;
+
+  const isInitialWelcomeOnly =
+    chatHistory.length === 1 &&
+    chatHistory[0]?.type === "bot" &&
+    !chatHistory[0]?.text;
+  const showWelcomePanel =
+    isInitialWelcomeOnly &&
+    !isProcessing &&
+    activeFlow !== "attendance" &&
+    activeFlow !== "voice_attendance" &&
+    Boolean(onSelectPrompt);
 
   const lastHealthCardSectionsIdx = chatHistory.reduce(
     (acc, m, i) =>
@@ -214,7 +226,12 @@ export default function ChatMessageList(props: ChatMessageListProps) {
       {/* Removed separate editable component - editing is now inline in the table */}
 
       <div className="chatbot-messages">
-        {chatHistory.map((msg, idx) => (
+        {showWelcomePanel && onSelectPrompt ? (
+          <ChatWelcomePanel onSelectPrompt={onSelectPrompt} />
+        ) : null}
+        {chatHistory.map((msg, idx) => {
+          if (showWelcomePanel && idx === 0 && msg.type === "bot") return null;
+          return (
           <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
             {msg.type === "user" ? (
               <>
@@ -1560,7 +1577,8 @@ export default function ChatMessageList(props: ChatMessageListProps) {
               </>
             )}
           </div>
-        ))}
+          );
+        })}
         {isProcessing && (
           <div className="chatbot-msg-row bot">
             {/* <span className="chatbot-msg-icon">
@@ -1568,25 +1586,12 @@ export default function ChatMessageList(props: ChatMessageListProps) {
             </span> */}
             <div className="chatbot-msg-bubble bot processing-bubble flex">
               <div className="processing-indicator flex gap-2 items-center justify-center">
-                <motion.div
-                  className="cloud-thinking-icon"
-                  animate={{
-                    scale: [1, 1.2, 1],
-                    opacity: [0.7, 1, 0.7],
-                    y: [0, -5, 0],
-                  }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                >
-                  <SlBubbles />
-                </motion.div>
-                {/* <div className="animate-bounce">
-                  <SlBubbles  />
-                </div> */}
-                <span className="thinking-text italic">Thinking...</span>
+                <div className="typing-dots" aria-label="Thinking">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <span className="thinking-text">SchoolOS AI is thinking...</span>
               </div>
             </div>
           </div>

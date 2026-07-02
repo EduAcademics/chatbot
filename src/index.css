@@ -5,25 +5,58 @@
 /* src/index.css */
 
 :root {
-  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: "Poppins", "Inter", system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.6;
   font-weight: 400;
   color-scheme: light;
-  color: rgba(34, 34, 34, 0.95);
+  color: rgba(61, 40, 23, 0.95);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* SchoolOS AI theme */
+  --ai-orange: #f5821f;
+  --ai-orange-soft: #ffab5c;
+  --ai-gradient-start: #fff8f2;
+  --ai-gradient-mid: #ffe4c8;
+  --ai-gradient-end: #ffc98a;
+  --ai-text-primary: #3d2817;
+  --ai-text-secondary: rgba(61, 40, 23, 0.78);
+  --ai-text-muted: rgba(61, 40, 23, 0.55);
+  --ai-glass-bg: rgba(255, 255, 255, 0.45);
+  --ai-glass-bg-strong: rgba(255, 255, 255, 0.58);
+  --ai-glass-border: rgba(255, 255, 255, 0.65);
+  --ai-wave: rgba(245, 130, 31, 0.3);
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
+  font-family: "Poppins", "Inter", system-ui, sans-serif;
+  background: linear-gradient(
+    160deg,
+    var(--ai-gradient-start) 0%,
+    var(--ai-gradient-mid) 52%,
+    var(--ai-gradient-end) 100%
+  );
+}
+
+#root {
+  height: 100%;
+  overflow: hidden;
 }
 
 h1, h2, h3 {
-  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: "Poppins", "Inter", system-ui, sans-serif;
   font-weight: 700;
   letter-spacing: -0.5px;
 }

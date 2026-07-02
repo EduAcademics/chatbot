@@ -1,11 +1,16 @@
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import "./markdown-tables.css";
 import "./chatbot.css";
+import "./schoolos-ui.css";
 import ClassInfoModal from "./ClassInfoModal";
 import ChatInputArea from "./ChatInputArea";
 import ChatHeaderWithMenu from "./ChatHeaderWithMenu";
 import ChatMessageList from "./ChatMessageList";
 import FilePreviewModal from "./FilePreviewModal";
+import HomeView from "./chatbot-ui/HomeView";
+import VoiceView from "./chatbot-ui/VoiceView";
+import type { ChatbotScreen } from "./chatbotData";
 import { useChatbot } from "./hooks/useChatbot";
 
 const AudioStreamerChatBot = ({
@@ -21,6 +26,12 @@ const AudioStreamerChatBot = ({
   // const api = useChatbot({ userId, roles, email });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewFilename, setPreviewFilename] = useState<string>("Attachment");
+  const [screen, setScreen] = useState<ChatbotScreen>("home");
+
+  const handleSelectPrompt = (prompt: string) => {
+    setScreen("chat");
+    void api.handleSubmit(prompt);
+  };
 
   const handleOpenPreview = (url: string, filename: string) => {
     setPreviewUrl(url);
@@ -42,7 +53,68 @@ const AudioStreamerChatBot = ({
 
       <div className="chatbot-root">
         <div className="chatbot-container">
+          <AnimatePresence mode="wait">
+          {screen === "home" && (
+            <motion.div
+              key="home"
+              className="chatbot-screen-motion"
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 16 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+            <HomeView
+              userName={loginId}
+              onNavigate={(next) => setScreen(next)}
+              onSelectPrompt={handleSelectPrompt}
+            />
+            </motion.div>
+          )}
+
+          {screen === "voice" && (
+            <motion.div
+              key="voice"
+              className="chatbot-screen-motion"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+            <VoiceView
+              onBack={() => setScreen("home")}
+              onOpenChat={() => setScreen("chat")}
+              transcript={api.inputText}
+              isCapturing={api.isPttCapturing}
+              isConnecting={api.isPttConnecting}
+              isListening={api.isVoiceActive || api.isRecording}
+              isProcessing={api.isProcessing}
+              handlePttDown={api.handlePttDown}
+              handlePttUp={api.handlePttUp}
+              chatHistory={api.chatHistory}
+              ttsLoading={api.ttsLoading}
+              handlePlayTTS={api.handlePlayTTS}
+              handleSendFeedback={api.handleSendFeedback}
+              showCorrectionBox={api.showCorrectionBox}
+              setShowCorrectionBox={api.setShowCorrectionBox}
+              feedbackComment={api.feedbackComment}
+              setFeedbackComment={api.setFeedbackComment}
+              correctionBoxRef={api.correctionBoxRef}
+              onOpenPreview={handleOpenPreview}
+            />
+            </motion.div>
+          )}
+
+          {screen === "chat" && (
+          <motion.div
+            key="chat"
+            className="chatbot-screen-motion chatbot-screen-motion--chat"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+          >
           <ChatHeaderWithMenu
+            onBack={() => setScreen("home")}
             menuRef={api.menuRef}
             isMenuOpen={api.isMenuOpen}
             setIsMenuOpen={api.setIsMenuOpen}
@@ -120,8 +192,11 @@ const AudioStreamerChatBot = ({
                 : []
             }
             speakHealthCardBotMessage={api.speakHealthCardBotMessage}
+            onSelectPrompt={handleSelectPrompt}
           />
           <ChatInputArea
+            autoFocus
+            textOnly
             activeFlow={api.activeFlow}
             inputText={api.inputText}
             setInputText={api.setInputText}
@@ -147,6 +222,9 @@ const AudioStreamerChatBot = ({
             activeVoiceButtonRef={api.activeVoiceButtonRef}
             handlePlayTTS={api.handlePlayTTS}
           />
+          </motion.div>
+          )}
+          </AnimatePresence>
         </div>
       </div>
 

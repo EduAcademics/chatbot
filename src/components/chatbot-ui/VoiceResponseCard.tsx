@@ -1,0 +1,164 @@
+import { FiThumbsDown, FiThumbsUp, FiVolume2 } from "react-icons/fi";
+import MemoizedAnswer from "../MemoizedAnswer";
+import KpiCardRow from "../KpiCardRow";
+import FindingsList from "../FindingsList";
+import PaginatedDataTable from "../PaginatedDataTable";
+import VisualizationRenderer from "../VisualizationRenderer";
+import { getThumbsUpClass, getThumbsDownClass } from "../utils/chatbotUtils";
+
+export interface VoiceResponseCardProps {
+  message: any;
+  index: number;
+  userQuestion?: string;
+  ttsLoading: number | null;
+  handlePlayTTS: (
+    idx: number,
+    text: string,
+    isQuery?: boolean,
+    uuidQuestion?: string,
+    ttsContext?: import("../types").TtsQueryContext,
+  ) => Promise<void>;
+  handleSendFeedback: (
+    idx: number,
+    type: "Approved" | "Rejected",
+    comment?: string,
+  ) => Promise<void>;
+  showCorrectionBox: number | null;
+  setShowCorrectionBox: (v: number | null) => void;
+  feedbackComment: { [idx: number]: string };
+  setFeedbackComment: React.Dispatch<
+    React.SetStateAction<{ [idx: number]: string }>
+  >;
+  correctionBoxRef: React.RefObject<HTMLDivElement | null>;
+  onOpenPreview: (url: string, filename: string) => void;
+}
+
+export default function VoiceResponseCard({
+  message: msg,
+  index: idx,
+  userQuestion,
+  ttsLoading,
+  handlePlayTTS,
+  handleSendFeedback,
+  showCorrectionBox,
+  setShowCorrectionBox,
+  feedbackComment,
+  setFeedbackComment,
+  correctionBoxRef,
+  onOpenPreview,
+}: VoiceResponseCardProps) {
+  const answerText = msg.answer || msg.text || "";
+
+  return (
+    <div className="voice-response-card">
+      {userQuestion ? (
+        <p className="voice-response-question" title={userQuestion}>
+          “{userQuestion}”
+        </p>
+      ) : null}
+
+      <div className="voice-response-body">
+        {msg.kpi_cards?.length ? <KpiCardRow cards={msg.kpi_cards} /> : null}
+        <MemoizedAnswer
+          answer={answerText}
+          messageIdx={idx}
+          onOpenPreview={onOpenPreview}
+        />
+        {msg.findings?.length ? <FindingsList items={msg.findings} /> : null}
+        {msg.table_data?.rows?.length ? (
+          <PaginatedDataTable
+            tableData={msg.table_data}
+            downloadFilename="query-results.csv"
+          />
+        ) : null}
+        {msg.visualization?.show_chart && msg.visualization ? (
+          <VisualizationRenderer visualization={msg.visualization} />
+        ) : null}
+      </div>
+
+      <div className="bot-actions-bottom voice-response-actions">
+        <button
+          className="bot-action-btn"
+          title="Listen"
+          disabled={ttsLoading === idx}
+          onClick={() =>
+            handlePlayTTS(
+              idx,
+              msg.tts_text?.trim() || answerText,
+              Boolean(msg.answer),
+              undefined,
+              {
+                backend_tts_text: msg.tts_text,
+                table_data: msg.table_data,
+                findings: msg.findings,
+                kpi_cards: msg.kpi_cards,
+              },
+            )
+          }
+        >
+          <FiVolume2 />
+          {ttsLoading === idx && (
+            <span className="feedback-sent-tooltip">Loading...</span>
+          )}
+        </button>
+        <button
+          className={getThumbsUpClass(msg)}
+          title="Approved"
+          disabled={msg.feedback === "Rejected"}
+          onClick={() => handleSendFeedback(idx, "Approved")}
+        >
+          <FiThumbsUp />
+          {msg.feedback === "Approved" && (
+            <span className="feedback-sent-tooltip">Approved</span>
+          )}
+        </button>
+        <div style={{ position: "relative" }}>
+          <button
+            className={getThumbsDownClass(msg)}
+            title="Rejected"
+            disabled={msg.feedback === "Approved"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCorrectionBox(showCorrectionBox === idx ? null : idx);
+            }}
+          >
+            <FiThumbsDown />
+            {msg.feedback === "Rejected" && (
+              <span className="feedback-sent-tooltip">Rejected</span>
+            )}
+          </button>
+          {showCorrectionBox === idx && msg.feedback !== "Approved" && (
+            <div className="correction-box" ref={correctionBoxRef}>
+              <div className="correction-title">Rejection Reason:</div>
+              <input
+                className="correction-input"
+                type="text"
+                placeholder="Enter reason..."
+                value={feedbackComment[idx] || ""}
+                onChange={(e) =>
+                  setFeedbackComment((prev) => ({
+                    ...prev,
+                    [idx]: e.target.value,
+                  }))
+                }
+              />
+              <button
+                className="correction-btn"
+                onClick={() =>
+                  handleSendFeedback(idx, "Rejected", feedbackComment[idx] || "")
+                }
+                disabled={!feedbackComment[idx]}
+              >
+                Submit
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {msg.feedbackMessage && (
+        <div className="feedback-status-msg">{msg.feedbackMessage}</div>
+      )}
+    </div>
+  );
+}

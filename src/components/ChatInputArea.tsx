@@ -2,7 +2,7 @@
  * Chat input area: file upload, text input, push-to-talk mic, send.
  * PTT: hold mic → live transcript in text box → release → auto-send.
  */
-import { useRef } from "react";
+import { useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { FiLoader, FiMic, FiSend, FiUpload } from "react-icons/fi";
 import type { FlowType } from "./types";
@@ -44,6 +44,9 @@ export interface ChatInputAreaProps {
     text: string,
     bypassSummary?: boolean,
   ) => Promise<void>;
+  autoFocus?: boolean;
+  /** Text-only chat: hides the push-to-talk mic so messages are never spoken. */
+  textOnly?: boolean;
 }
 
 export default function ChatInputArea({
@@ -71,21 +74,31 @@ export default function ChatInputArea({
   getErpContext,
   activeVoiceButtonRef,
   handlePlayTTS,
+  autoFocus = false,
+  textOnly = false,
 }: ChatInputAreaProps) {
   const isAttendanceFlow =
     activeFlow === "attendance" || activeFlow === "voice_attendance";
   const pttBtnRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const isPttBusy = isPttCapturing || isRecording;
   const pttConnectingOnly = isPttConnecting && !isRecording;
   // Show the send icon only when the user has TYPED text. During push-to-talk the
   // box fills with the live transcript, so we keep the mic icon while capturing.
-  const showSend = inputText.trim().length > 0 && !isPttBusy;
+  // In text-only mode there is no mic, so the send button is always shown.
+  const showSend = textOnly || (inputText.trim().length > 0 && !isPttBusy);
   // The upload icon only does something in these flows; hide it otherwise so the
   // default view shows just the mic (file-upload functionality is unchanged).
   const canUpload =
     activeFlow === "attendance" ||
     activeFlow === "assignment" ||
     activeFlow === "submission";
+
+  useEffect(() => {
+    if (autoFocus && !isPttBusy) {
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  }, [autoFocus, isPttBusy]);
 
   const releasePttPointer = (e: React.PointerEvent) => {
     const btn = pttBtnRef.current;
@@ -141,8 +154,9 @@ export default function ChatInputArea({
       : "Ask me anything!";
 
   return (
+    <div className="chatbot-input-wrapper">
     <div
-      className={`chatbot-input-area ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}
+      className={`chatbot-input-area chatbot-input-row ${isAttendanceFlow ? "chatbot-input-area-attendance" : ""}`}
     >
       <div className="relative">
         <input
@@ -300,8 +314,11 @@ export default function ChatInputArea({
         )}
       </div>
 
+      <div className="chatbot-input-glass">
+        <div className="chatbot-input-inner">
       <div className="chatbot-input-wrap flex-1 min-w-0 relative">
         <input
+          ref={inputRef}
           type="text"
           placeholder={inputPlaceholder}
           value={inputText}
@@ -333,18 +350,18 @@ export default function ChatInputArea({
       {showSend ? (
         <button
           onClick={() => void handleSubmit()}
-          className="chatbot-btn send"
+          className="chatbot-action-btn send"
           title="Send Message"
-          disabled={isPttBusy}
+          disabled={isPttBusy || inputText.trim().length === 0}
         >
-          <FiSend />
+          <FiSend size={18} />
         </button>
       ) : (
         <button
           ref={pttBtnRef}
           type="button"
-          className={`chatbot-btn chatbot-btn-ptt w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center${
-            isPttBusy ? " ptt-active" : ""
+          className={`chatbot-action-btn chatbot-btn-ptt flex items-center justify-center${
+            isPttBusy ? " ptt-active mic-held" : ""
           }${pttConnectingOnly ? " ptt-connecting" : ""}${
             isVoiceActive ? " ptt-voice-active" : ""
           }`}
@@ -362,9 +379,12 @@ export default function ChatInputArea({
           onLostPointerCapture={handlePttLostCapture}
           onContextMenu={(e) => e.preventDefault()}
         >
-          {pttConnectingOnly ? <FiLoader /> : <FiMic />}
+          {pttConnectingOnly ? <FiLoader size={18} /> : <FiMic size={20} />}
         </button>
       )}
+        </div>
+      </div>
+    </div>
     </div>
   );
 }
