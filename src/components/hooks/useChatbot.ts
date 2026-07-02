@@ -13,6 +13,7 @@ import {
   aiAPI,
   userAPI,
   leaveApprovalAPI,
+  studentLeaveApprovalAPI,
   getAIHeaders,
 } from "../../services/api";
 import { API_BASE_URL } from "../../config/api";
@@ -31,6 +32,8 @@ import {
   resolveTtsVoice,
 } from "../../services/voiceConstants";
 import { handleAssignmentChat } from "../flows/assignmentFlow";
+import { handleMessageChat } from "../flows/messageFlow";
+import { handleLibraryChat } from "../flows/libraryFlow";
 import { handleComplaintChat } from "../flows/complaintFlow";
 import { handleSubmissionChat } from "../flows/submissionFlow";
 import { handleReviewChat } from "../flows/reviewFlow";
@@ -54,6 +57,32 @@ import {
   generateLeaveTTSSummary,
 } from "../flows/leaveApplicationFlow";
 import type { RefObject } from "react";
+
+const APPROVAL_DISAMBIGUATION_QUESTION =
+  "Are you looking for student leave approvals or teacher leave approvals?";
+
+const APPROVAL_DISAMBIGUATION_REASK =
+  "Sorry, I didn't catch that. Are you looking for student leave approvals or teacher leave approvals?";
+
+const buildLeaveApprovalEntrySpeech = (
+  kind: "teacher" | "student",
+  count: number,
+): string => {
+  const label = kind === "student" ? "student leave" : "leave";
+  const base = `Found ${count} pending ${label} request${count === 1 ? "" : "s"} for your approval.`;
+  if (count > 0) {
+    return `${base} Click approve or reject for each request.`;
+  }
+  return base;
+};
+
+const mapResolvedApprovalFlow = (
+  resolved: string | undefined,
+): FlowType | null => {
+  if (resolved === "student") return "student_leave_approval";
+  if (resolved === "teacher") return "leave_approval";
+  return null;
+};
 
 export interface UseChatbotReturn {
   showClassInfoModal: boolean;
@@ -93,6 +122,11 @@ export interface UseChatbotReturn {
     React.SetStateAction<{ [key: string]: string }>
   >;
   setLoadingLeaveRequests: (v: boolean) => void;
+  setStudentLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
+  setStudentRejectReason: React.Dispatch<
+    React.SetStateAction<{ [key: string]: string }>
+  >;
+  setLoadingStudentLeaveRequests: (v: boolean) => void;
   devices: MediaDeviceInfo[];
   selectedDeviceId: string;
   setSelectedDeviceId: (v: string) => void;
@@ -151,6 +185,9 @@ export interface UseChatbotReturn {
   leaveApprovalRequests: any[];
   loadingLeaveRequests: boolean;
   rejectReason: { [key: string]: string };
+  studentLeaveApprovalRequests: any[];
+  loadingStudentLeaveRequests: boolean;
+  studentRejectReason: { [key: string]: string };
   inputText: string;
   setInputText: React.Dispatch<React.SetStateAction<string>>;
   isRecording: boolean;
@@ -328,6 +365,14 @@ export function useChatbot({
   const [rejectReason, setRejectReason] = useState<{ [key: string]: string }>(
     {},
   ); // <-- add for reject reasons
+  const [studentLeaveApprovalRequests, setStudentLeaveApprovalRequests] =
+    useState<any[]>([]);
+  const [loadingStudentLeaveRequests, setLoadingStudentLeaveRequests] =
+    useState(false);
+  const [studentRejectReason, setStudentRejectReason] = useState<{
+    [key: string]: string;
+  }>({});
+  const pendingApprovalDisambiguationRef = useRef(false);
   // Course progress is now fully backend-driven - no frontend state needed
   // The backend returns course_progress data in the response which is stored in chat messages
 
@@ -707,7 +752,12 @@ export function useChatbot({
       leaveVoiceInitiatedRef.current = false;
     } else if (flow === "leave_approval") {
       setLeaveApprovalRequests([]);
+    } else if (flow === "student_leave_approval") {
+      setStudentLeaveApprovalRequests([]);
+      setStudentRejectReason({});
+      setLoadingStudentLeaveRequests(false);
     }
+    pendingApprovalDisambiguationRef.current = false;
     // assignment, course_progress, query, none: no extra state to clear
 
     activeFlowRef.current = "none";
@@ -848,6 +898,8 @@ export function useChatbot({
               const useDictationDebounce =
                 activeFlow === "full_voice_attendance" ||
                 (activeFlow === "assignment" && useFullVoice) ||
+                (activeFlow === "message" && useFullVoice) ||
+                (activeFlow === "library" && useFullVoice) ||
                 (activeFlow === "leave" && useFullVoice);
               if (useDictationDebounce) {
                 setLastVoiceInputTime(Date.now());
@@ -912,6 +964,8 @@ export function useChatbot({
               activeFlow === "full_voice_attendance" ||
               (activeFlow === "assignment" && useFullVoice) ||
               (activeFlow === "leave" && useFullVoice);
+              (activeFlow === "message" && useFullVoice) ||
+              (activeFlow === "library" && useFullVoice);
             if (useDictationDebounce) return;
             if (turnCompleteTimerRef.current)
               clearTimeout(turnCompleteTimerRef.current);
@@ -1319,6 +1373,7 @@ export function useChatbot({
     confidence: number;
     entities: any;
     validation_status?: string;
+    clarification_question?: string;
   }> => {
     try {
       const response = await fetch(`${API_BASE_URL}/v1/ai/classify-query`, {
@@ -1334,7 +1389,13 @@ export function useChatbot({
       const data = await response.json();
 
       if (data.status === "success") {
-        const { flow, confidence, entities,validation_status } = data.data;
+        const {
+          flow,
+          confidence,
+          entities,
+          validation_status,
+          clarification_question,
+        } = data.data;
 
         console.log("[Routing] Query classification:", {
           query: message,
@@ -1343,7 +1404,13 @@ export function useChatbot({
           entities,
         });
 
-        return { flow, confidence, entities,validation_status };
+        return {
+          flow,
+          confidence,
+          entities,
+          validation_status,
+          clarification_question,
+        };
       }
 
       // Fallback
@@ -1436,7 +1503,58 @@ export function useChatbot({
       confidence: number;
       entities: any;
       validation_status?: string;
+      clarification_question?: string;
     } | null = null;
+    let disambiguationResolvedFlow: FlowType | null = null;
+
+    if (pendingApprovalDisambiguationRef.current) {
+      try {
+        const resolution = await aiAPI.resolveApprovalDisambiguation({
+          reply: userMessage,
+        });
+        const resolvedFlow = mapResolvedApprovalFlow(resolution.resolved);
+        if (!resolvedFlow) {
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              answer: APPROVAL_DISAMBIGUATION_REASK,
+              activeTab: "answer" as const,
+            },
+          ]);
+          try {
+            if (isVoiceTriggeredForThisRequest) {
+              void handlePlayTTS(-1, APPROVAL_DISAMBIGUATION_REASK);
+            }
+          } catch (ttsErr) {
+            console.error("TTS playback failed:", ttsErr);
+          }
+          setIsProcessing(false);
+          return;
+        }
+
+        pendingApprovalDisambiguationRef.current = false;
+        disambiguationResolvedFlow = resolvedFlow;
+        classificationResult = { flow: resolvedFlow, confidence: 1, entities: {} };
+        targetFlow = resolvedFlow;
+      } catch (err) {
+        console.error("Approval disambiguation resolution failed:", err);
+        const reask = APPROVAL_DISAMBIGUATION_REASK;
+        setChatHistory((prev) => [
+          ...prev,
+          { type: "bot", answer: reask, activeTab: "answer" as const },
+        ]);
+        try {
+          if (isVoiceTriggeredForThisRequest) {
+            void handlePlayTTS(-1, reask);
+          }
+        } catch (ttsErr) {
+          console.error("TTS playback failed:", ttsErr);
+        }
+        setIsProcessing(false);
+        return;
+      }
+    }
 
     // Don't re-classify if we're in the middle of a multi-step flow
     const inAttendanceFlow =
@@ -1461,6 +1579,22 @@ export function useChatbot({
       "create assignment",
       "give assignment",
       "new assignment",
+      "send a message",
+      "send message",
+      "create message",
+      "compose message",
+      "message staff",
+      "message students",
+      "notify staff",
+      "notify teachers",
+      "broadcast message",
+      "reserve a book",
+      "reserve book",
+      "borrow a book",
+      "borrow book",
+      "library book",
+      "find a book",
+      "search for a book",
       "create diary",
       "diary entry",
       "teacher diary",
@@ -1485,6 +1619,10 @@ export function useChatbot({
       "estate complaint",
       "raise complaint",
       "estate issue",
+      "student leave approval",
+      "approve student leave",
+      "student leave requests",
+      "pending student leaves",
     ];
     const looksLikeNewRequest = newFlowKeywords.some((keyword) =>
       userMessage.toLowerCase().includes(keyword),
@@ -1496,9 +1634,16 @@ export function useChatbot({
     const inLeave = activeFlowRef.current === "leave" || activeFlow === "leave";
     const inAssignment =
       activeFlowRef.current === "assignment" || activeFlow === "assignment";
+    const inMessage =
+      activeFlowRef.current === "message" || activeFlow === "message";
+    const inLibrary =
+      activeFlowRef.current === "library" || activeFlow === "library";
     const inLeaveApproval =
       activeFlowRef.current === "leave_approval" ||
       activeFlow === "leave_approval";
+    const inStudentLeaveApproval =
+      activeFlowRef.current === "student_leave_approval" ||
+      activeFlow === "student_leave_approval";
     const inTeacherDiary =
       activeFlowRef.current === "teacher_diary" ||
       activeFlow === "teacher_diary";
@@ -1511,7 +1656,11 @@ export function useChatbot({
       activeFlowRef.current === "complaint" || activeFlow === "complaint";
     const inLeaveFlow = inLeave && !looksLikeNewRequest;
     const inAssignmentFlow = inAssignment && !looksLikeNewRequest;
+    const inMessageFlow = inMessage && !looksLikeNewRequest;
+    const inLibraryFlow = inLibrary && !looksLikeNewRequest;
     const inLeaveApprovalFlow = inLeaveApproval && !looksLikeNewRequest;
+    const inStudentLeaveApprovalFlow =
+      inStudentLeaveApproval && !looksLikeNewRequest;
     const inTeacherDiaryFlow = inTeacherDiary && !looksLikeNewRequest;
     const inHealthCardFlow = inHealthCard && !looksLikeNewRequest;
     const inMarksFlow = inMarks && !looksLikeNewRequest;
@@ -1527,7 +1676,10 @@ export function useChatbot({
       inVoiceAttendanceFlow,
       inLeaveFlow,
       inAssignmentFlow,
+      inMessageFlow,
+      inLibraryFlow,
       inLeaveApprovalFlow,
+      inStudentLeaveApprovalFlow,
       inTeacherDiaryFlow,
       inHealthCardFlow,
       inMarksFlow,
@@ -1541,12 +1693,18 @@ export function useChatbot({
       // so we get the correct exit message and flow state is cleared by the backend
       targetFlow = flowToExitOnCommand;
       setDetectedFlow(null);
+    } else if (disambiguationResolvedFlow) {
+      targetFlow = disambiguationResolvedFlow;
+      setDetectedFlow(null);
     } else if (
       inAttendanceFlow ||
       inVoiceAttendanceFlow ||
       inLeaveFlow ||
       inAssignmentFlow ||
+      inMessageFlow ||
+      inLibraryFlow ||
       inLeaveApprovalFlow ||
+      inStudentLeaveApprovalFlow ||
       inTeacherDiaryFlow ||
       inHealthCardFlow ||
       inMarksFlow ||
@@ -1658,7 +1816,88 @@ export function useChatbot({
             tokens.includes(t),
           );
 
-          if (hasLeaveToken && hasApprovalToken) {
+          const studentLeaveApprovalKeywords = [
+            "student leave approval",
+            "approve student leave",
+            "student leave requests",
+            "pending student leaves",
+          ];
+          const hasStudentLeaveApprovalKeyword =
+            studentLeaveApprovalKeywords.some((keyword) =>
+              normalized.includes(keyword),
+            );
+
+          const teacherLeaveApprovalKeywords = [
+            "teacher leave approval",
+            "approve teacher leave",
+            "teacher leave requests",
+            "approve staff leave",
+            "staff leave approval",
+            "staff leave requests",
+            "employee leave approval",
+            "approve employee leave",
+          ];
+          const hasTeacherLeaveApprovalKeyword =
+            teacherLeaveApprovalKeywords.some((keyword) =>
+              normalized.includes(keyword),
+            );
+
+          const ambiguousApprovalPhrases = [
+            "pending approvals",
+            "approve requests",
+            "leave approval",
+            "approval requests",
+            "pending approval",
+            "show approval",
+            "show approvals",
+            "approvals",
+            "view approvals",
+            "check approvals",
+            "my approvals",
+            "leave approvals",
+          ];
+          const isAmbiguousApproval =
+            (normalized === "approval" || normalized === "approvals") ||
+            (ambiguousApprovalPhrases.some((phrase) =>
+              normalized.includes(phrase),
+            ) &&
+              !normalized.includes("student") &&
+              !normalized.includes("teacher") &&
+              !normalized.includes("staff") &&
+              !normalized.includes("employee"));
+
+          if (hasStudentLeaveApprovalKeyword) {
+            console.log(
+              "[Routing] Lexical override: forcing student_leave_approval based on keywords",
+              { normalized },
+            );
+            classificationResult = {
+              flow: "student_leave_approval",
+              confidence: 1,
+            } as any;
+            targetFlow = "student_leave_approval" as FlowType;
+          } else if (isAmbiguousApproval) {
+            console.log(
+              "[Routing] Lexical override: forcing approval_disambiguation",
+              { normalized },
+            );
+            classificationResult = {
+              flow: "approval_disambiguation",
+              confidence: 1,
+              clarification_question: APPROVAL_DISAMBIGUATION_QUESTION,
+            } as any;
+            targetFlow = "approval_disambiguation" as FlowType;
+          } else if (hasTeacherLeaveApprovalKeyword) {
+            console.log(
+              "[Routing] Lexical override: forcing leave_approval (teacher) based on keywords",
+              { normalized },
+            );
+            classificationResult = {
+              flow: "leave_approval",
+              confidence: 1,
+            } as any;
+            targetFlow = "leave_approval" as FlowType;
+          } else if (hasLeaveToken && hasApprovalToken) {
             console.log(
               "[Routing] Lexical override: forcing leave_approval based on tokens",
               { tokens },
@@ -1710,6 +1949,10 @@ export function useChatbot({
           // Map backend flow names to frontend flow types
           if (targetFlow === ("assignment_create" as any)) {
             targetFlow = "assignment";
+          } else if (targetFlow === ("message_create" as any)) {
+            targetFlow = "message";
+          } else if (targetFlow === ("library_reserve_book" as any)) {
+            targetFlow = "library";
           } else if (targetFlow === ("assignment_submit" as any)) {
             targetFlow = "submission";
           } else if (targetFlow === ("review_submission" as any)) {
@@ -1816,6 +2059,9 @@ export function useChatbot({
         setLeaveApprovalRequests([]);
         setLoadingLeaveRequests(false);
         setRejectReason({});
+        setStudentLeaveApprovalRequests([]);
+        setLoadingStudentLeaveRequests(false);
+        setStudentRejectReason({});
         // Do not switch to push-to-talk if user started this flow by voice (full voice mode stays on)
         if (!isVoiceTriggeredRequestRef.current) {
           setFullVoiceMode(false);
@@ -1828,6 +2074,72 @@ export function useChatbot({
         setRouterMode("llm");
         setAutoRouting(true);
         console.log("[Routing] Processing first assignment message");
+      }
+
+      // Initialize message flow
+      if (targetFlow === "message" && isNewFlowInitialization) {
+        console.log("[Routing] Initializing message flow state");
+        console.log("[Routing] Setting activeFlow to 'message'");
+
+        activeFlowRef.current = "message";
+        setActiveFlow("message");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        setStudentLeaveApprovalRequests([]);
+        setLoadingStudentLeaveRequests(false);
+        setStudentRejectReason({});
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
+        console.log("[Routing] Processing first message flow message");
+      }
+
+      // Initialize library flow
+      if (targetFlow === "library" && isNewFlowInitialization) {
+        console.log("[Routing] Initializing library flow state");
+        console.log("[Routing] Setting activeFlow to 'library'");
+
+        activeFlowRef.current = "library";
+        setActiveFlow("library");
+        setAttendanceData([]);
+        attendanceDataRef.current = [];
+        setAttendanceStep("class_info");
+        setPendingClassInfo(null);
+        setAttendanceFlowState(INITIAL_ATTENDANCE_STATE);
+        setClassInfo(null);
+        classInfoRef.current = null;
+        setLeaveApprovalRequests([]);
+        setLoadingLeaveRequests(false);
+        setRejectReason({});
+        setStudentLeaveApprovalRequests([]);
+        setLoadingStudentLeaveRequests(false);
+        setStudentRejectReason({});
+        if (!isVoiceTriggeredRequestRef.current) {
+          setFullVoiceMode(false);
+          setIsVoiceActive(false);
+        }
+        setPendingImageFile(null);
+        setEditingMessageIndex(null);
+        setShowClassInfoModal(false);
+        setDetectedFlow(null);
+        setRouterMode("llm");
+        setAutoRouting(true);
+        console.log("[Routing] Processing first library flow message");
       }
 
       // Initialize submission flow
@@ -1848,6 +2160,9 @@ export function useChatbot({
         setLeaveApprovalRequests([]);
         setLoadingLeaveRequests(false);
         setRejectReason({});
+        setStudentLeaveApprovalRequests([]);
+        setLoadingStudentLeaveRequests(false);
+        setStudentRejectReason({});
         // Do not switch to push-to-talk if user started this flow by voice (full voice mode stays on)
         if (!isVoiceTriggeredRequestRef.current) {
           setFullVoiceMode(false);
@@ -1892,6 +2207,9 @@ export function useChatbot({
         setLeaveApprovalRequests([]);
         setLoadingLeaveRequests(false);
         setRejectReason({});
+        setStudentLeaveApprovalRequests([]);
+        setLoadingStudentLeaveRequests(false);
+        setStudentRejectReason({});
         if (!isVoiceTriggeredRequestRef.current) {
           setFullVoiceMode(false);
           setIsVoiceActive(false);
@@ -1921,6 +2239,9 @@ export function useChatbot({
         setLeaveApprovalRequests([]);
         setLoadingLeaveRequests(false);
         setRejectReason({});
+        setStudentLeaveApprovalRequests([]);
+        setLoadingStudentLeaveRequests(false);
+        setStudentRejectReason({});
         // Do not switch to push-to-talk if user started this flow by voice (full voice mode stays on)
         if (!isVoiceTriggeredRequestRef.current) {
           setFullVoiceMode(false);
@@ -2037,6 +2358,30 @@ export function useChatbot({
     console.log("[Routing] Routing to flow:", targetFlow);
     console.log("[Routing] Current attendance step:", attendanceStep);
     console.log("[Routing] Pending class info:", pendingClassInfo);
+
+    if (targetFlow === ("approval_disambiguation" as FlowType)) {
+      const clarificationQuestion =
+        classificationResult?.clarification_question ||
+        APPROVAL_DISAMBIGUATION_QUESTION;
+      pendingApprovalDisambiguationRef.current = true;
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "bot",
+          answer: clarificationQuestion,
+          activeTab: "answer" as const,
+        },
+      ]);
+      try {
+        if (isVoiceTriggeredForThisRequest) {
+          void handlePlayTTS(-1, clarificationQuestion);
+        }
+      } catch (ttsErr) {
+        console.error("TTS playback failed:", ttsErr);
+      }
+      setIsProcessing(false);
+      return;
+    }
 
     // Update active flow for next message (unless manually overridden)
     if (autoRouting) {
@@ -2248,6 +2593,38 @@ export function useChatbot({
         playTTS: (idx, text) => void handlePlayTTS(idx, text),
         getTTSSummary: generateQueryTTSSummary,
       });
+    } else if (targetFlow === "message") {
+      await handleMessageChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowPreserveTTS: () =>
+          handleFlowExit({ newSession: false, skipTTSInterrupt: true }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
+    } else if (targetFlow === "library") {
+      await handleLibraryChat({
+        userMessage,
+        sessionId,
+        userId,
+        isVoiceTriggered: isVoiceTriggeredRequestRef.current === true,
+        getErpContext,
+        appendBotMessage: (msg) => setChatHistory((prev) => [...prev, msg]),
+        exitFlow: () => handleFlowExit({ newSession: false }),
+        exitFlowForManualExit: () =>
+          handleFlowExit({ newSession: true, skipTTSInterrupt: true }),
+        setProcessing: setIsProcessing,
+        playTTS: (idx, text) => void handlePlayTTS(idx, text),
+        getTTSSummary: generateQueryTTSSummary,
+      });
     } else if (targetFlow === "complaint") {
       await handleComplaintChat({
         userMessage,
@@ -2393,6 +2770,10 @@ export function useChatbot({
         setIsProcessing(false);
       }
     } else if (targetFlow === "leave_approval") {
+      setStudentLeaveApprovalRequests([]);
+      setLoadingStudentLeaveRequests(false);
+      setStudentRejectReason({});
+
       // Exit command: handle exit immediately (no backend for leave approval)
       if (
         flowToExitOnCommand === "leave_approval" ||
@@ -2445,6 +2826,7 @@ export function useChatbot({
                 type: "bot",
                 answer: `📋 **Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
                 activeTab: "answer" as const,
+                leaveApprovalDashboard: true,
               },
             ]);
 
@@ -2457,17 +2839,10 @@ export function useChatbot({
                 targetFlow === "leave_approval"
               ) {
                 const count = (response.data.leaveRequests || []).length || 0;
-                let speech = "";
-                if (count > 0) {
-                  speech = `📋 Leave Approval Dashboard. Found ${count} pending leave request${
-                    count === 1 ? "" : "s"
-                  } for your approval. Please review each request below and take action by either: ✅ Approve - Click the green \"Approve\" button. ❌ Reject - Enter a rejection reason and click the red \"Reject\" button`;
-                } else {
-                  speech = `Leave Approval Dashboard. Found 0 pending leave request(s) for your approval.`;
-                }
-
-                // Use the component's TTS helper to play speech. Pass a non-disruptive index.
-                void handlePlayTTS(-1, speech);
+                void handlePlayTTS(
+                  -1,
+                  buildLeaveApprovalEntrySpeech("teacher", count),
+                );
               }
             } catch (ttsErr) {
               console.error("TTS playback failed:", ttsErr);
@@ -2506,6 +2881,118 @@ export function useChatbot({
           {
             type: "bot",
             text: "You're in the Leave Approval flow. Please use the approve/reject buttons on the leave requests above to take action.",
+          },
+        ]);
+        setIsProcessing(false);
+      }
+    } else if (targetFlow === "student_leave_approval") {
+      setLeaveApprovalRequests([]);
+      setLoadingLeaveRequests(false);
+      setRejectReason({});
+
+      if (
+        flowToExitOnCommand === "student_leave_approval" ||
+        (isExitCommand && targetFlow === "student_leave_approval")
+      ) {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "✅ Exited. How can I help you next?",
+          },
+        ]);
+        handleFlowExit({ newSession: true, skipTTSInterrupt: true });
+        setIsProcessing(false);
+        try {
+          if (isVoiceTriggeredRequestRef.current === true) {
+            void handlePlayTTS(
+              -1,
+              "You've exited the student leave approval flow. How can I help you next?",
+            );
+          }
+        } catch (ttsErr) {
+          console.error("TTS playback failed:", ttsErr);
+        }
+        return;
+      }
+
+      if (
+        studentLeaveApprovalRequests.length === 0 &&
+        !loadingStudentLeaveRequests
+      ) {
+        try {
+          setLoadingStudentLeaveRequests(true);
+          const authToken = localStorage.getItem("token");
+          const { academic_session, branch_token } = getErpContext();
+
+          const response = await studentLeaveApprovalAPI.fetchPendingRequests({
+            user_id: userId,
+            page: 1,
+            limit: 50,
+            bearer_token: authToken || undefined,
+            academic_session,
+            branch_token,
+          });
+
+          if (response.status === 200 && response.data) {
+            setStudentLeaveApprovalRequests(response.data.leaveRequests || []);
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: `📋 **Student Leave Approval Dashboard**\n\nFound **${response.data.leaveRequests.length}** pending student leave request(s) for your approval.\n\nPlease review each request below and take action by either:\n- ✅ **Approve** - Click the green "Approve" button\n- ❌ **Reject** - Enter a rejection reason and click the red "Reject" button`,
+                activeTab: "answer" as const,
+                studentLeaveApprovalDashboard: true,
+              },
+            ]);
+
+            try {
+              if (
+                isVoiceTriggeredRequestRef.current === true &&
+                targetFlow === "student_leave_approval"
+              ) {
+                const count = (response.data.leaveRequests || []).length || 0;
+                void handlePlayTTS(
+                  -1,
+                  buildLeaveApprovalEntrySpeech("student", count),
+                );
+              }
+            } catch (ttsErr) {
+              console.error("TTS playback failed:", ttsErr);
+            }
+          } else {
+            setChatHistory((prev) => [
+              ...prev,
+              {
+                type: "bot",
+                answer: `✅ **No Pending Requests**\n\nThere are currently no pending student leave requests requiring your approval.`,
+                activeTab: "answer" as const,
+              },
+            ]);
+          }
+        } catch (err: any) {
+          console.error("Error fetching student leave approval requests:", err);
+          const errorMessage =
+            err.message ||
+            err.response?.data?.message ||
+            "Unknown error occurred";
+          setChatHistory((prev) => [
+            ...prev,
+            {
+              type: "bot",
+              text: `❌ **Error Loading Student Leave Requests**\n\nSorry, there was an error fetching student leave approval requests.\n\n**Error:** ${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
+            },
+          ]);
+        } finally {
+          setLoadingStudentLeaveRequests(false);
+          setIsProcessing(false);
+        }
+      } else {
+        setChatHistory((prev) => [
+          ...prev,
+          {
+            type: "bot",
+            text: "You're in the Student Leave Approval flow. Please use the approve/reject buttons on the student leave requests above to take action.",
           },
         ]);
         setIsProcessing(false);
@@ -3757,6 +4244,9 @@ export function useChatbot({
     setLeaveApprovalRequests,
     setRejectReason,
     setLoadingLeaveRequests,
+    setStudentLeaveApprovalRequests,
+    setStudentRejectReason,
+    setLoadingStudentLeaveRequests,
     devices,
     selectedDeviceId,
     setSelectedDeviceId,
@@ -3790,6 +4280,9 @@ export function useChatbot({
     leaveApprovalRequests,
     loadingLeaveRequests,
     rejectReason,
+    studentLeaveApprovalRequests,
+    loadingStudentLeaveRequests,
+    studentRejectReason,
     inputText,
     setInputText,
     isRecording,
