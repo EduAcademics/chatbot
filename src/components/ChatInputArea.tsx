@@ -28,6 +28,7 @@ export interface ChatInputAreaProps {
   handlePttDown: () => Promise<void>;
   handlePttUp: () => Promise<void>;
   setChatHistory: React.Dispatch<React.SetStateAction<any[]>>;
+  fullVoiceMode: boolean;
   sessionId: string;
   userId: string;
   classInfo: ClassInfo | null;
@@ -59,6 +60,7 @@ export default function ChatInputArea({
   handlePttDown,
   handlePttUp,
   setChatHistory,
+  fullVoiceMode,
   sessionId,
   userId,
   classInfo,

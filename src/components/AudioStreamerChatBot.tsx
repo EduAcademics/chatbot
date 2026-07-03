@@ -92,6 +92,7 @@ const AudioStreamerChatBot = ({
             setFeedbackComment={api.setFeedbackComment}
             correctionBoxRef={api.correctionBoxRef}
             handlePlayTTS={api.handlePlayTTS}
+            fullVoiceMode={api.fullVoiceMode}
             handleSendFeedback={api.handleSendFeedback}
             handleAttendanceDataChange={api.handleAttendanceDataChange}
             handleAddStudent={api.handleAddStudent}
@@ -153,6 +154,7 @@ const AudioStreamerChatBot = ({
             getErpContext={api.getErpContext}
             activeVoiceButtonRef={api.activeVoiceButtonRef}
             handlePlayTTS={api.handlePlayTTS}
+            fullVoiceMode={api.fullVoiceMode}
           />
         </div>
       </div>
