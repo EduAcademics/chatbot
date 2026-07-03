@@ -4,6 +4,17 @@ export const FULL_VOICE_TURN_DEBOUNCE_MS = 500;
 /** Longer pause for flows where users list names (attendance, assignment, leave). */
 export const FULL_VOICE_DICTATION_DEBOUNCE_MS = 1200;
 
+/** De-dupe window for voice submits. Multiple paths can try to submit the same
+ *  utterance (dictation debounce, VAD turn-complete, PTT release). If the same
+ *  text is submitted again within this window it is ignored so the user's speech
+ *  isn't sent/echoed twice. */
+export const VOICE_SUBMIT_DEDUPE_MS = 4000;
+
+/** Backstop de-dupe window applied inside handleSubmit itself (covers every
+ *  submit source, not just voice). Kept short so it only catches accidental
+ *  double-fires, never an intentional repeat the user types/says later. */
+export const SUBMIT_DEDUPE_MS = 1500;
+
 /** Wait before REST TTS if WebRTC pipeline does not signal audio start.
  *  Must stay above the real pipeline TTS time-to-first-byte (~1.4s observed for
  *  Azure) so a healthy pipeline isn't raced by the REST fallback (which caused

@@ -12,6 +12,7 @@ import type {
   ClassInfo,
 } from "./flows/attendanceFlow";
 import { handleAssignmentFileUpload } from "./flows/assignmentFlow";
+import { handleMessageFileUpload } from "./flows/messageFlow";
 import { handleSubmissionFileUpload } from "./flows/submissionFlow";
 import { handleAttendanceImageUpload } from "./flows/attendanceFlow";
 
@@ -77,6 +78,15 @@ export default function ChatInputArea({
   const pttBtnRef = useRef<HTMLButtonElement>(null);
   const isPttBusy = isPttCapturing || isRecording;
   const pttConnectingOnly = isPttConnecting && !isRecording;
+  // Show the send icon only when the user has TYPED text. During push-to-talk the
+  // box fills with the live transcript, so we keep the mic icon while capturing.
+  const showSend = inputText.trim().length > 0 && !isPttBusy;
+  // The upload icon only does something in these flows; hide it otherwise so the
+  // default view shows just the mic (file-upload functionality is unchanged).
+  const canUpload =
+    activeFlow === "attendance" ||
+    activeFlow === "assignment" ||
+    activeFlow === "submission";
 
   const releasePttPointer = (e: React.PointerEvent) => {
     const btn = pttBtnRef.current;
@@ -88,7 +98,14 @@ export default function ChatInputArea({
   const handlePttPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     if (isPttConnecting && !isPttCapturing) return;
-    pttBtnRef.current?.setPointerCapture(e.pointerId);
+    // Pointer capture keeps pointerup/cancel on this button even if the finger
+    // slides. Some Android/iOS WebViews throw or no-op here — PTT must still work,
+    // so guard it and rely on the up/cancel/lost-capture handlers below.
+    try {
+      pttBtnRef.current?.setPointerCapture(e.pointerId);
+    } catch {
+      /* capture unsupported in this WebView — ignore */
+    }
     void handlePttDown();
   };
 
@@ -103,6 +120,14 @@ export default function ChatInputArea({
 
   const handlePttPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
     releasePttPointer(e);
+    void handlePttUp();
+  };
+
+  // Safety net: if a WebView drops pointer capture without firing pointerup
+  // (observed on some Android/iOS in-app browsers), still release so the mic
+  // can never get stuck on. handlePttUp self-guards, so this is a no-op after a
+  // normal release.
+  const handlePttLostCapture = () => {
     void handlePttUp();
   };
 
@@ -124,7 +149,9 @@ export default function ChatInputArea({
         <input
           type="file"
           accept={
-            activeFlow === "assignment" || activeFlow === "submission"
+            activeFlow === "assignment" ||
+            activeFlow === "message" ||
+            activeFlow === "submission"
               ? ".pdf,.doc,.docx,image/*"
               : ".xlsx,.xls,.csv,image/*"
           }
@@ -133,6 +160,7 @@ export default function ChatInputArea({
           disabled={
             activeFlow !== "attendance" &&
             activeFlow !== "assignment" &&
+            activeFlow !== "message" &&
             activeFlow !== "submission"
           }
           onChange={async (e) => {
@@ -206,6 +234,19 @@ export default function ChatInputArea({
                 appendBotMessage: (msg) =>
                   setChatHistory((prev) => [...prev, msg]),
               });
+            } else if (activeFlow === "message") {
+              await handleMessageFileUpload({
+                file,
+                sessionId,
+                userId,
+                isVoiceTriggered:
+                  fullVoiceMode || activeVoiceButtonRef.current !== null,
+                getErpContext,
+                appendBotMessage: (msg) =>
+                  setChatHistory((prev) => [...prev, msg]),
+                playTTS: (idx, text) => void handlePlayTTS(idx, text, true),
+                getTTSSummary: (text) => text,
+              });
             } else if (activeFlow === "submission") {
               await handleSubmissionFileUpload({
                 file,
@@ -221,10 +262,12 @@ export default function ChatInputArea({
             e.target.value = "";
           }}
         />
+        {canUpload && (
         <motion.label
           htmlFor={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? "file-upload-input"
               : undefined
@@ -232,6 +275,7 @@ export default function ChatInputArea({
           className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? "cursor-pointer"
               : "cursor-not-allowed"
@@ -239,6 +283,7 @@ export default function ChatInputArea({
           whileHover={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? { scale: 1.08, y: -2 }
               : {}
@@ -246,6 +291,7 @@ export default function ChatInputArea({
           whileTap={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? { scale: 0.95 }
               : {}
@@ -255,14 +301,17 @@ export default function ChatInputArea({
               ? "Upload Excel or Image"
               : activeFlow === "assignment"
                 ? "Upload Assignment File (PDF, DOCX, Image)"
-                : activeFlow === "submission"
-                  ? "Upload Submission File"
-                  : "Enable assignment or attendance flow to upload"
+                : activeFlow === "message"
+                  ? "Upload Message Attachment (PDF, DOCX, Image)"
+                  : activeFlow === "submission"
+                    ? "Upload Submission File"
+                    : "Enable assignment or attendance flow to upload"
           }
           onClick={(e) => {
             if (
               activeFlow !== "attendance" &&
               activeFlow !== "assignment" &&
+              activeFlow !== "message" &&
               activeFlow !== "submission"
             ) {
               e.preventDefault();
@@ -272,6 +321,7 @@ export default function ChatInputArea({
         >
           <FiUpload />
         </motion.label>
+        )}
       </div>
 
       <div className="chatbot-input-wrap flex-1 min-w-0 relative">
@@ -304,38 +354,41 @@ export default function ChatInputArea({
         )}
       </div>
 
-      <button
-        ref={pttBtnRef}
-        type="button"
-        className={`chatbot-btn chatbot-btn-ptt w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center${
-          isPttBusy ? " ptt-active" : ""
-        }${pttConnectingOnly ? " ptt-connecting" : ""}${
-          isVoiceActive ? " ptt-voice-active" : ""
-        }`}
-        title={
-          pttConnectingOnly
-            ? "Connecting microphone…"
-            : isPttBusy
-              ? "Release to send"
-              : "Hold to speak (Push-to-Talk)"
-        }
-        aria-pressed={isPttBusy}
-        onPointerDown={handlePttPointerDown}
-        onPointerUp={handlePttPointerUp}
-        onPointerCancel={handlePttPointerCancel}
-        onContextMenu={(e) => e.preventDefault()}
-      >
-        {pttConnectingOnly ? <FiLoader /> : <FiMic />}
-      </button>
-
-      <button
-        onClick={() => void handleSubmit()}
-        className="chatbot-btn send"
-        title="Send Message"
-        disabled={isPttBusy}
-      >
-        <FiSend />
-      </button>
+      {showSend ? (
+        <button
+          onClick={() => void handleSubmit()}
+          className="chatbot-btn send"
+          title="Send Message"
+          disabled={isPttBusy}
+        >
+          <FiSend />
+        </button>
+      ) : (
+        <button
+          ref={pttBtnRef}
+          type="button"
+          className={`chatbot-btn chatbot-btn-ptt w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl flex items-center justify-center${
+            isPttBusy ? " ptt-active" : ""
+          }${pttConnectingOnly ? " ptt-connecting" : ""}${
+            isVoiceActive ? " ptt-voice-active" : ""
+          }`}
+          title={
+            pttConnectingOnly
+              ? "Connecting microphone…"
+              : isPttBusy
+                ? "Release to send"
+                : "Hold to speak (Push-to-Talk)"
+          }
+          aria-pressed={isPttBusy}
+          onPointerDown={handlePttPointerDown}
+          onPointerUp={handlePttPointerUp}
+          onPointerCancel={handlePttPointerCancel}
+          onLostPointerCapture={handlePttLostCapture}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {pttConnectingOnly ? <FiLoader /> : <FiMic />}
+        </button>
+      )}
     </div>
   );
 }

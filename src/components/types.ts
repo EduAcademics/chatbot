@@ -9,13 +9,17 @@ export type FlowType =
   | "full_voice_attendance"
   | "leave"
   | "leave_approval"
+  | "student_leave_approval"
   | "assignment"
+  | "message"
+  | "library"
   | "submission"
   | "review"
   | "marks"
   | "health_card"
   | "teacher_diary"
   | "course_progress"
+  | "complaint"
   | "_legacy_attendance_disabled"
   | "_legacy_voice_attendance_disabled";
 
