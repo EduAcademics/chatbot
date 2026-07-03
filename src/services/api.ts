@@ -34,7 +34,7 @@ interface UserFetchResponse {
 
 interface QueryHandlerRequest {
   user_id: string;
-  user_roles: string;
+  user_roles: string | string[];
   query: string;
   flow?: string;  
   validation_status?: string;
