@@ -51,6 +51,7 @@ interface QueryHandlerResponse {
         total: number;
         page_size: number;
         columns: string[];
+        row_status_key?: string;
       };
     } | null;
     mongodbquery: string[];
@@ -60,6 +61,10 @@ interface QueryHandlerResponse {
     findings?: string[];
     ai_level?: string;
     catalog_id?: string;
+    layout?: string[];
+    action_options?: import("../components/types").ActionOption[];
+    recommendations?: import("../components/types").Recommendation[];
+    interactive_ui?: import("../types/managerBriefTypes").ManagerBriefPayload;  // 3rd-july ko add kiya
   };
   message?: string;
 }
@@ -1053,5 +1058,63 @@ export const courseProgressAPI = {
     }
 
     return await parseJsonResponse<GetCourseProgressResponse>(response);
+  },
+};
+
+// Board Pack review / archive
+export const boardPackAPI = {
+  getReview: async (
+    uuid_question: string,
+  ): Promise<{ status: string; review?: { status?: string } | null; message?: string }> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/board-pack/review/${encodeURIComponent(uuid_question)}`,
+    );
+    return parseJsonResponse(response);
+  },
+
+  approve: async (body: {
+    uuid_question: string;
+    user_id: string;
+    academic_session?: string;
+    period?: string;
+    snapshot: Record<string, unknown>;
+  }): Promise<{ status: string; message?: string }> => {
+    const response = await fetch(`${API_BASE_URL}/v1/board-pack/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return parseJsonResponse(response);
+  },
+
+  reject: async (body: {
+    uuid_question: string;
+    user_id: string;
+    reason?: string;
+  }): Promise<{ status: string; message?: string }> => {
+    const response = await fetch(`${API_BASE_URL}/v1/board-pack/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return parseJsonResponse(response);
+  },
+
+  downloadExport: async (uuid_question: string): Promise<void> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/board-pack/${encodeURIComponent(uuid_question)}/export`,
+    );
+    if (!response.ok) {
+      throw new Error("Export failed");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `board-pack-${uuid_question.slice(0, 8)}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   },
 };

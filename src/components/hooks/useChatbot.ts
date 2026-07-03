@@ -1540,6 +1540,11 @@ export function useChatbot({
               findings: data.data?.findings ?? undefined,
               ai_level: data.data?.ai_level,
               catalog_id: data.data?.catalog_id,
+              layout: data.data?.layout ?? undefined,
+              action_options: data.data?.action_options ?? undefined,
+              recommendations: data.data?.recommendations ?? undefined,
+              interactive_ui: data.data?.interactive_ui ?? undefined,  // 3rd-july ko add kiya
+              uuid_question: data.data?.uuid_question,
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response

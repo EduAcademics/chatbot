@@ -21,11 +21,31 @@ export type FlowType =
 
 export type ChartType = "bar" | "line" | "pie" | "table" | "none";
 
+export type Tone = "neutral" | "success" | "warning" | "danger";
+
 /** Matches backend query-handler `data.visualization` contract */
 export interface TableMeta {
   total: number;
   page_size: number;
   columns: string[];
+  
+  row_status_key?: string;
+}
+
+/** A single decision button in the L4 ActionEngine block. */
+export interface ActionOption {
+  id: string;
+  label: string;
+  icon?: string;
+  tone?: Tone;
+}
+
+export interface Recommendation {
+  id: string;
+  title: string;
+  detail: string;
+  action: string;
+  severity?: Tone | "info" | "warning" | "critical";
 }
 
 export interface TableData {
@@ -36,7 +56,9 @@ export interface TableData {
 export interface KpiCard {
   label: string;
   value: string | number;
-  tone?: "neutral" | "danger" | "warning" | "success";
+  tone?: Tone;
+  
+  sublabel?: string;
 }
 
 export interface Visualization {
@@ -85,6 +107,14 @@ export interface ChatMessage {
   findings?: string[];
   ai_level?: string;
   catalog_id?: string;
+  
+  layout?: string[];
+  
+  action_options?: ActionOption[];
+  recommendations?: Recommendation[];
+  interactive_ui?: import("../types/managerBriefTypes").ManagerBriefPayload;  // 3rd-july ko add kiya
+  uuid_question?: string;
+  board_pack_status?: "draft" | "approved" | "rejected";
 }
 
 export interface ClassInfo {

@@ -16,12 +16,19 @@ interface PaginatedDataTableProps {
   downloadFilename?: string;
 }
 
+const ragRowClass: Record<string, string> = {
+  danger: "rag-row-danger",
+  warning: "rag-row-warning",
+  success: "rag-row-success",
+  neutral: "",
+};
+
 export default function PaginatedDataTable({
   tableData,
   downloadFilename = "query-results.csv",
 }: PaginatedDataTableProps) {
   const { rows, table_meta } = tableData;
-  const { columns, page_size, total } = table_meta;
+  const { columns, page_size, total, row_status_key } = table_meta;
   const [page, setPage] = useState(0);
 
   const usePagination = total > page_size;
@@ -93,13 +100,19 @@ export default function PaginatedDataTable({
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((row, rowIdx) => (
-              <tr key={`${safePage}-${rowIdx}`}>
-                {columns.map((col) => (
-                  <td key={col}>{cellText(row[col])}</td>
-                ))}
-              </tr>
-            ))}
+            {pageRows.map((row, rowIdx) => {
+              const status = row_status_key
+                ? String(row[row_status_key] ?? "").toLowerCase()
+                : "";
+              const rowClass = row_status_key ? ragRowClass[status] || "" : "";
+              return (
+                <tr key={`${safePage}-${rowIdx}`} className={rowClass}>
+                  {columns.map((col) => (
+                    <td key={col}>{cellText(row[col])}</td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
