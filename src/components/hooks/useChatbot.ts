@@ -1911,7 +1911,7 @@ export function useChatbot({
       try {
         const data = await aiAPI.queryHandler({    // this is where suitcase is built using model.py structure and sent to backend server(supriyo). the code combines the ID, Question and label into one package 
           user_id: userId,
-          user_roles: roles,
+          user_roles: roles ? (Array.isArray(roles) ? roles : roles.split(",").map(r => r.trim())) : [],
           query: userMessage,
           flow: targetFlow,
           validation_status: classificationResult?.validation_status 
