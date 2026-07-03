@@ -27,6 +27,7 @@ const formatStudentLeaveType = (leaveType: string): string => {
 
 export interface ChatMessageListProps {
   chatBoxRef: React.RefObject<HTMLDivElement | null>;
+  fullVoiceMode?: boolean;
   chatHistory: any[];
   activeFlow: FlowType;
   attendanceStep: "class_info" | "student_details" | "completed";

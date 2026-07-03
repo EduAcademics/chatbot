@@ -88,6 +88,7 @@ export default function ChatInputArea({
   const canUpload =
     activeFlow === "attendance" ||
     activeFlow === "assignment" ||
+    activeFlow === "message" ||
     activeFlow === "submission";
 
   const releasePttPointer = (e: React.PointerEvent) => {
