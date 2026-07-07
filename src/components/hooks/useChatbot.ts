@@ -2026,7 +2026,8 @@ export function useChatbot({
           user_roles: roles,
           query: userMessage,
           flow: targetFlow,
-          validation_status: classificationResult?.validation_status 
+          validation_status: classificationResult?.validation_status,
+          voice_mode: isVoiceTriggeredForThisRequest,
         });
         if (data.status === "success" && data.data) {
           setChatHistory((prev) => [
@@ -2043,7 +2044,9 @@ export function useChatbot({
               findings: data.data?.findings ?? undefined,
               ai_level: data.data?.ai_level,
               catalog_id: data.data?.catalog_id,
+              uuid_question: data.data?.uuid_question,
               tts_text: data.data?.tts_text,
+              tts_summary_ready: data.data?.tts_summary_ready,
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response
@@ -2059,17 +2062,15 @@ export function useChatbot({
           if (shouldPlayQueryTTS) {
             try {
               queryResponseAtRef.current = Date.now();
-              const speakText =
-                data.data?.tts_text?.trim() ||
-                data.data?.answer ||
-                "";
+              const answerText = data.data?.answer || "";
               void handlePlayTTS(
                 -1,
-                speakText,
+                answerText,
                 true,
                 data.data?.uuid_question,
                 {
                   backend_tts_text: data.data?.tts_text,
+                  tts_summary_ready: data.data?.tts_summary_ready,
                   table_data: data.data?.table_data ?? undefined,
                   findings: data.data?.findings,
                   kpi_cards: data.data?.kpi_cards,
@@ -2576,7 +2577,9 @@ export function useChatbot({
 
     let speechText = text;
     let summaryAlreadyResolved = false;
-    const preResolved = ttsContext?.backend_tts_text?.trim();
+    const preResolved =
+      ttsContext?.tts_summary_ready === true &&
+      ttsContext?.backend_tts_text?.trim();
 
     if (isQuery) {
       if (preResolved) {
@@ -2587,19 +2590,6 @@ export function useChatbot({
             `[Voice/Latency] query-response → speak-ready: ${Date.now() - queryResponseAtRef.current}ms (pre-resolved)`,
           );
         }
-        // Warm insight cache in background; do not block or re-speak (v1).
-        void aiAPI
-          .resolveTtsText({
-            text,
-            uuid_question: uuidQuestion,
-            timeout_seconds: 5,
-            table_data: ttsContext?.table_data ?? undefined,
-            findings: ttsContext?.findings,
-            kpi_cards: ttsContext?.kpi_cards,
-          })
-          .catch((err) => {
-            console.debug("[TTS] background resolve-tts-text:", err);
-          });
       } else {
         try {
           const resolved = await aiAPI.resolveTtsText({
@@ -2613,7 +2603,9 @@ export function useChatbot({
           const backendSummary = resolved.data?.tts_text?.trim();
           if (backendSummary) {
             speechText = backendSummary;
-            summaryAlreadyResolved = true;
+            if (resolved.data?.tts_summary_ready) {
+              summaryAlreadyResolved = true;
+            }
           } else {
             speechText = generateQueryTTSSummary(text) || text;
           }

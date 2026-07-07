@@ -84,11 +84,12 @@ export default function VoiceResponseCard({
           onClick={() =>
             handlePlayTTS(
               idx,
-              msg.tts_text?.trim() || answerText,
+              answerText,
               Boolean(msg.answer),
-              undefined,
+              msg.uuid_question,
               {
                 backend_tts_text: msg.tts_text,
+                tts_summary_ready: msg.tts_summary_ready,
                 table_data: msg.table_data,
                 findings: msg.findings,
                 kpi_cards: msg.kpi_cards,

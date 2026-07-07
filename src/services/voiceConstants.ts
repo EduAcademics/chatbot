@@ -21,8 +21,8 @@ export const SUBMIT_DEDUPE_MS = 1500;
  *  double playback). Mutual-exclusion guards correctness; this only tunes latency. */
 export const PIPELINE_TTS_FALLBACK_MS = 2500;
 
-/** Max seconds to block on resolve-tts-text when no pre-resolved summary exists. */
-export const TTS_RESOLVE_TIMEOUT_SEC = 1.0;
+/** Max seconds to block on resolve-tts-text when no pre-resolved LLM summary exists. */
+export const TTS_RESOLVE_TIMEOUT_SEC = 6.0;
 
 /** Keep WebRTC warm after PTT release before disconnecting.
  *  Long window so repeated PTT presses reuse the live connection (instant mic,

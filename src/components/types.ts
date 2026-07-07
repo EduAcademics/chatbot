@@ -37,8 +37,10 @@ export interface TtsQueryContext {
   table_data?: TableData;
   findings?: string[];
   kpi_cards?: KpiCard[];
-  /** Ready-to-speak summary from query-handler; skips blocking resolve-tts-text. */
+  /** Speakable summary from query-handler when tts_summary_ready is true. */
   backend_tts_text?: string;
+  /** When true, backend_tts_text is production-ready (LLM or table summary). */
+  tts_summary_ready?: boolean;
 }
 
 export interface KpiCard {
@@ -93,8 +95,10 @@ export interface ChatMessage {
   findings?: string[];
   ai_level?: string;
   catalog_id?: string;
-  /** Pre-resolved voice summary from query-handler (instant speaker replay). */
+  uuid_question?: string;
+  /** Pre-resolved voice summary when tts_summary_ready is true. */
   tts_text?: string;
+  tts_summary_ready?: boolean;
 }
 
 export interface ClassInfo {

@@ -38,6 +38,9 @@ interface QueryHandlerRequest {
   query: string;
   flow?: string;  
   validation_status?: string;
+  /** STT/PTT submission — backend awaits voice summary before returning tts_text. */
+  voice_mode?: boolean;
+  tts?: boolean;
 }
 
 interface QueryHandlerResponse {
@@ -55,8 +58,10 @@ interface QueryHandlerResponse {
     } | null;
     mongodbquery: string[];
     uuid_question?: string;
-    /** Pre-resolved voice summary (table-aware); speak immediately in PTT flow. */
+    /** Pre-resolved voice summary when tts_summary_ready is true. */
     tts_text?: string;
+    /** True when tts_text is an LLM/table summary (safe to speak without re-resolve). */
+    tts_summary_ready?: boolean;
     visualization?: Visualization;
     kpi_cards?: import("../components/types").KpiCard[];
     findings?: string[];
@@ -437,7 +442,7 @@ interface ResolveTtsTextRequest {
 
 interface ResolveTtsTextResponse {
   status: string;
-  data?: { tts_text?: string };
+  data?: { tts_text?: string; tts_summary_ready?: boolean };
 }
 
 interface FeedbackRequest {
