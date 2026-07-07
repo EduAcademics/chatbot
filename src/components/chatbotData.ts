@@ -16,12 +16,12 @@ export const QUICK_ACTIONS = [
 ];
 
 export const SUGGESTED_PROMPTS = [
-  "What are my classes today?",
-  "Summarize my homework",
-  "Help me with math problems",
-  "What's on the school calendar?",
-  "Explain photosynthesis simply",
-  "Tips for better study habits",
+  "Show my profile summary",
+  "Show my attendance for the last 7 days",
+  "What is my attendance this month?",
+  "What are the school holidays this month?",
+  "Show names of all class teachers",
+  "When did I join this school?"
 ];
 
 export type ChatbotScreen = "home" | "chat" | "voice";
