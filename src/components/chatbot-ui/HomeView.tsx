@@ -1,12 +1,14 @@
 import { motion } from "framer-motion";
 import { FiMic, FiMessageCircle } from "react-icons/fi";
 import AiMascot from "./AiMascot";
-import { QUICK_ACTIONS, SUGGESTED_PROMPTS } from "../chatbotData";
+import { QUICK_ACTIONS } from "../chatbotData";
 import type { ChatbotScreen } from "../chatbotData";
+import { getSuggestedPrompts } from "../../utils/resolvePersona";
 import { formatDisplayName } from "./formatDisplayName";
 
 interface HomeViewProps {
   userName?: string | null;
+  roles: string;
   onNavigate: (screen: ChatbotScreen) => void;
   onSelectPrompt: (prompt: string) => void;
 }
@@ -16,10 +18,12 @@ const actionIcon = (icon: "mic" | "chat") =>
 
 export default function HomeView({
   userName,
+  roles,
   onNavigate,
   onSelectPrompt,
 }: HomeViewProps) {
   const displayName = formatDisplayName(userName);
+  const suggestedPrompts = getSuggestedPrompts(roles);
 
   return (
     <div className="chatbot-screen home-view">
@@ -44,7 +48,7 @@ export default function HomeView({
 
       <p className="home-section-label">Try asking</p>
       <div className="suggested-prompts-scroll">
-        {SUGGESTED_PROMPTS.map((prompt) => (
+        {suggestedPrompts.map((prompt) => (
           <button
             key={prompt}
             type="button"

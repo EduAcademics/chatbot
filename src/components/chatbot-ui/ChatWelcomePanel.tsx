@@ -1,13 +1,18 @@
 import { motion } from "framer-motion";
 import { FiMessageCircle } from "react-icons/fi";
 import AiMascot from "./AiMascot";
-import { SUGGESTED_PROMPTS } from "../chatbotData";
+import { getSuggestedPrompts } from "../../utils/resolvePersona";
 
 interface ChatWelcomePanelProps {
+  roles: string;
   onSelectPrompt: (prompt: string) => void;
 }
 
-export default function ChatWelcomePanel({ onSelectPrompt }: ChatWelcomePanelProps) {
+export default function ChatWelcomePanel({
+  roles,
+  onSelectPrompt,
+}: ChatWelcomePanelProps) {
+  const suggestedPrompts = getSuggestedPrompts(roles).slice(0, 4);
   return (
     <motion.div
       className="chat-welcome-panel"
@@ -29,7 +34,7 @@ export default function ChatWelcomePanel({ onSelectPrompt }: ChatWelcomePanelPro
       </div>
 
       <div className="chat-welcome-prompts">
-        {SUGGESTED_PROMPTS.slice(0, 4).map((prompt, i) => (
+        {suggestedPrompts.map((prompt, i) => (
           <motion.button
             key={prompt}
             type="button"

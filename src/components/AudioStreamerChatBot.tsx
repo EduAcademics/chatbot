@@ -65,6 +65,7 @@ const AudioStreamerChatBot = ({
             >
             <HomeView
               userName={loginId}
+              roles={roles}
               onNavigate={(next) => setScreen(next)}
               onSelectPrompt={handleSelectPrompt}
             />

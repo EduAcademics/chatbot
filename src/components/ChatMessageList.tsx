@@ -227,7 +227,10 @@ export default function ChatMessageList(props: ChatMessageListProps) {
 
       <div className="chatbot-messages">
         {showWelcomePanel && onSelectPrompt ? (
-          <ChatWelcomePanel onSelectPrompt={onSelectPrompt} />
+          <ChatWelcomePanel
+            roles={userRoles.join(",")}
+            onSelectPrompt={onSelectPrompt}
+          />
         ) : null}
         {chatHistory.map((msg, idx) => {
           if (showWelcomePanel && idx === 0 && msg.type === "bot") return null;
