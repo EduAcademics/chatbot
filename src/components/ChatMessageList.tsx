@@ -1472,6 +1472,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                             key={bIdx}
                                             tableData={msg.table_data}
                                             downloadFilename="advisory-results.csv"
+                                            showDownload={!msg.catalog_id?.trim()}
                                           />
                                         ) : null;
                                       case "TrendChart":
@@ -1512,6 +1513,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   <PaginatedDataTable
                                     tableData={msg.table_data}
                                     downloadFilename="query-results.csv"
+                                    showDownload={!msg.catalog_id?.trim()}
                                   />
                                 ) : null}
                               </>

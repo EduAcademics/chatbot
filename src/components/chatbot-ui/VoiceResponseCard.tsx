@@ -69,6 +69,7 @@ export default function VoiceResponseCard({
           <PaginatedDataTable
             tableData={msg.table_data}
             downloadFilename="query-results.csv"
+            showDownload={!msg.catalog_id?.trim()}
           />
         ) : null}
         {msg.visualization?.show_chart && msg.visualization ? (

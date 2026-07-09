@@ -531,6 +531,7 @@ export default function ManagerBriefDashboard({
               <PaginatedDataTable
                 tableData={tableDetail}
                 downloadFilename="manager-brief-results.csv"
+                showDownload={false}
               />
             </div>
           ) : null}

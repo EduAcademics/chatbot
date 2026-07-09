@@ -14,6 +14,8 @@ function cellText(value: unknown): string {
 interface PaginatedDataTableProps {
   tableData: TableData;
   downloadFilename?: string;
+  /** Hide toolbar CSV when catalog responses use Download .xls above the table. */
+  showDownload?: boolean;
 }
 
 const ragRowClass: Record<string, string> = {
@@ -26,6 +28,7 @@ const ragRowClass: Record<string, string> = {
 export default function PaginatedDataTable({
   tableData,
   downloadFilename = "query-results.csv",
+  showDownload = true,
 }: PaginatedDataTableProps) {
   const { rows, table_meta } = tableData;
   const { columns, page_size, total, row_status_key } = table_meta;
@@ -79,13 +82,15 @@ export default function PaginatedDataTable({
             >
               Next
             </button>
-            <button
-              type="button"
-              className="paginated-table-btn paginated-table-btn-primary"
-              onClick={() => downloadTableCsv(rows, columns, downloadFilename)}
-            >
-              Download CSV
-            </button>
+            {showDownload ? (
+              <button
+                type="button"
+                className="paginated-table-btn paginated-table-btn-primary"
+                onClick={() => downloadTableCsv(rows, columns, downloadFilename)}
+              >
+                Download CSV
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
