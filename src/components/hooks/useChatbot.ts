@@ -2047,6 +2047,11 @@ export function useChatbot({
               uuid_question: data.data?.uuid_question,
               tts_text: data.data?.tts_text,
               tts_summary_ready: data.data?.tts_summary_ready,
+              layout: data.data?.layout ?? undefined,
+              action_options: data.data?.action_options ?? undefined,
+              recommendations: data.data?.recommendations ?? undefined,
+              interactive_ui: data.data?.interactive_ui ?? undefined,  // 3rd-july ko add kiya
+            
             },
           ]);
           // Ã¢Â­Â NEW: Check for exit response

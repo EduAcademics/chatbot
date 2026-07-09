@@ -7,7 +7,12 @@ import MemoizedAnswer from "./MemoizedAnswer";
 import PaginatedDataTable from "./PaginatedDataTable";
 import KpiCardRow from "./KpiCardRow";
 import FindingsList from "./FindingsList";
+import RecommendationsList from "./RecommendationsList";
+import BoardPackReview from "./BoardPackReview";
+import ManagerBriefDashboard from "./ManagerBriefDashboard";
+import { resolveManagerBrief } from "../utils/resolveManagerBrief";
 import VisualizationRenderer from "./VisualizationRenderer";
+import ActionEngine from "./ActionEngine";
 import { MarksEntryTable } from "./MarksEntryTable";
 import { HealthCardTable } from "./HealthCardTable";
 import { HealthCardSelector } from "./HealthCardSelector";
@@ -232,8 +237,13 @@ export default function ChatMessageList(props: ChatMessageListProps) {
             onSelectPrompt={onSelectPrompt}
           />
         ) : null}
+
+
+        {/*{chatHistory.map((msg, idx) => {
+          if (showWelcomePanel && idx === 0 && msg.type === "bot") return null; */}
+
         {chatHistory.map((msg, idx) => {
-          if (showWelcomePanel && idx === 0 && msg.type === "bot") return null;
+          const managerBrief = resolveManagerBrief(msg);
           return (
           <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
             {msg.type === "user" ? (
@@ -1377,6 +1387,106 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   )}
                                 </div>
                               )
+                            ) : managerBrief ? (
+                              <>
+                                <ManagerBriefDashboard
+                                  data={managerBrief}
+                                  actionOptions={msg.action_options}
+                                />
+                                {(managerBrief.footer ===
+                                  "board_pack_review" ||
+                                  msg.catalog_id === "management_q12") &&
+                                msg.uuid_question ? (
+                                  <BoardPackReview
+                                    message={msg}
+                                    userId={userId}
+                                    academicSession={
+                                      getErpContext().academic_session
+                                    }
+                                  />
+                                ) : null}
+                              </>
+                            ) : msg.layout?.length ? (
+                              // Server-Driven-UI (L4 advisory): render blocks in
+                              // the order the backend specified via its registry.
+                              <>
+                                {msg.layout.map(
+                                  (block: string, bIdx: number) => {
+                                    switch (block) {
+                                      case "ManagerBrief":
+                                        return null;
+                                      case "KpiBanner":
+                                        return msg.kpi_cards?.length ? (
+                                          <KpiCardRow
+                                            key={bIdx}
+                                            cards={msg.kpi_cards}
+                                          />
+                                        ) : null;
+                                      case "Narrative":
+                                        return (
+                                          <MemoizedAnswer
+                                            key={bIdx}
+                                            answer={msg.answer || ""}
+                                            messageIdx={idx}
+                                            onOpenPreview={onOpenPreview}
+                                          />
+                                        );
+                                      case "Findings":
+                                        return msg.findings?.length ? (
+                                          <FindingsList
+                                            key={bIdx}
+                                            items={msg.findings}
+                                          />
+                                        ) : null;
+                                      case "Recommendations":
+                                        return msg.recommendations?.length ? (
+                                          <RecommendationsList
+                                            key={bIdx}
+                                            items={msg.recommendations}
+                                          />
+                                        ) : null;
+                                      case "BoardPackReview":
+                                        return msg.catalog_id ===
+                                          "management_q12" &&
+                                          msg.uuid_question ? (
+                                          <BoardPackReview
+                                            key={bIdx}
+                                            message={msg}
+                                            userId={userId}
+                                            academicSession={
+                                              getErpContext().academic_session
+                                            }
+                                          />
+                                        ) : null;
+                                      case "RagTable":
+                                        return msg.table_data?.rows?.length ? (
+                                          <PaginatedDataTable
+                                            key={bIdx}
+                                            tableData={msg.table_data}
+                                            downloadFilename="advisory-results.csv"
+                                          />
+                                        ) : null;
+                                      case "TrendChart":
+                                        return msg.visualization?.show_chart &&
+                                          msg.visualization ? (
+                                          <VisualizationRenderer
+                                            key={bIdx}
+                                            visualization={msg.visualization}
+                                          />
+                                        ) : null;
+                                      case "ActionEngine":
+                                        return msg.action_options?.length ? (
+                                          <ActionEngine
+                                            key={bIdx}
+                                            options={msg.action_options}
+                                          />
+                                        ) : null;
+                                      default:
+                                        return null;
+                                    }
+                                  },
+                                )}
+                              </>
                             ) : (
                               <>
                                 {msg.kpi_cards?.length ? (
@@ -1398,7 +1508,11 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 ) : null}
                               </>
                             )}
-                            {msg.visualization?.show_chart && msg.visualization ? (
+                            {/* Legacy chart placement: only when NOT layout-driven
+                                (the L4 layout renders its own TrendChart block). */}
+                            {!msg.layout?.length &&
+                            msg.visualization?.show_chart &&
+                            msg.visualization ? (
                               <VisualizationRenderer
                                 visualization={msg.visualization}
                               />
