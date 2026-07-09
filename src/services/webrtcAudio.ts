@@ -20,6 +20,10 @@ export interface WebRTCConnectOptions {
   deviceId?: string;
   /** Mic on at connect time (full voice). PTT keeps mic off until enableMic(true). */
   enableMicInitially?: boolean;
+  /** LiveKit participant identity (typically user id). */
+  identity?: string;
+  /** LiveKit room name (typically chat session id). */
+  sessionId?: string;
 }
 
 export class WebRTCAudioService {

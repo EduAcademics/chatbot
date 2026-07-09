@@ -26,11 +26,18 @@ export const ERP_API_BASE_URL =
 export const WS_BASE_URL = env.VITE_WS_BASE_URL || "";
 
 // ---------------------------------------------------------------------------
-// WebRTC / Pipecat bot
+// Voice transport selection and endpoints
 // ---------------------------------------------------------------------------
+export const VOICE_TRANSPORT =
+  (env.VITE_VOICE_TRANSPORT as "webrtc" | "livekit" | undefined) || "webrtc";
+
+// WebRTC / Pipecat bot (current implementation)
 export const BOT_START_URL =
   env.VITE_BOT_START_URL || "http://localhost:7860/start";
 export const BOT_START_PUBLIC_API_KEY = env.VITE_BOT_START_PUBLIC_API_KEY || "";
+
+// LiveKit (new implementation – used when VOICE_TRANSPORT === "livekit")
+export const LIVEKIT_URL = env.VITE_LIVEKIT_URL || "";
 
 // ---------------------------------------------------------------------------
 // ICE servers (STUN / TURN) for WebRTC – all from .env

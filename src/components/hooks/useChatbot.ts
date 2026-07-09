@@ -17,6 +17,8 @@ import {
 } from "../../services/api";
 import { API_BASE_URL } from "../../config/api";
 import { WebRTCAudioService } from "../../services/webrtcAudio";
+import { LiveKitAudioService } from "../../services/livekitAudio";
+import { VOICE_TRANSPORT } from "../../config/settings";
 import {
   FULL_VOICE_TURN_DEBOUNCE_MS,
   FULL_VOICE_DICTATION_DEBOUNCE_MS,
@@ -184,7 +186,7 @@ export function useChatbot({
   roles: string;
   loginId: string;
 }): UseChatbotReturn {
-  const webrtcServiceRef = useRef<WebRTCAudioService | null>(null);
+  const webrtcServiceRef = useRef<WebRTCAudioService | LiveKitAudioService | null>(null);
   const lastInterimTextRef = useRef<string>(""); // Track last interim text to replace it with final
   const finalTextRef = useRef<string>(""); // Track accumulated final text (completed sentences)
   // Mirror of the text actually shown in the input during the current PTT capture.
@@ -783,10 +785,13 @@ export function useChatbot({
         return;
       }
 
-      const webrtcService = new WebRTCAudioService();
-      webrtcServiceRef.current = webrtcService;
+      const service =
+        VOICE_TRANSPORT === "livekit"
+          ? new LiveKitAudioService()
+          : new WebRTCAudioService();
+      webrtcServiceRef.current = service;
 
-      await webrtcService.connect(
+      await service.connect(
         selectedLanguage,
         {
           onTranscript: (() => {
@@ -962,6 +967,8 @@ export function useChatbot({
           fullVoiceMode: useFullVoice,
           pushToTalkMode: !useFullVoice,
           deviceId: selectedDeviceId,
+          identity: userId,
+          sessionId: sessionId || undefined,
           // Acquire the mic track during pre-warm too, so the first PTT press is an
           // instant track un-mute instead of a (slow) first-time getUserMedia.
           enableMicInitially: useFullVoice || prewarmOnly,
@@ -969,10 +976,10 @@ export function useChatbot({
       );
 
       if (!useFullVoice && !prewarmOnly) {
-        webrtcService.enableMic(true);
+        service.enableMic(true);
       } else if (prewarmOnly) {
         // Mic track is now acquired/warm — mute it until the user presses PTT.
-        webrtcService.enableMic(false);
+        service.enableMic(false);
         micWarmingRef.current = false;
       }
     } catch (error) {
