@@ -32,7 +32,7 @@ export function narrativeToBullets(text: string): string[] {
 function normalizeBriefBullets(payload: ManagerBriefPayload): ManagerBriefPayload {
   const bullets = (payload.bullets ?? []).map((b) => b.trim()).filter(Boolean);
   if (bullets.length) {
-    return { ...payload, bullets, narrative: "" };
+    return { ...payload, bullets };
   }
 
   const fromNarrative = narrativeToBullets(payload.narrative || "");

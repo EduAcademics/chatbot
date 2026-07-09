@@ -44,6 +44,12 @@ export interface ManagerBriefBarChart {
   threshold_pct?: number;
 }
 
+export interface ManagerBriefAction {
+  id: "download_xls" | "view_table" | string;
+  label: string;
+  filename?: string;
+}
+
 export interface ManagerBriefPayload {
   template: "manager_brief";
   header: {
@@ -52,6 +58,7 @@ export interface ManagerBriefPayload {
     meta?: string;
   };
   narrative: string;
+  intro?: string;
   highlights?: string[];
   bullets?: string[];
   kpi_strip?: ManagerBriefKpiItem[];
@@ -59,6 +66,7 @@ export interface ManagerBriefPayload {
   sections: ManagerBriefSection[];
   decisions: ManagerBriefDecision[];
   footer?: string | null;
+  actions?: ManagerBriefAction[];
   detail?: {
     type: "none" | "table";
     table_rows?: Record<string, unknown>[];

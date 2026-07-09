@@ -1393,6 +1393,14 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   data={managerBrief}
                                   actionOptions={msg.action_options}
                                 />
+                                {/* Chart hidden for now — re-enable when graph should show in ManagerBrief
+                                {msg.visualization?.show_chart &&
+                                msg.visualization ? (
+                                  <VisualizationRenderer
+                                    visualization={msg.visualization}
+                                  />
+                                ) : null}
+                                */}
                                 {(managerBrief.footer ===
                                   "board_pack_review" ||
                                   msg.catalog_id === "management_q12") &&

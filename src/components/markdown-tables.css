@@ -403,6 +403,13 @@
     margin-bottom: 1rem;
 }
 
+.bp-attachment-note {
+    margin: 0.75rem 0 0;
+    color: #5c5348;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
 .bp-narrative {
     margin: 0;
     font-size: 0.92rem;
@@ -915,6 +922,23 @@
 
 .bp-table-toggle:hover {
     color: #3d3429;
+}
+
+.bp-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin: 0.85rem 0 0.25rem;
+}
+
+.bp-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.bp-action-icon {
+    font-size: 0.95rem;
 }
 
 .l1-bar-chart-section {

@@ -7,6 +7,8 @@ import {
   FiChevronUp,
   FiClipboard,
   FiClock,
+  FiDownload,
+  FiEye,
   FiHeart,
   FiShield,
   FiTruck,
@@ -20,6 +22,7 @@ import PaginatedDataTable from "./PaginatedDataTable";
 import ActionEngine from "./ActionEngine";
 import KpiCardRow from "./KpiCardRow";
 import type {
+  ManagerBriefAction,
   ManagerBriefPayload,
   ManagerBriefSection,
   ManagerBriefBarChart,
@@ -27,6 +30,7 @@ import type {
 } from "../types/managerBriefTypes";
 import { STATUS_LABELS, statusClass } from "../types/managerBriefTypes";
 import { narrativeToBullets } from "../utils/resolveManagerBrief";
+import { downloadTableCsv } from "./utils/exportTableCsv";
 
 const ICONS: Record<string, IconType> = {
   wallet: MdOutlineAccountBalanceWallet,
@@ -44,11 +48,6 @@ const STATUS_ICONS: Record<StatusKind, IconType> = {
   urgent: FiAlertCircle,
   no_data: FiXCircle,
 };
-
-interface ManagerBriefDashboardProps {
-  data: ManagerBriefPayload;
-  actionOptions?: ActionOption[];
-}
 
 function SummaryBullets({ bullets }: { bullets: string[] }) {
   const items = bullets.map((b) => b.trim()).filter(Boolean);
@@ -268,6 +267,60 @@ function CategoryDetail({ category }: { category: ManagerBriefSection }) {
   );
 }
 
+function BriefActionButton({
+  action,
+  tableDetail,
+  onViewTable,
+}: {
+  action: ManagerBriefAction;
+  tableDetail: {
+    rows: Record<string, unknown>[];
+    table_meta: {
+      columns: string[];
+    };
+  };
+  onViewTable: () => void;
+}) {
+  if (action.id === "download_xls") {
+    return (
+      <button
+        type="button"
+        className="board-pack-btn board-pack-btn-download bp-action-btn"
+        onClick={() =>
+          downloadTableCsv(
+            tableDetail.rows,
+            tableDetail.table_meta.columns,
+            action.filename || "query-results.xls",
+          )
+        }
+      >
+        <FiDownload className="bp-action-icon" />
+        {action.label}
+      </button>
+    );
+  }
+
+  if (action.id === "view_table") {
+    return (
+      <button
+        type="button"
+        className="board-pack-btn bp-action-btn"
+        onClick={onViewTable}
+      >
+        <FiEye className="bp-action-icon" />
+        {action.label}
+      </button>
+    );
+  }
+
+  return null;
+}
+
+interface ManagerBriefDashboardProps {
+  data: ManagerBriefPayload;
+  actionOptions?: ActionOption[];
+}
+
 export default function ManagerBriefDashboard({
   data,
   actionOptions,
@@ -290,6 +343,9 @@ export default function ManagerBriefDashboard({
   }));
 
   const tableTotal = data.detail?.table_rows?.length ?? 0;
+  const hasViewAction = (data.actions ?? []).some(
+    (action) => action.id === "view_table",
+  );
 
   const selected = useMemo(
     () => data.sections.find((c) => c.id === selectedId),
@@ -338,16 +394,52 @@ export default function ManagerBriefDashboard({
       <div className="bp-narrative-card">
         {(() => {
           const bullets =
-            data.bullets?.map((b) => b.trim()).filter(Boolean) ??
-            narrativeToBullets(data.narrative || "");
-          if (bullets.length) {
-            return <SummaryBullets bullets={bullets} />;
+            data.bullets?.map((b) => b.trim()).filter(Boolean) ?? [];
+          const narrative = (data.narrative || "").trim();
+          const intro = (data.intro || "").trim();
+          const narrativeBullets =
+            bullets.length || narrative
+              ? bullets
+              : narrativeToBullets(narrative);
+
+          if (narrativeBullets.length && narrative) {
+            return (
+              <>
+                {intro ? <p className="bp-narrative">{intro}</p> : null}
+                <SummaryBullets bullets={narrativeBullets} />
+                <p className="bp-attachment-note">{narrative}</p>
+              </>
+            );
           }
-          return (
-            <SummaryText text={data.narrative} highlights={data.highlights} />
-          );
+          if (narrativeBullets.length) {
+            return (
+              <>
+                {intro ? <p className="bp-narrative">{intro}</p> : null}
+                <SummaryBullets bullets={narrativeBullets} />
+              </>
+            );
+          }
+          if (narrative) {
+            return (
+              <SummaryText text={narrative} highlights={data.highlights} />
+            );
+          }
+          return null;
         })()}
       </div>
+
+      {data.actions?.length && tableDetail ? (
+        <div className="bp-action-row">
+          {data.actions.map((action) => (
+            <BriefActionButton
+              key={action.id}
+              action={action}
+              tableDetail={tableDetail}
+              onViewTable={() => setShowTable(true)}
+            />
+          ))}
+        </div>
+      ) : null}
 
       {kpiCards.length ? <KpiCardRow cards={kpiCards} /> : null}
 
@@ -416,7 +508,7 @@ export default function ManagerBriefDashboard({
 
       {tableDetail ? (
         <>
-          {tableCollapsedDefault ? (
+          {tableCollapsedDefault && !hasViewAction ? (
             <button
               type="button"
               className="bp-table-toggle"
