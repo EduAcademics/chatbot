@@ -30,7 +30,7 @@ import type {
 } from "../types/managerBriefTypes";
 import { STATUS_LABELS, statusClass } from "../types/managerBriefTypes";
 import { narrativeToBullets } from "../utils/resolveManagerBrief";
-import { downloadTableCsv } from "./utils/exportTableCsv";
+import { downloadTableXls } from "./utils/exportTableCsv";
 
 const ICONS: Record<string, IconType> = {
   wallet: MdOutlineAccountBalanceWallet,
@@ -287,7 +287,7 @@ function BriefActionButton({
         type="button"
         className="board-pack-btn board-pack-btn-download bp-action-btn"
         onClick={() =>
-          downloadTableCsv(
+          downloadTableXls(
             tableDetail.rows,
             tableDetail.table_meta.columns,
             action.filename || "query-results.xls",
