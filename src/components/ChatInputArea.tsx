@@ -12,6 +12,7 @@ import type {
   ClassInfo,
 } from "./flows/attendanceFlow";
 import { handleAssignmentFileUpload } from "./flows/assignmentFlow";
+import { handleMessageFileUpload } from "./flows/messageFlow";
 import { handleSubmissionFileUpload } from "./flows/submissionFlow";
 import { handleAttendanceImageUpload } from "./flows/attendanceFlow";
 
@@ -162,7 +163,9 @@ export default function ChatInputArea({
         <input
           type="file"
           accept={
-            activeFlow === "assignment" || activeFlow === "submission"
+            activeFlow === "assignment" ||
+            activeFlow === "message" ||
+            activeFlow === "submission"
               ? ".pdf,.doc,.docx,image/*"
               : ".xlsx,.xls,.csv,image/*"
           }
@@ -171,6 +174,7 @@ export default function ChatInputArea({
           disabled={
             activeFlow !== "attendance" &&
             activeFlow !== "assignment" &&
+            activeFlow !== "message" &&
             activeFlow !== "submission"
           }
           onChange={async (e) => {
@@ -244,6 +248,19 @@ export default function ChatInputArea({
                 appendBotMessage: (msg) =>
                   setChatHistory((prev) => [...prev, msg]),
               });
+            } else if (activeFlow === "message") {
+              await handleMessageFileUpload({
+                file,
+                sessionId,
+                userId,
+                isVoiceTriggered:
+                  fullVoiceMode || activeVoiceButtonRef.current !== null,
+                getErpContext,
+                appendBotMessage: (msg) =>
+                  setChatHistory((prev) => [...prev, msg]),
+                playTTS: (idx, text) => void handlePlayTTS(idx, text, true),
+                getTTSSummary: (text) => text,
+              });
             } else if (activeFlow === "submission") {
               await handleSubmissionFileUpload({
                 file,
@@ -264,6 +281,7 @@ export default function ChatInputArea({
           htmlFor={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? "file-upload-input"
               : undefined
@@ -271,6 +289,7 @@ export default function ChatInputArea({
           className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? "cursor-pointer"
               : "cursor-not-allowed"
@@ -278,6 +297,7 @@ export default function ChatInputArea({
           whileHover={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? { scale: 1.08, y: -2 }
               : {}
@@ -285,6 +305,7 @@ export default function ChatInputArea({
           whileTap={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
+            activeFlow === "message" ||
             activeFlow === "submission"
               ? { scale: 0.95 }
               : {}
@@ -294,14 +315,17 @@ export default function ChatInputArea({
               ? "Upload Excel or Image"
               : activeFlow === "assignment"
                 ? "Upload Assignment File (PDF, DOCX, Image)"
-                : activeFlow === "submission"
-                  ? "Upload Submission File"
-                  : "Enable assignment or attendance flow to upload"
+                : activeFlow === "message"
+                  ? "Upload Message Attachment (PDF, DOCX, Image)"
+                  : activeFlow === "submission"
+                    ? "Upload Submission File"
+                    : "Enable assignment or attendance flow to upload"
           }
           onClick={(e) => {
             if (
               activeFlow !== "attendance" &&
               activeFlow !== "assignment" &&
+              activeFlow !== "message" &&
               activeFlow !== "submission"
             ) {
               e.preventDefault();

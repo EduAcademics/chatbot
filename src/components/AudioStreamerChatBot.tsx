@@ -183,6 +183,13 @@ const AudioStreamerChatBot = ({
             loadingLeaveRequests={api.loadingLeaveRequests}
             rejectReason={api.rejectReason}
             setRejectReason={api.setRejectReason}
+            studentLeaveApprovalRequests={api.studentLeaveApprovalRequests}
+            setStudentLeaveApprovalRequests={
+              api.setStudentLeaveApprovalRequests
+            }
+            loadingStudentLeaveRequests={api.loadingStudentLeaveRequests}
+            studentRejectReason={api.studentRejectReason}
+            setStudentRejectReason={api.setStudentRejectReason}
             userId={api.userId}
             getErpContext={api.getErpContext}
             onOpenPreview={handleOpenPreview}
