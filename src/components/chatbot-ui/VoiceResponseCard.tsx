@@ -4,6 +4,8 @@ import KpiCardRow from "../KpiCardRow";
 import FindingsList from "../FindingsList";
 import PaginatedDataTable from "../PaginatedDataTable";
 import VisualizationRenderer from "../VisualizationRenderer";
+import ManagerBriefDashboard from "../ManagerBriefDashboard";
+import { resolveManagerBrief } from "../../utils/resolveManagerBrief";
 import { getThumbsUpClass, getThumbsDownClass } from "../utils/chatbotUtils";
 
 export interface VoiceResponseCardProps {
@@ -48,6 +50,7 @@ export default function VoiceResponseCard({
   onOpenPreview,
 }: VoiceResponseCardProps) {
   const answerText = msg.answer || msg.text || "";
+  const managerBrief = resolveManagerBrief(msg);
 
   return (
     <div className="voice-response-card">
@@ -58,23 +61,32 @@ export default function VoiceResponseCard({
       ) : null}
 
       <div className="voice-response-body">
-        {msg.kpi_cards?.length ? <KpiCardRow cards={msg.kpi_cards} /> : null}
-        <MemoizedAnswer
-          answer={answerText}
-          messageIdx={idx}
-          onOpenPreview={onOpenPreview}
-        />
-        {msg.findings?.length ? <FindingsList items={msg.findings} /> : null}
-        {msg.table_data?.rows?.length ? (
-          <PaginatedDataTable
-            tableData={msg.table_data}
-            downloadFilename="query-results.csv"
-            showDownload={!msg.catalog_id?.trim()}
+        {managerBrief ? (
+          <ManagerBriefDashboard
+            data={managerBrief}
+            actionOptions={msg.action_options}
           />
-        ) : null}
-        {msg.visualization?.show_chart && msg.visualization ? (
-          <VisualizationRenderer visualization={msg.visualization} />
-        ) : null}
+        ) : (
+          <>
+            {msg.kpi_cards?.length ? <KpiCardRow cards={msg.kpi_cards} /> : null}
+            <MemoizedAnswer
+              answer={answerText}
+              messageIdx={idx}
+              onOpenPreview={onOpenPreview}
+            />
+            {msg.findings?.length ? <FindingsList items={msg.findings} /> : null}
+            {msg.table_data?.rows?.length ? (
+              <PaginatedDataTable
+                tableData={msg.table_data}
+                downloadFilename="query-results.csv"
+                showDownload={!msg.catalog_id?.trim()}
+              />
+            ) : null}
+            {msg.visualization?.show_chart && msg.visualization ? (
+              <VisualizationRenderer visualization={msg.visualization} />
+            ) : null}
+          </>
+        )}
       </div>
 
       <div className="bot-actions-bottom voice-response-actions">

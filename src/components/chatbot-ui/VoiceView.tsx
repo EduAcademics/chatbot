@@ -79,7 +79,8 @@ export default function VoiceView({
       m.kpi_cards?.length ||
       m.findings?.length ||
       m.table_data?.rows?.length ||
-      m.visualization?.show_chart);
+      m.visualization?.show_chart ||
+      m.interactive_ui?.template === "manager_brief");
 
   // Full conversation (all questions + answers) for the voice screen.
   const conversation = useMemo(
