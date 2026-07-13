@@ -229,6 +229,7 @@ const AudioStreamerChatBot = ({
             getErpContext={api.getErpContext}
             activeVoiceButtonRef={api.activeVoiceButtonRef}
             handlePlayTTS={api.handlePlayTTS}
+            fullVoiceMode={api.fullVoiceMode}
           />
           </motion.div>
           )}

@@ -45,6 +45,8 @@ export interface ChatInputAreaProps {
     text: string,
     bypassSummary?: boolean,
   ) => Promise<void>;
+  /** Full Voice Mode (hands-free); used when marking message uploads as voice-triggered. */
+  fullVoiceMode?: boolean;
   autoFocus?: boolean;
   /** Text-only chat: hides the push-to-talk mic so messages are never spoken. */
   textOnly?: boolean;
@@ -75,6 +77,7 @@ export default function ChatInputArea({
   getErpContext,
   activeVoiceButtonRef,
   handlePlayTTS,
+  fullVoiceMode = false,
   autoFocus = false,
   textOnly = false,
 }: ChatInputAreaProps) {
@@ -281,7 +284,6 @@ export default function ChatInputArea({
           htmlFor={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
-            activeFlow === "message" ||
             activeFlow === "submission"
               ? "file-upload-input"
               : undefined
@@ -289,7 +291,6 @@ export default function ChatInputArea({
           className={`chatbot-btn upload-btn w-10 h-10 sm:w-12 sm:h-12 text-lg sm:text-xl ${
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
-            activeFlow === "message" ||
             activeFlow === "submission"
               ? "cursor-pointer"
               : "cursor-not-allowed"
@@ -297,7 +298,6 @@ export default function ChatInputArea({
           whileHover={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
-            activeFlow === "message" ||
             activeFlow === "submission"
               ? { scale: 1.08, y: -2 }
               : {}
@@ -305,7 +305,6 @@ export default function ChatInputArea({
           whileTap={
             activeFlow === "attendance" ||
             activeFlow === "assignment" ||
-            activeFlow === "message" ||
             activeFlow === "submission"
               ? { scale: 0.95 }
               : {}
@@ -315,17 +314,14 @@ export default function ChatInputArea({
               ? "Upload Excel or Image"
               : activeFlow === "assignment"
                 ? "Upload Assignment File (PDF, DOCX, Image)"
-                : activeFlow === "message"
-                  ? "Upload Message Attachment (PDF, DOCX, Image)"
-                  : activeFlow === "submission"
-                    ? "Upload Submission File"
-                    : "Enable assignment or attendance flow to upload"
+                : activeFlow === "submission"
+                  ? "Upload Submission File"
+                  : "Enable assignment or attendance flow to upload"
           }
           onClick={(e) => {
             if (
               activeFlow !== "attendance" &&
               activeFlow !== "assignment" &&
-              activeFlow !== "message" &&
               activeFlow !== "submission"
             ) {
               e.preventDefault();
