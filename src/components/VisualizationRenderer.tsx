@@ -323,7 +323,7 @@ export default function VisualizationRenderer({
               aria-label={title || "Pie chart"}
             />
             <div className="absolute left-1/2 top-1/2 flex h-[102px] w-[102px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full bg-white text-center shadow-inner">
-              {centerPercentText !== null ? (
+              {isAttendanceLike && centerPercentText !== null ? (
                 <>
                   <div className="text-3xl font-bold leading-none text-slate-800">
                     {centerPercentText}%
