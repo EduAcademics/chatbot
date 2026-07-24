@@ -906,6 +906,17 @@
     margin: 0.75rem 0;
 }
 
+.bp-table-block + .bp-table-block {
+    margin-top: 1.25rem;
+}
+
+.bp-table-title {
+    margin: 0 0 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #3d3429;
+}
+
 .bp-table-toggle {
     display: flex;
     align-items: center;

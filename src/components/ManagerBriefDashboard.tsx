@@ -30,7 +30,7 @@ import type {
 } from "../types/managerBriefTypes";
 import { STATUS_LABELS, statusClass } from "../types/managerBriefTypes";
 import { narrativeToBullets } from "../utils/resolveManagerBrief";
-import { downloadTableXls } from "./utils/exportTableCsv";
+import { downloadMultiTableXls, downloadTableXls } from "./utils/exportTableCsv";
 
 const ICONS: Record<string, IconType> = {
   wallet: MdOutlineAccountBalanceWallet,
@@ -270,6 +270,7 @@ function CategoryDetail({ category }: { category: ManagerBriefSection }) {
 function BriefActionButton({
   action,
   tableDetail,
+  multiTables,
   onViewTable,
 }: {
   action: ManagerBriefAction;
@@ -278,7 +279,12 @@ function BriefActionButton({
     table_meta: {
       columns: string[];
     };
-  };
+  } | null;
+  multiTables?: Array<{
+    title?: string;
+    rows: Record<string, unknown>[];
+    columns: string[];
+  }>;
   onViewTable: () => void;
 }) {
   if (action.id === "download_xls") {
@@ -286,13 +292,18 @@ function BriefActionButton({
       <button
         type="button"
         className="board-pack-btn board-pack-btn-download bp-action-btn"
-        onClick={() =>
+        onClick={() => {
+          if (multiTables?.length) {
+            downloadMultiTableXls(multiTables, action.filename || "query-results.xls");
+            return;
+          }
+          if (!tableDetail) return;
           downloadTableXls(
             tableDetail.rows,
             tableDetail.table_meta.columns,
             action.filename || "query-results.xls",
-          )
-        }
+          );
+        }}
       >
         <FiDownload className="bp-action-icon" />
         {action.label}
@@ -342,7 +353,39 @@ export default function ManagerBriefDashboard({
     tone: k.tone,
   }));
 
-  const tableTotal = data.detail?.table_rows?.length ?? 0;
+  const multiTableBlocks = useMemo(() => {
+    if (data.detail?.type !== "tables" || !data.detail.tables?.length) {
+      return [];
+    }
+    return data.detail.tables
+      .filter((block) => block.table_rows?.length)
+      .map((block) => {
+        const columns = (
+          block.columns?.length
+            ? block.columns
+            : Object.keys(block.table_rows[0] ?? {})
+        ).filter((c) => !c.startsWith("__"));
+        return {
+          title: block.title,
+          rows: block.table_rows,
+          columns,
+          tableDetail: {
+            rows: block.table_rows,
+            table_meta: {
+              total: block.table_rows.length,
+              page_size: 10,
+              columns,
+              row_status_key: data.detail?.row_status_key,
+            },
+          },
+        };
+      });
+  }, [data.detail]);
+
+  const tableTotal =
+    multiTableBlocks.reduce((sum, block) => sum + block.rows.length, 0) ||
+    data.detail?.table_rows?.length ||
+    0;
   const hasViewAction = (data.actions ?? []).some(
     (action) => action.id === "view_table",
   );
@@ -374,6 +417,8 @@ export default function ManagerBriefDashboard({
           },
         }
       : null;
+
+  const hasTableContent = Boolean(tableDetail || multiTableBlocks.length);
 
   return (
     <div className="board-pack-dashboard manager-brief-dashboard">
@@ -428,13 +473,22 @@ export default function ManagerBriefDashboard({
         })()}
       </div>
 
-      {data.actions?.length && tableDetail ? (
+      {data.actions?.length && hasTableContent ? (
         <div className="bp-action-row">
           {data.actions.map((action) => (
             <BriefActionButton
               key={action.id}
               action={action}
               tableDetail={tableDetail}
+              multiTables={
+                multiTableBlocks.length
+                  ? multiTableBlocks.map((block) => ({
+                      title: block.title,
+                      rows: block.rows,
+                      columns: block.columns,
+                    }))
+                  : undefined
+              }
               onViewTable={() => setShowTable(true)}
             />
           ))}
@@ -506,7 +560,7 @@ export default function ManagerBriefDashboard({
         </>
       ) : null}
 
-      {tableDetail ? (
+      {hasTableContent ? (
         <>
           {tableCollapsedDefault && !hasViewAction ? (
             <button
@@ -528,11 +582,26 @@ export default function ManagerBriefDashboard({
           ) : null}
           {showTable ? (
             <div className="bp-table-detail">
-              <PaginatedDataTable
-                tableData={tableDetail}
-                downloadFilename="manager-brief-results.csv"
-                showDownload={false}
-              />
+              {multiTableBlocks.length ? (
+                multiTableBlocks.map((block) => (
+                  <div key={block.title || "table"} className="bp-table-block">
+                    {block.title ? (
+                      <h4 className="bp-table-title">{block.title}</h4>
+                    ) : null}
+                    <PaginatedDataTable
+                      tableData={block.tableDetail}
+                      downloadFilename="manager-brief-results.csv"
+                      showDownload={false}
+                    />
+                  </div>
+                ))
+              ) : tableDetail ? (
+                <PaginatedDataTable
+                  tableData={tableDetail}
+                  downloadFilename="manager-brief-results.csv"
+                  showDownload={false}
+                />
+              ) : null}
             </div>
           ) : null}
         </>

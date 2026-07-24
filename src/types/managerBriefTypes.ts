@@ -50,6 +50,12 @@ export interface ManagerBriefAction {
   filename?: string;
 }
 
+export interface ManagerBriefTableBlock {
+  title?: string;
+  table_rows: Record<string, unknown>[];
+  columns?: string[];
+}
+
 export interface ManagerBriefPayload {
   template: "manager_brief";
   header: {
@@ -68,9 +74,10 @@ export interface ManagerBriefPayload {
   footer?: string | null;
   actions?: ManagerBriefAction[];
   detail?: {
-    type: "none" | "table";
+    type: "none" | "table" | "tables";
     table_rows?: Record<string, unknown>[];
     columns?: string[];
+    tables?: ManagerBriefTableBlock[];
     row_status_key?: string;
     collapsed_default?: boolean;
   };

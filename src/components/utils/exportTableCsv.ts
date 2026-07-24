@@ -79,3 +79,39 @@ export function downloadTableXls(
   XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
   XLSX.writeFile(workbook, normalizeXlsFilename(filename), { bookType: "xls" });
 }
+
+export function downloadMultiTableXls(
+  tables: Array<{
+    title?: string;
+    rows: Record<string, unknown>[];
+    columns: string[];
+  }>,
+  filename = "query-results.xls",
+): void {
+  const workbook = XLSX.utils.book_new();
+  let added = false;
+
+  for (const table of tables) {
+    const { rows, columns } = table;
+    if (!rows.length || !columns.length) continue;
+
+    const sheetData = rows.map((row) => {
+      const line: Record<string, unknown> = {};
+      for (const col of columns) {
+        line[formatColumnHeader(col)] = row[col] ?? "";
+      }
+      return line;
+    });
+
+    const sheetName = (table.title || "Report").slice(0, 31);
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(sheetData),
+      sheetName,
+    );
+    added = true;
+  }
+
+  if (!added) return;
+  XLSX.writeFile(workbook, normalizeXlsFilename(filename), { bookType: "xls" });
+}
