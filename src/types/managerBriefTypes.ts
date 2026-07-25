@@ -80,6 +80,8 @@ export interface ManagerBriefPayload {
     tables?: ManagerBriefTableBlock[];
     row_status_key?: string;
     collapsed_default?: boolean;
+    
+    merge_column?: string;
   };
 }
 
