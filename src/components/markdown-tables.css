@@ -61,6 +61,18 @@
     min-width: 120px;
 }
 
+.markdown-table-container td.merge-group-cell {
+    vertical-align: middle;
+    text-align: center;
+    font-weight: 600;
+    color: #334155;
+    background-color: #fff;
+}
+
+.markdown-table-merge tbody tr:nth-child(even) td.merge-group-cell {
+    background-color: #fff;
+}
+
 .markdown-table-container tbody tr:nth-child(even) {
     background-color: #f9fafb;
 }

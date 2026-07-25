@@ -406,7 +406,10 @@ export default function ManagerBriefDashboard({
           rows: data.detail.table_rows,
           table_meta: {
             total: data.detail.table_rows.length,
-            page_size: 10,
+           
+            page_size: data.detail.merge_column
+              ? Math.max(data.detail.table_rows.length, 10)
+              : 10,
             columns: (data.detail.columns?.length
               ? data.detail.columns
               : Object.keys(data.detail.table_rows[0] ?? {})
@@ -414,6 +417,7 @@ export default function ManagerBriefDashboard({
               (c) => !c.startsWith("__") && c !== data.detail?.row_status_key,
             ),
             row_status_key: data.detail.row_status_key,
+            merge_column: data.detail.merge_column,
           },
         }
       : null;

@@ -32,8 +32,9 @@ export interface TableMeta {
   total: number;
   page_size: number;
   columns: string[];
-  
   row_status_key?: string;
+  
+  merge_column?: string;
 }
 
 /** A single decision button in the L4 ActionEngine block. */
