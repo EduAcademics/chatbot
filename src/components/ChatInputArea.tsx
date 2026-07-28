@@ -12,6 +12,7 @@ import type {
   ClassInfo,
 } from "./flows/attendanceFlow";
 import { handleAssignmentFileUpload } from "./flows/assignmentFlow";
+import { handleMessageFileUpload } from "./flows/messageFlow";
 import { handleSubmissionFileUpload } from "./flows/submissionFlow";
 import { handleAttendanceImageUpload } from "./flows/attendanceFlow";
 
@@ -44,6 +45,8 @@ export interface ChatInputAreaProps {
     text: string,
     bypassSummary?: boolean,
   ) => Promise<void>;
+  /** Full Voice Mode (hands-free); used when marking message uploads as voice-triggered. */
+  fullVoiceMode?: boolean;
   autoFocus?: boolean;
   /** Text-only chat: hides the push-to-talk mic so messages are never spoken. */
   textOnly?: boolean;
@@ -74,6 +77,7 @@ export default function ChatInputArea({
   getErpContext,
   activeVoiceButtonRef,
   handlePlayTTS,
+  fullVoiceMode = false,
   autoFocus = false,
   textOnly = false,
 }: ChatInputAreaProps) {
@@ -162,7 +166,9 @@ export default function ChatInputArea({
         <input
           type="file"
           accept={
-            activeFlow === "assignment" || activeFlow === "submission"
+            activeFlow === "assignment" ||
+            activeFlow === "message" ||
+            activeFlow === "submission"
               ? ".pdf,.doc,.docx,image/*"
               : ".xlsx,.xls,.csv,image/*"
           }
@@ -171,6 +177,7 @@ export default function ChatInputArea({
           disabled={
             activeFlow !== "attendance" &&
             activeFlow !== "assignment" &&
+            activeFlow !== "message" &&
             activeFlow !== "submission"
           }
           onChange={async (e) => {
@@ -243,6 +250,19 @@ export default function ChatInputArea({
                 getErpContext,
                 appendBotMessage: (msg) =>
                   setChatHistory((prev) => [...prev, msg]),
+              });
+            } else if (activeFlow === "message") {
+              await handleMessageFileUpload({
+                file,
+                sessionId,
+                userId,
+                isVoiceTriggered:
+                  fullVoiceMode || activeVoiceButtonRef.current !== null,
+                getErpContext,
+                appendBotMessage: (msg) =>
+                  setChatHistory((prev) => [...prev, msg]),
+                playTTS: (idx, text) => void handlePlayTTS(idx, text, true),
+                getTTSSummary: (text) => text,
               });
             } else if (activeFlow === "submission") {
               await handleSubmissionFileUpload({

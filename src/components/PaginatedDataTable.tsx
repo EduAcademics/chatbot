@@ -5,24 +5,59 @@ import {
   formatColumnHeader,
 } from "./utils/exportTableCsv";
 
-function cellText(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "-";
+function cellText(value: unknown, blankAsEmpty = false): string {
+  if (value === null || value === undefined || value === "") {
+    return blankAsEmpty ? "" : "-";
+  }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+function isBlankCell(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+
+function mergeRowSpan(
+  rows: Record<string, unknown>[],
+  rowIdx: number,
+  mergeColumn: string,
+): number {
+  const value = rows[rowIdx]?.[mergeColumn];
+  if (isBlankCell(value)) {
+    return 0;
+  }
+  let span = 1;
+  for (let i = rowIdx + 1; i < rows.length; i += 1) {
+    if (!isBlankCell(rows[i]?.[mergeColumn])) break;
+    span += 1;
+  }
+  return span;
 }
 
 interface PaginatedDataTableProps {
   tableData: TableData;
   downloadFilename?: string;
+  
+  showDownload?: boolean;
 }
+
+const ragRowClass: Record<string, string> = {
+  danger: "rag-row-danger",
+  warning: "rag-row-warning",
+  success: "rag-row-success",
+  neutral: "",
+};
 
 export default function PaginatedDataTable({
   tableData,
   downloadFilename = "query-results.csv",
+  showDownload = true,
 }: PaginatedDataTableProps) {
   const { rows, table_meta } = tableData;
-  const { columns, page_size, total } = table_meta;
+  const { columns, page_size, total, row_status_key, merge_column } = table_meta;
   const [page, setPage] = useState(0);
+  const mergeEnabled = Boolean(merge_column && columns.includes(merge_column));
 
   const usePagination = total > page_size;
   const totalPages = Math.max(1, Math.ceil(total / page_size));
@@ -72,18 +107,24 @@ export default function PaginatedDataTable({
             >
               Next
             </button>
-            <button
-              type="button"
-              className="paginated-table-btn paginated-table-btn-primary"
-              onClick={() => downloadTableCsv(rows, columns, downloadFilename)}
-            >
-              Download CSV
-            </button>
+            {showDownload ? (
+              <button
+                type="button"
+                className="paginated-table-btn paginated-table-btn-primary"
+                onClick={() => downloadTableCsv(rows, columns, downloadFilename)}
+              >
+                Download CSV
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
 
-      <div className="markdown-table-container">
+      <div
+        className={`markdown-table-container${
+          mergeEnabled ? " markdown-table-merge" : ""
+        }`}
+      >
         <table>
           <thead>
             <tr>
@@ -93,13 +134,38 @@ export default function PaginatedDataTable({
             </tr>
           </thead>
           <tbody>
-            {pageRows.map((row, rowIdx) => (
-              <tr key={`${safePage}-${rowIdx}`}>
-                {columns.map((col) => (
-                  <td key={col}>{cellText(row[col])}</td>
-                ))}
-              </tr>
-            ))}
+            {pageRows.map((row, rowIdx) => {
+              const status = row_status_key
+                ? String(row[row_status_key] ?? "").toLowerCase()
+                : "";
+              const rowClass = row_status_key ? ragRowClass[status] || "" : "";
+              return (
+                <tr key={`${safePage}-${rowIdx}`} className={rowClass}>
+                  {columns.map((col) => {
+                    if (mergeEnabled && col === merge_column) {
+                      const span = mergeRowSpan(pageRows, rowIdx, merge_column);
+                      if (span === 0) {
+                        return null;
+                      }
+                      return (
+                        <td
+                          key={col}
+                          rowSpan={span}
+                          className="merge-group-cell"
+                        >
+                          {cellText(row[col], true)}
+                        </td>
+                      );
+                    }
+                    return (
+                      <td key={col}>
+                        {cellText(row[col], mergeEnabled)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

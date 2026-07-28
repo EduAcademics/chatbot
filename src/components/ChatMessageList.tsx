@@ -7,15 +7,27 @@ import MemoizedAnswer from "./MemoizedAnswer";
 import PaginatedDataTable from "./PaginatedDataTable";
 import KpiCardRow from "./KpiCardRow";
 import FindingsList from "./FindingsList";
+import RecommendationsList from "./RecommendationsList";
+import BoardPackReview from "./BoardPackReview";
+import ManagerBriefDashboard from "./ManagerBriefDashboard";
+import { resolveManagerBrief } from "../utils/resolveManagerBrief";
 import VisualizationRenderer from "./VisualizationRenderer";
+import ActionEngine from "./ActionEngine";
 import { MarksEntryTable } from "./MarksEntryTable";
 import { HealthCardTable } from "./HealthCardTable";
 import { HealthCardSelector } from "./HealthCardSelector";
 import ChatWelcomePanel from "./chatbot-ui/ChatWelcomePanel";
 import type { FlowType } from "./types";
 import { getThumbsUpClass, getThumbsDownClass } from "./utils/chatbotUtils";
-import { leaveApprovalAPI } from "../services/api";
+import { leaveApprovalAPI, studentLeaveApprovalAPI } from "../services/api";
 import type { ClassInfo, AttendanceRecord } from "./flows/attendanceFlow";
+
+const formatStudentLeaveType = (leaveType: string): string => {
+  if (!leaveType) return "Unknown";
+  return leaveType
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
 
 export interface ChatMessageListProps {
   chatBoxRef: React.RefObject<HTMLDivElement | null>;
@@ -83,6 +95,13 @@ export interface ChatMessageListProps {
   setRejectReason: React.Dispatch<
     React.SetStateAction<{ [key: string]: string }>
   >;
+  studentLeaveApprovalRequests: any[];
+  setStudentLeaveApprovalRequests: React.Dispatch<React.SetStateAction<any[]>>;
+  loadingStudentLeaveRequests: boolean;
+  studentRejectReason: { [key: string]: string };
+  setStudentRejectReason: React.Dispatch<
+    React.SetStateAction<{ [key: string]: string }>
+  >;
   userId: string;
   getErpContext: () => { academic_session: string; branch_token: string };
   onOpenPreview: (url: string, filename: string) => void;
@@ -122,6 +141,11 @@ export default function ChatMessageList(props: ChatMessageListProps) {
     loadingLeaveRequests,
     rejectReason,
     setRejectReason,
+    studentLeaveApprovalRequests,
+    setStudentLeaveApprovalRequests,
+    loadingStudentLeaveRequests,
+    studentRejectReason,
+    setStudentRejectReason,
     getErpContext,
     userId,
     onOpenPreview,
@@ -149,6 +173,20 @@ export default function ChatMessageList(props: ChatMessageListProps) {
         : acc,
     -1,
   );
+
+  const leaveApprovalDashboardIdx = chatHistory.reduce(
+    (acc, m, i) => (m.leaveApprovalDashboard ? i : acc),
+    -1,
+  );
+
+  const studentLeaveApprovalDashboardIdx = chatHistory.reduce(
+    (acc, m, i) => (m.studentLeaveApprovalDashboard ? i : acc),
+    -1,
+  );
+
+  const speakLeaveActionResult = (text: string) => {
+    void handlePlayTTS(-1, text.replace(/\*\*/g, ""));
+  };
 
   return (
     <div className="chatbot-chatbox" ref={chatBoxRef}>
@@ -232,8 +270,13 @@ export default function ChatMessageList(props: ChatMessageListProps) {
             onSelectPrompt={onSelectPrompt}
           />
         ) : null}
+
+
+        {/*{chatHistory.map((msg, idx) => {
+          if (showWelcomePanel && idx === 0 && msg.type === "bot") return null; */}
+
         {chatHistory.map((msg, idx) => {
-          if (showWelcomePanel && idx === 0 && msg.type === "bot") return null;
+          const managerBrief = resolveManagerBrief(msg);
           return (
           <div key={idx} className={`chatbot-msg-row ${msg.type}`}>
             {msg.type === "user" ? (
@@ -689,7 +732,7 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                           <>
                             {/* Show leave approval requests if in leave_approval flow */}
                             {activeFlow === "leave_approval" &&
-                              idx === chatHistory.length - 1 && (
+                              idx === leaveApprovalDashboardIdx && (
                                 <>
                                   {loadingLeaveRequests ? (
                                     <div className="mt-4 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl shadow-sm">
@@ -919,6 +962,9 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                             },
                                                           ],
                                                         );
+                                                        speakLeaveActionResult(
+                                                          `Leave request for ${employeeName} has been approved successfully!`,
+                                                        );
                                                       } catch (err: any) {
                                                         setChatHistory(
                                                           (prev) => [
@@ -1029,6 +1075,9 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                                               },
                                                             ],
                                                           );
+                                                          speakLeaveActionResult(
+                                                            `Leave request for ${employeeName} has been rejected. Reason: ${reason}`,
+                                                          );
                                                         } catch (err: any) {
                                                           setChatHistory(
                                                             (prev) => [
@@ -1074,6 +1123,480 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                         All leave requests have been processed
                                         or there are no pending requests at this
                                         time.
+                                      </p>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            {/* Show student leave approval requests if in student_leave_approval flow */}
+                            {activeFlow === "student_leave_approval" &&
+                              idx === studentLeaveApprovalDashboardIdx && (
+                                <>
+                                  {loadingStudentLeaveRequests ? (
+                                    <div className="mt-4 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-xl shadow-sm">
+                                      <div className="flex items-center justify-center gap-4">
+                                        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                                        <span className="text-blue-900 font-semibold text-base">
+                                          Loading pending student leave
+                                          requests...
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ) : studentLeaveApprovalRequests.length >
+                                    0 ? (
+                                    <div className="mt-4 space-y-5">
+                                      {/* Summary Header */}
+                                      <div className="p-4 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-xl shadow-lg text-white">
+                                        <div className="flex items-center gap-3">
+                                          <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-xl">
+                                            📋
+                                          </div>
+                                          <div>
+                                            <h3 className="text-lg font-bold">
+                                              Student Leave Approval Dashboard
+                                            </h3>
+                                            <p className="text-sm text-blue-100">
+                                              {
+                                                studentLeaveApprovalRequests.length
+                                              }{" "}
+                                              {studentLeaveApprovalRequests.length ===
+                                              1
+                                                ? "request"
+                                                : "requests"}{" "}
+                                              pending review
+                                            </p>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Student Leave Request Cards */}
+                                      {studentLeaveApprovalRequests.map(
+                                        (request, reqIdx) => {
+                                          const startDate = new Date(
+                                            request.from_date,
+                                          );
+                                          const endDate = new Date(
+                                            request.to_date,
+                                          );
+                                          const startDateStr =
+                                            startDate.toLocaleDateString(
+                                              "en-US",
+                                              {
+                                                month: "short",
+                                                day: "numeric",
+                                                year: "numeric",
+                                              },
+                                            );
+                                          const endDateStr =
+                                            endDate.toLocaleDateString(
+                                              "en-US",
+                                              {
+                                                month: "short",
+                                                day: "numeric",
+                                                year: "numeric",
+                                              },
+                                            );
+                                          const isSingleDay =
+                                            startDateStr === endDateStr;
+                                          const daysDiff =
+                                            Math.ceil(
+                                              (endDate.getTime() -
+                                                startDate.getTime()) /
+                                                (1000 * 60 * 60 * 24),
+                                            ) + 1;
+
+                                          const studentName =
+                                            request.student?.fullName?.trim() ||
+                                            request.student?.personalInfo?.firstName?.trim() ||
+                                            "Unknown";
+                                          const studentId =
+                                            request.student?.admissionNumber ||
+                                            request.student?.personalInfo
+                                              ?.admissionNo ||
+                                            "";
+                                          const classSection = `${
+                                            request.student?.class?.name ||
+                                            "N/A"
+                                          } - ${
+                                            request.student?.section?.name ||
+                                            "N/A"
+                                          }`;
+                                          const leaveType =
+                                            formatStudentLeaveType(
+                                              request.leave_type,
+                                            );
+                                          const description =
+                                            request.description ||
+                                            "No description provided";
+                                          const photoPath =
+                                            request.student?.personalInfo
+                                              ?.studentPhotoDocument?.path;
+
+                                          return (
+                                            <div
+                                              key={request.uuid || reqIdx}
+                                              className="bg-white border-2 border-gray-200 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden"
+                                            >
+                                              {/* Card Header */}
+                                              <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-6 py-4 border-b border-gray-200">
+                                                <div className="flex items-center gap-4">
+                                                  {photoPath ? (
+                                                    <img
+                                                      src={photoPath}
+                                                      alt={studentName}
+                                                      className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md"
+                                                      onError={(e) => {
+                                                        (
+                                                          e.target as HTMLImageElement
+                                                        ).style.display =
+                                                          "none";
+                                                      }}
+                                                    />
+                                                  ) : (
+                                                    <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-2xl font-bold shadow-md">
+                                                      {studentName
+                                                        .charAt(0)
+                                                        .toUpperCase()}
+                                                    </div>
+                                                  )}
+                                                  <div className="flex-1">
+                                                    <h4 className="text-xl font-bold text-gray-900 mb-1">
+                                                      {studentName}
+                                                    </h4>
+                                                    <p className="text-sm text-gray-600 flex items-center gap-2">
+                                                      <span className="font-medium">
+                                                        Student ID:
+                                                      </span>
+                                                      <span className="bg-gray-200 px-2 py-0.5 rounded-md font-mono text-xs">
+                                                        {studentId || "N/A"}
+                                                      </span>
+                                                    </p>
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                              {/* Card Body */}
+                                              <div className="p-6">
+                                                {/* Leave Details Grid */}
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                                                  {/* Leave Type */}
+                                                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                      <span className="text-blue-600 text-lg">
+                                                        📝
+                                                      </span>
+                                                      <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                                                        Leave Type
+                                                      </span>
+                                                    </div>
+                                                    <p className="text-base font-semibold text-gray-900">
+                                                      {leaveType}
+                                                    </p>
+                                                  </div>
+
+                                                  {/* Duration */}
+                                                  <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                      <span className="text-purple-600 text-lg">
+                                                        📅
+                                                      </span>
+                                                      <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
+                                                        Duration
+                                                      </span>
+                                                    </div>
+                                                    <p className="text-base font-semibold text-gray-900">
+                                                      {isSingleDay
+                                                        ? startDateStr
+                                                        : `${startDateStr} - ${endDateStr}`}
+                                                    </p>
+                                                    <p className="text-xs text-gray-600 mt-1">
+                                                      {daysDiff}{" "}
+                                                      {daysDiff === 1
+                                                        ? "day"
+                                                        : "days"}
+                                                    </p>
+                                                  </div>
+
+                                                  {/* Class-Section */}
+                                                  <div className="bg-teal-50 rounded-lg p-4 border border-teal-200">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                      <span className="text-teal-600 text-lg">
+                                                        🏫
+                                                      </span>
+                                                      <span className="text-xs font-semibold text-teal-700 uppercase tracking-wide">
+                                                        Class-Section
+                                                      </span>
+                                                    </div>
+                                                    <p className="text-base font-semibold text-gray-900">
+                                                      {classSection}
+                                                    </p>
+                                                  </div>
+                                                </div>
+
+                                                {/* Reason Section */}
+                                                <div className="bg-amber-50 rounded-lg p-4 border border-amber-200 mb-5">
+                                                  <div className="flex items-center gap-2 mb-2">
+                                                    <span className="text-amber-600 text-lg">
+                                                      💬
+                                                    </span>
+                                                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                                                      Reason
+                                                    </span>
+                                                  </div>
+                                                  <p className="text-sm text-gray-800 leading-relaxed">
+                                                    {description}
+                                                  </p>
+                                                </div>
+
+                                                {/* Attachments Section */}
+                                                {request.attachments &&
+                                                  request.attachments.length >
+                                                    0 && (
+                                                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-5">
+                                                      <div className="flex items-center gap-2 mb-2">
+                                                        <span className="text-gray-600 text-lg">
+                                                          📎
+                                                        </span>
+                                                        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                                                          Attachments
+                                                        </span>
+                                                      </div>
+                                                      <div className="flex flex-col gap-1">
+                                                        {request.attachments.map(
+                                                          (
+                                                            att: any,
+                                                            i: number,
+                                                          ) => (
+                                                            <a
+                                                              key={
+                                                                att.uuid || i
+                                                              }
+                                                              href={att.path}
+                                                              onClick={(e) => {
+                                                                e.preventDefault();
+                                                                onOpenPreview(
+                                                                  att.path,
+                                                                  att.originalname ||
+                                                                    att.name ||
+                                                                    `Attachment ${i + 1}`,
+                                                                );
+                                                              }}
+                                                              className="text-sm text-blue-600 hover:underline cursor-pointer"
+                                                            >
+                                                              {att.originalname ||
+                                                                att.name ||
+                                                                `Attachment ${i + 1}`}
+                                                            </a>
+                                                          ),
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  )}
+
+                                                {/* Action Buttons */}
+                                                <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t-2 border-gray-200">
+                                                  {/* Approve Button */}
+                                                  <button
+                                                    onClick={async () => {
+                                                      try {
+                                                        const authToken =
+                                                          localStorage.getItem(
+                                                            "token",
+                                                          );
+                                                        const {
+                                                          academic_session,
+                                                          branch_token,
+                                                        } = getErpContext();
+                                                        await studentLeaveApprovalAPI.approve(
+                                                          {
+                                                            leave_request_uuid:
+                                                              request.uuid,
+                                                            bearer_token:
+                                                              authToken ||
+                                                              undefined,
+                                                            academic_session,
+                                                            branch_token,
+                                                          },
+                                                        );
+                                                        setStudentLeaveApprovalRequests(
+                                                          (prev: any[]) =>
+                                                            prev.filter(
+                                                              (r: any) =>
+                                                                r.uuid !==
+                                                                request.uuid,
+                                                            ),
+                                                        );
+                                                        setChatHistory(
+                                                          (prev) => [
+                                                            ...prev,
+                                                            {
+                                                              type: "bot",
+                                                              text: `✅ Student leave request for **${studentName}** has been approved successfully!`,
+                                                            },
+                                                          ],
+                                                        );
+                                                        speakLeaveActionResult(
+                                                          `Student leave request for ${studentName} has been approved successfully!`,
+                                                        );
+                                                      } catch (err: any) {
+                                                        setChatHistory(
+                                                          (prev) => [
+                                                            ...prev,
+                                                            {
+                                                              type: "bot",
+                                                              text: `❌ Error approving student leave request: ${
+                                                                err.message ||
+                                                                "Unknown error"
+                                                              }`,
+                                                            },
+                                                          ],
+                                                        );
+                                                      }
+                                                    }}
+                                                    className="flex-1 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-emerald-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2"
+                                                  >
+                                                    <span className="text-xl">
+                                                      ✓
+                                                    </span>
+                                                    <span>Approve</span>
+                                                  </button>
+
+                                                  {/* Reject Section */}
+                                                  <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                                                    <input
+                                                      type="text"
+                                                      placeholder="Rejection reason (optional)"
+                                                      value={
+                                                        studentRejectReason[
+                                                          request.uuid
+                                                        ] || ""
+                                                      }
+                                                      onChange={(e) =>
+                                                        setStudentRejectReason(
+                                                          (prev: {
+                                                            [
+                                                              key: string
+                                                            ]: string;
+                                                          }) => ({
+                                                            ...prev,
+                                                            [request.uuid]:
+                                                              e.target.value,
+                                                          }),
+                                                        )
+                                                      }
+                                                      className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-200 transition-all"
+                                                    />
+                                                    <button
+                                                      onClick={async () => {
+                                                        try {
+                                                          const authToken =
+                                                            localStorage.getItem(
+                                                              "token",
+                                                            );
+                                                          const reason =
+                                                            studentRejectReason[
+                                                              request.uuid
+                                                            ] ||
+                                                            "No reason provided";
+                                                          const {
+                                                            academic_session,
+                                                            branch_token,
+                                                          } = getErpContext();
+                                                          await studentLeaveApprovalAPI.reject(
+                                                            {
+                                                              leave_request_uuid:
+                                                                request.uuid,
+                                                              reject_reason:
+                                                                reason,
+                                                              bearer_token:
+                                                                authToken ||
+                                                                undefined,
+                                                              academic_session,
+                                                              branch_token,
+                                                            },
+                                                          );
+                                                          setStudentLeaveApprovalRequests(
+                                                            (prev: any[]) =>
+                                                              prev.filter(
+                                                                (r: any) =>
+                                                                  r.uuid !==
+                                                                  request.uuid,
+                                                              ),
+                                                          );
+                                                          setStudentRejectReason(
+                                                            (prev: {
+                                                              [
+                                                                key: string
+                                                              ]: string;
+                                                            }) => {
+                                                              const newReasons =
+                                                                {
+                                                                  ...prev,
+                                                                };
+                                                              delete newReasons[
+                                                                request.uuid
+                                                              ];
+                                                              return newReasons;
+                                                            },
+                                                          );
+                                                          setChatHistory(
+                                                            (prev) => [
+                                                              ...prev,
+                                                              {
+                                                                type: "bot",
+                                                                text: `❌ Student leave request for **${studentName}** has been rejected. Reason: ${reason}`,
+                                                              },
+                                                            ],
+                                                          );
+                                                          speakLeaveActionResult(
+                                                            `Student leave request for ${studentName} has been rejected. Reason: ${reason}`,
+                                                          );
+                                                        } catch (err: any) {
+                                                          setChatHistory(
+                                                            (prev) => [
+                                                              ...prev,
+                                                              {
+                                                                type: "bot",
+                                                                text: `❌ Error rejecting student leave request: ${
+                                                                  err.message ||
+                                                                  "Unknown error"
+                                                                }`,
+                                                              },
+                                                            ],
+                                                          );
+                                                        }
+                                                      }}
+                                                      className="px-6 py-3 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-lg font-semibold hover:from-red-600 hover:to-rose-700 transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 whitespace-nowrap"
+                                                    >
+                                                      <span className="text-xl">
+                                                        ✗
+                                                      </span>
+                                                      <span>Reject</span>
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          );
+                                        },
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="mt-4 p-8 bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl text-center shadow-lg">
+                                      <div className="text-6xl mb-4 animate-bounce">
+                                        ✅
+                                      </div>
+                                      <h3 className="text-green-900 font-bold text-xl mb-2">
+                                        All Clear! 🎉
+                                      </h3>
+                                      <p className="text-green-700 font-medium text-base">
+                                        No pending student leave requests
+                                        found
+                                      </p>
+                                      <p className="text-green-600 text-sm mt-2">
+                                        All student leave requests have been
+                                        processed or there are no pending
+                                        requests at this time.
                                       </p>
                                     </div>
                                   )}
@@ -1377,6 +1900,115 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   )}
                                 </div>
                               )
+                            ) : managerBrief ? (
+                              <>
+                                <ManagerBriefDashboard
+                                  data={managerBrief}
+                                  actionOptions={msg.action_options}
+                                />
+                                {/* Chart hidden for now — re-enable when graph should show in ManagerBrief
+                                {msg.visualization?.show_chart &&
+                                msg.visualization ? (
+                                  <VisualizationRenderer
+                                    visualization={msg.visualization}
+                                  />
+                                ) : null}
+                                */}
+                                {(managerBrief.footer ===
+                                  "board_pack_review" ||
+                                  msg.catalog_id === "management_q12") &&
+                                msg.uuid_question ? (
+                                  <BoardPackReview
+                                    message={msg}
+                                    userId={userId}
+                                    academicSession={
+                                      getErpContext().academic_session
+                                    }
+                                  />
+                                ) : null}
+                              </>
+                            ) : msg.layout?.length ? (
+                              // Server-Driven-UI (L4 advisory): render blocks in
+                              // the order the backend specified via its registry.
+                              <>
+                                {msg.layout.map(
+                                  (block: string, bIdx: number) => {
+                                    switch (block) {
+                                      case "ManagerBrief":
+                                        return null;
+                                      case "KpiBanner":
+                                        return msg.kpi_cards?.length ? (
+                                          <KpiCardRow
+                                            key={bIdx}
+                                            cards={msg.kpi_cards}
+                                          />
+                                        ) : null;
+                                      case "Narrative":
+                                        return (
+                                          <MemoizedAnswer
+                                            key={bIdx}
+                                            answer={msg.answer || ""}
+                                            messageIdx={idx}
+                                            onOpenPreview={onOpenPreview}
+                                          />
+                                        );
+                                      case "Findings":
+                                        return msg.findings?.length ? (
+                                          <FindingsList
+                                            key={bIdx}
+                                            items={msg.findings}
+                                          />
+                                        ) : null;
+                                      case "Recommendations":
+                                        return msg.recommendations?.length ? (
+                                          <RecommendationsList
+                                            key={bIdx}
+                                            items={msg.recommendations}
+                                          />
+                                        ) : null;
+                                      case "BoardPackReview":
+                                        return msg.catalog_id ===
+                                          "management_q12" &&
+                                          msg.uuid_question ? (
+                                          <BoardPackReview
+                                            key={bIdx}
+                                            message={msg}
+                                            userId={userId}
+                                            academicSession={
+                                              getErpContext().academic_session
+                                            }
+                                          />
+                                        ) : null;
+                                      case "RagTable":
+                                        return msg.table_data?.rows?.length ? (
+                                          <PaginatedDataTable
+                                            key={bIdx}
+                                            tableData={msg.table_data}
+                                            downloadFilename="advisory-results.csv"
+                                            showDownload={!msg.catalog_id?.trim()}
+                                          />
+                                        ) : null;
+                                      case "TrendChart":
+                                        return msg.visualization?.show_chart &&
+                                          msg.visualization ? (
+                                          <VisualizationRenderer
+                                            key={bIdx}
+                                            visualization={msg.visualization}
+                                          />
+                                        ) : null;
+                                      case "ActionEngine":
+                                        return msg.action_options?.length ? (
+                                          <ActionEngine
+                                            key={bIdx}
+                                            options={msg.action_options}
+                                          />
+                                        ) : null;
+                                      default:
+                                        return null;
+                                    }
+                                  },
+                                )}
+                              </>
                             ) : (
                               <>
                                 {msg.kpi_cards?.length ? (
@@ -1394,11 +2026,16 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                   <PaginatedDataTable
                                     tableData={msg.table_data}
                                     downloadFilename="query-results.csv"
+                                    showDownload={!msg.catalog_id?.trim()}
                                   />
                                 ) : null}
                               </>
                             )}
-                            {msg.visualization?.show_chart && msg.visualization ? (
+                            {/* Legacy chart placement: only when NOT layout-driven
+                                (the L4 layout renders its own TrendChart block). */}
+                            {!msg.layout?.length &&
+                            msg.visualization?.show_chart &&
+                            msg.visualization ? (
                               <VisualizationRenderer
                                 visualization={msg.visualization}
                               />

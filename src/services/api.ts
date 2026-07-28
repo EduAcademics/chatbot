@@ -54,6 +54,7 @@ interface QueryHandlerResponse {
         total: number;
         page_size: number;
         columns: string[];
+        row_status_key?: string;
       };
     } | null;
     mongodbquery: string[];
@@ -67,6 +68,10 @@ interface QueryHandlerResponse {
     findings?: string[];
     ai_level?: string;
     catalog_id?: string;
+    layout?: string[];
+    action_options?: import("../components/types").ActionOption[];
+    recommendations?: import("../components/types").Recommendation[];
+    interactive_ui?: import("../types/managerBriefTypes").ManagerBriefPayload;  // 3rd-july ko add kiya
   };
   message?: string;
 }
@@ -208,6 +213,85 @@ interface AssignmentChatResponse {
       description: string;
       attachments: any[];
     };
+  };
+  message?: string;
+}
+
+interface MessageChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+interface MessageChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+    message_data?: {
+      message_type: string;
+      message_to: string;
+      message_tag: string;
+      subject: string;
+      description: string;
+      departments: string[];
+      employees: string[];
+      students: string[];
+      attachments: string[];
+      is_replied: boolean;
+    };
+  };
+  message?: string;
+}
+
+interface LibraryChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+}
+
+interface LibraryChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
+    library_data?: {
+      book: string;
+      member_able_type: string;
+      member_able: string;
+      type: string;
+    };
+  };
+  message?: string;
+}
+
+interface ComplaintChatRequest {
+  session_id: string;
+  user_id?: string;
+  query: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+  voice_mode?: boolean;
+  tts?: boolean;
+  tts_voice?: string;
+}
+
+interface ComplaintChatResponse {
+  status: string;
+  data?: {
+    answer?: string;
+    tts_text?: string;
   };
   message?: string;
 }
@@ -412,6 +496,72 @@ interface RejectLeaveRequest {
   branch_token?: string;
 }
 
+interface StudentLeaveApprovalRequest {
+  user_id: string;
+  page?: number;
+  limit?: number;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface StudentLeaveApprovalResponse {
+  message: string;
+  status: number;
+  data: {
+    leaveRequests: Array<{
+      uuid: string;
+      status: string;
+      from_date: string;
+      to_date: string;
+      leave_type: string;
+      leave_for: string;
+      description: string;
+      remarks: string | null;
+      attachments: Array<{
+        uuid: string;
+        name: string;
+        originalname: string;
+        type: string;
+        path: string;
+      }>;
+      student: {
+        fullName: string;
+        admissionNumber: string;
+        class: { name: string; uuid: string };
+        section: { name: string; uuid: string };
+        personalInfo: {
+          firstName: string;
+          admissionNo: string;
+          rollNo: number;
+          studentPhotoDocument?: { path: string; uuid: string };
+        };
+      };
+    }>;
+    meta: {
+      currentPage: number;
+      limit: number;
+      totalPages: number;
+      totalRecords: number;
+    };
+  };
+}
+
+interface ApproveStudentLeaveRequest {
+  leave_request_uuid: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+interface RejectStudentLeaveRequest {
+  leave_request_uuid: string;
+  reject_reason: string;
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
 interface TextToSpeechRequest {
   text: string;
   // When true, backend will treat this as a query-flow TTS
@@ -551,6 +701,24 @@ export const aiAPI = {
     });
 
     return await parseJsonResponse<QueryHandlerResponse>(response);
+  },
+
+  resolveApprovalDisambiguation: async (request: {
+    reply: string;
+  }): Promise<{ status: string; resolved: "student" | "teacher" | "unclear" }> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/resolve-approval-disambiguation`,
+      {
+        method: "POST",
+        headers: getAIHeaders(),
+        body: JSON.stringify(request),
+      },
+    );
+
+    return await parseJsonResponse<{
+      status: string;
+      resolved: "student" | "teacher" | "unclear";
+    }>(response);
   },
 
   // Chat endpoint (used for multiple purposes)
@@ -737,6 +905,45 @@ export const aiAPI = {
     return await parseJsonResponse<AssignmentChatResponse>(response);
   },
 
+  // Message chat
+  messageChat: async (
+    request: MessageChatRequest,
+  ): Promise<MessageChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/message-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<MessageChatResponse>(response);
+  },
+
+  // Library chat
+  libraryChat: async (
+    request: LibraryChatRequest,
+  ): Promise<LibraryChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/v1/ai/library-chat`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<LibraryChatResponse>(response);
+  },
+
+  // Complaint chat
+  complaintChat: async (
+    request: ComplaintChatRequest,
+  ): Promise<ComplaintChatResponse> => {
+    const response = await fetch(`${API_BASE_URL}/chat/complaint`, {
+      method: "POST",
+      headers: getDefaultHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<ComplaintChatResponse>(response);
+  },
+
   // Submission chat
   submissionChat: async (
     request: SubmissionChatRequest,
@@ -834,6 +1041,30 @@ export const aiAPI = {
 
     if (!response.ok) {
       throw new Error("Assignment file upload failed");
+    }
+
+    return await parseJsonResponse(response);
+  },
+
+  // Upload message file
+  uploadMessageFile: async (
+    file: File,
+    session_id: string,
+  ): Promise<any> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("session_id", session_id);
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/upload-message-file`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Message file upload failed");
     }
 
     return await parseJsonResponse(response);
@@ -951,6 +1182,123 @@ export const leaveApprovalAPI = {
 
     if (!response.ok) {
       throw new Error("Failed to reject leave request");
+    }
+
+    return await parseJsonResponse(response);
+  },
+};
+
+// Student Leave Approval API
+export const studentLeaveApprovalAPI = {
+  // Fetch pending student leave requests for approval
+  fetchPendingRequests: async (
+    request: StudentLeaveApprovalRequest,
+  ): Promise<StudentLeaveApprovalResponse> => {
+    const params = new URLSearchParams({
+      user_id: request.user_id,
+      page: String(request.page || 1),
+      limit: String(request.limit || 10),
+    });
+
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/student-leave-approval-requests?${params.toString()}`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch student leave approval requests");
+    }
+
+    return await parseJsonResponse<StudentLeaveApprovalResponse>(response);
+  },
+
+  // Approve a student leave request
+  approve: async (request: ApproveStudentLeaveRequest): Promise<any> => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/student-leave-approval/approve`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          leave_request_uuid: request.leave_request_uuid,
+          bearer_token: request.bearer_token,
+          academic_session: request.academic_session,
+          branch_token: request.branch_token,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to approve student leave request");
+    }
+
+    return await parseJsonResponse(response);
+  },
+
+  // Reject a student leave request
+  reject: async (request: RejectStudentLeaveRequest): Promise<any> => {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/v1/ai/student-leave-approval/reject`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          leave_request_uuid: request.leave_request_uuid,
+          reject_reason: request.reject_reason,
+          bearer_token: request.bearer_token,
+          academic_session: request.academic_session,
+          branch_token: request.branch_token,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to reject student leave request");
     }
 
     return await parseJsonResponse(response);
@@ -1094,5 +1442,63 @@ export const courseProgressAPI = {
     }
 
     return await parseJsonResponse<GetCourseProgressResponse>(response);
+  },
+};
+
+// Board Pack review / archive
+export const boardPackAPI = {
+  getReview: async (
+    uuid_question: string,
+  ): Promise<{ status: string; review?: { status?: string } | null; message?: string }> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/board-pack/review/${encodeURIComponent(uuid_question)}`,
+    );
+    return parseJsonResponse(response);
+  },
+
+  approve: async (body: {
+    uuid_question: string;
+    user_id: string;
+    academic_session?: string;
+    period?: string;
+    snapshot: Record<string, unknown>;
+  }): Promise<{ status: string; message?: string }> => {
+    const response = await fetch(`${API_BASE_URL}/v1/board-pack/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return parseJsonResponse(response);
+  },
+
+  reject: async (body: {
+    uuid_question: string;
+    user_id: string;
+    reason?: string;
+  }): Promise<{ status: string; message?: string }> => {
+    const response = await fetch(`${API_BASE_URL}/v1/board-pack/reject`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return parseJsonResponse(response);
+  },
+
+  downloadExport: async (uuid_question: string): Promise<void> => {
+    const response = await fetch(
+      `${API_BASE_URL}/v1/board-pack/${encodeURIComponent(uuid_question)}/export`,
+    );
+    if (!response.ok) {
+      throw new Error("Export failed");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `board-pack-${uuid_question.slice(0, 8)}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   },
 };
