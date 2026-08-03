@@ -1720,17 +1720,20 @@ export function useChatbot({
           : activeFlow;
       // Don't show old detection when in multi-step flow
       setDetectedFlow(null);
-    } else if (
-      (activeFlowRef.current === "query" ||
-        activeFlowRef.current === "faq" ||
-        activeFlow === "query" ||
-        activeFlow === "faq") &&
-      !looksLikeNewRequest
-    ) {
-      targetFlow =
-        activeFlowRef.current === "faq" || activeFlow === "faq" ? "faq" : "query";
-      setDetectedFlow(targetFlow);
-      console.log("[Routing] Skipping classify — already in query/faq flow");
+    // Disabled: skipping classify in query/faq flow dropped validation_status
+    // (e.g. llm_intent_faq), so repeat FAQ questions took the normal query path
+    // and failed. Always re-classify new query/faq messages instead.
+    // } else if (
+    //   (activeFlowRef.current === "query" ||
+    //     activeFlowRef.current === "faq" ||
+    //     activeFlow === "query" ||
+    //     activeFlow === "faq") &&
+    //   !looksLikeNewRequest
+    // ) {
+    //   targetFlow =
+    //     activeFlowRef.current === "faq" || activeFlow === "faq" ? "faq" : "query";
+    //   setDetectedFlow(targetFlow);
+    //   console.log("[Routing] Skipping classify — already in query/faq flow");
     } else if (
       isVoiceTriggeredForThisRequest &&
       looksLikeInformationQuery(userMessage) &&
@@ -1866,7 +1869,16 @@ export function useChatbot({
               !normalized.includes("staff") &&
               !normalized.includes("employee"));
 
-          if (hasStudentLeaveApprovalKeyword) {
+          // Allowlist-only: these how-to FAQ variants must not hit leave-approval
+          // overrides (other approval routing stays unchanged).
+          const isLeaveApprovalStatusFaqAllowlist = normalized.includes(
+            "check my leave approval status on mobile",
+          );
+
+          if (
+            !isLeaveApprovalStatusFaqAllowlist &&
+            hasStudentLeaveApprovalKeyword
+          ) {
             console.log(
               "[Routing] Lexical override: forcing student_leave_approval based on keywords",
               { normalized },
@@ -1876,7 +1888,10 @@ export function useChatbot({
               confidence: 1,
             } as any;
             targetFlow = "student_leave_approval" as FlowType;
-          } else if (isAmbiguousApproval) {
+          } else if (
+            !isLeaveApprovalStatusFaqAllowlist &&
+            isAmbiguousApproval
+          ) {
             console.log(
               "[Routing] Lexical override: forcing approval_disambiguation",
               { normalized },
@@ -1887,7 +1902,10 @@ export function useChatbot({
               clarification_question: APPROVAL_DISAMBIGUATION_QUESTION,
             } as any;
             targetFlow = "approval_disambiguation" as FlowType;
-          } else if (hasTeacherLeaveApprovalKeyword) {
+          } else if (
+            !isLeaveApprovalStatusFaqAllowlist &&
+            hasTeacherLeaveApprovalKeyword
+          ) {
             console.log(
               "[Routing] Lexical override: forcing leave_approval (teacher) based on keywords",
               { normalized },
@@ -1897,7 +1915,11 @@ export function useChatbot({
               confidence: 1,
             } as any;
             targetFlow = "leave_approval" as FlowType;
-          } else if (hasLeaveToken && hasApprovalToken) {
+          } else if (
+            !isLeaveApprovalStatusFaqAllowlist &&
+            hasLeaveToken &&
+            hasApprovalToken
+          ) {
             console.log(
               "[Routing] Lexical override: forcing leave_approval based on tokens",
               { tokens },
@@ -1929,8 +1951,14 @@ export function useChatbot({
             } as any;
             targetFlow = "health_card" as FlowType;
           } else if (
-            normalized.includes("complaint") ||
-            normalized.includes("estate")
+            !(
+              normalized.startsWith("how do i ") ||
+              normalized.startsWith("how to ") ||
+              normalized.startsWith("how can i ") ||
+              normalized.startsWith("how do we ")
+            ) &&
+            (normalized.includes("complaint") ||
+              normalized.includes("estate"))
           ) {
             console.log(
               "[Routing] Lexical override: forcing complaint based on keywords",
