@@ -67,6 +67,8 @@
     font-weight: 600;
     color: #334155;
     background-color: #fff;
+    white-space: pre-line;
+    line-height: 1.35;
 }
 
 .markdown-table-merge tbody tr:nth-child(even) td.merge-group-cell {
