@@ -963,7 +963,7 @@ export function useChatbot({
             const useDictationDebounce =
               activeFlow === "full_voice_attendance" ||
               (activeFlow === "assignment" && useFullVoice) ||
-              (activeFlow === "leave" && useFullVoice);
+              (activeFlow === "leave" && useFullVoice) ||
               (activeFlow === "message" && useFullVoice) ||
               (activeFlow === "library" && useFullVoice);
             if (useDictationDebounce) return;
@@ -1950,24 +1950,6 @@ export function useChatbot({
               confidence: 1,
             } as any;
             targetFlow = "health_card" as FlowType;
-          } else if (
-            !(
-              normalized.startsWith("how do i ") ||
-              normalized.startsWith("how to ") ||
-              normalized.startsWith("how can i ") ||
-              normalized.startsWith("how do we ")
-            ) &&
-            (normalized.includes("complaint") ||
-              normalized.includes("estate"))
-          ) {
-            console.log(
-              "[Routing] Lexical override: forcing complaint based on keywords",
-            );
-            classificationResult = {
-              flow: "complaint",
-              confidence: 1,
-            } as any;
-            targetFlow = "complaint" as FlowType;
           } else {
             classificationResult = await classifyQuery(userMessage);  
             console.log("✅ Classification complete:", classificationResult);
