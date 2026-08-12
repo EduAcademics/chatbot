@@ -680,7 +680,7 @@ export const userAPI = {
   fetch: async (request: UserFetchRequest): Promise<UserFetchResponse> => {
     const response = await fetch(`${API_BASE_URL}/v1/user/fetch`, {
       method: "POST",
-      headers: getDefaultHeaders(true),
+      headers: getAIHeaders(),
       body: JSON.stringify(request),
     });
 
