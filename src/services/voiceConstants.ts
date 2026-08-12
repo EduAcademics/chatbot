@@ -39,7 +39,7 @@ export const PTT_RELEASE_STT_FLUSH_MS = 450;
  *  still takes ~1–3s, so starting ASAP maximizes the chance it is warm in time). */
 export const VOICE_PREWARM_DELAY_MS = 0;
 
-/** Matches backend webrtc_bot _TTS_VOICE_MAP for consistent REST + pipeline voice. */
+/** Matches backend webrtc_bot / livekit_bot _TTS_VOICE_MAP for consistent REST + pipeline voice. */
 export const TTS_VOICE_BY_LANGUAGE: Record<string, string> = {
   auto: "en-IN-NeerjaNeural",
   "en-US": "en-US-JennyNeural",

@@ -17,7 +17,10 @@ import {
   getAIHeaders,
 } from "../../services/api";
 import { API_BASE_URL } from "../../config/api";
-import { WebRTCAudioService } from "../../services/webrtcAudio";
+import {
+  createVoiceAudioService,
+  type VoiceAudioService,
+} from "../../services/voiceAudioFactory";
 import {
   FULL_VOICE_TURN_DEBOUNCE_MS,
   FULL_VOICE_DICTATION_DEBOUNCE_MS,
@@ -222,7 +225,7 @@ export function useChatbot({
   roles: string;
   loginId: string;
 }): UseChatbotReturn {
-  const webrtcServiceRef = useRef<WebRTCAudioService | null>(null);
+  const webrtcServiceRef = useRef<VoiceAudioService | null>(null);
   const lastInterimTextRef = useRef<string>(""); // Track last interim text to replace it with final
   const finalTextRef = useRef<string>(""); // Track accumulated final text (completed sentences)
   // Mirror of the text actually shown in the input during the current PTT capture.
@@ -834,7 +837,7 @@ export function useChatbot({
         return;
       }
 
-      const webrtcService = new WebRTCAudioService();
+      const webrtcService = createVoiceAudioService();
       webrtcServiceRef.current = webrtcService;
 
       await webrtcService.connect(
@@ -3127,17 +3130,24 @@ export function useChatbot({
     uuidQuestion?: string,
     ttsContext?: import("../types").TtsQueryContext,
   ) => {
-    if (!text?.trim()) return;
+    const backendTts = ttsContext?.backend_tts_text?.trim() || "";
+    const hasQueryContext = Boolean(
+      uuidQuestion || ttsContext?.table_data || backendTts,
+    );
+    // Table-only answers can have empty answer text; still allow TTS via backend summary.
+    if (!text?.trim() && !hasQueryContext) return;
 
     interruptTTS();
 
-    let speechText = text;
+    let speechText = text?.trim() || backendTts;
     let summaryAlreadyResolved = false;
     const preResolved =
       ttsContext?.tts_summary_ready === true &&
       ttsContext?.backend_tts_text?.trim();
+    // Query/table responses may have blank answer after dropping "N records found."
+    const treatAsQuery = isQuery || hasQueryContext;
 
-    if (isQuery) {
+    if (treatAsQuery) {
       if (preResolved) {
         speechText = preResolved;
         summaryAlreadyResolved = true;
@@ -3149,7 +3159,7 @@ export function useChatbot({
       } else {
         try {
           const resolved = await aiAPI.resolveTtsText({
-            text,
+            text: text || backendTts || "",
             uuid_question: uuidQuestion,
             timeout_seconds: TTS_RESOLVE_TIMEOUT_SEC,
             table_data: ttsContext?.table_data ?? undefined,
@@ -3163,14 +3173,16 @@ export function useChatbot({
               summaryAlreadyResolved = true;
             }
           } else {
-            speechText = generateQueryTTSSummary(text) || text;
+            speechText = generateQueryTTSSummary(text) || text || backendTts;
           }
         } catch (err) {
           console.warn("[TTS] resolve-tts-text failed, using client summary:", err);
-          speechText = generateQueryTTSSummary(text) || text;
+          speechText = generateQueryTTSSummary(text) || text || backendTts;
         }
       }
     }
+
+    if (!speechText?.trim()) return;
 
     ttsRequestIdRef.current += 1;
     const thisRequestId = ttsRequestIdRef.current;

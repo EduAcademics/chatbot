@@ -26,7 +26,20 @@ export const ERP_API_BASE_URL =
 export const WS_BASE_URL = env.VITE_WS_BASE_URL || "";
 
 // ---------------------------------------------------------------------------
-// WebRTC / Pipecat bot
+// Voice transport: "livekit" | "webrtc" (legacy Pipecat P2P)
+// ---------------------------------------------------------------------------
+const rawVoiceTransport = String(env.VITE_VOICE_TRANSPORT || "webrtc")
+  .trim()
+  .toLowerCase()
+  .replace(/#.*$/, "")
+  .trim();
+export const VOICE_TRANSPORT: "livekit" | "webrtc" =
+  rawVoiceTransport === "livekit" ? "livekit" : "webrtc";
+
+export const LIVEKIT_URL = env.VITE_LIVEKIT_URL || "";
+
+// ---------------------------------------------------------------------------
+// WebRTC / Pipecat bot (legacy SmallWebRTC path)
 // ---------------------------------------------------------------------------
 export const BOT_START_URL =
   env.VITE_BOT_START_URL || "http://localhost:7860/start";

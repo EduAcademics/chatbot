@@ -639,6 +639,15 @@ const getDefaultHeaders = (includeAuth: boolean = false): HeadersInit => {
     }
   }
 
+  const academicSession = localStorage.getItem("academic_session");
+  const branchToken = localStorage.getItem("branch_token");
+  if (academicSession) {
+    (headers as Record<string, string>)["x-academic-session"] = academicSession;
+  }
+  if (branchToken) {
+    (headers as Record<string, string>)["x-branch-token"] = branchToken;
+  }
+
   return headers;
 };
 
@@ -646,7 +655,8 @@ export const getAIHeaders = (): HeadersInit => {
   const headers = getDefaultHeaders(true) as Record<string, string>;
 
   const academicSession = localStorage.getItem("academic_session") || "2025-26";
-  const branchToken = localStorage.getItem("branch_token") || "indp";
+  // Must match Mongo DB suffix: branch_{token} (e.g. dpsindp → branch_dpsindp)
+  const branchToken = localStorage.getItem("branch_token") || "dpsindp";
 
   headers["x-academic-session"] = academicSession;
   headers["x-branch-token"] = branchToken;

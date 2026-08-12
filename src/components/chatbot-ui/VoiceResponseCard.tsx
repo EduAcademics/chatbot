@@ -98,7 +98,7 @@ export default function VoiceResponseCard({
             handlePlayTTS(
               idx,
               answerText,
-              Boolean(msg.answer),
+              Boolean(msg.answer) || Boolean(msg.uuid_question) || Boolean(msg.table_data),
               msg.uuid_question,
               {
                 backend_tts_text: msg.tts_text,
