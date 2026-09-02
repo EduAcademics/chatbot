@@ -10,6 +10,7 @@ function App() {
   const [userId, setUserId] = useState<string | null>(null);
   const [roles, setRoles] = useState<string>("");
   const [loginId, setLoginId] = useState<string>("");
+  const [firstName, setFirstName] = useState<string>("");
   const [isAuthResolved, setIsAuthResolved] = useState(false);
   const [isAutoFetching, setIsAutoFetching] = useState(false);
   const [autoAuthError, setAutoAuthError] = useState<string | null>(null);
@@ -26,12 +27,16 @@ function App() {
       const params = new URLSearchParams(window.location.search);
       const tokenFromQuery = params.get("token");
       const loginIdFromQuery = params.get("login_id");
+      const firstNameFromQuery = params.get("first_name");
 
       if (tokenFromQuery && loginIdFromQuery) {
         setIsAutoFetching(true);
         setAutoAuthError(null);
         localStorage.setItem("token", tokenFromQuery);
         setLoginId(loginIdFromQuery);
+        if (firstNameFromQuery) {
+          setFirstName(firstNameFromQuery);
+        }
 
         try {
           const response = await userAPI.fetch({
@@ -40,6 +45,9 @@ function App() {
           if (response.status === "success" && response.user_id) {
             setUserId(response.user_id);
             setRoles(response.user_roles || "");
+            if (response.first_name) {
+              setFirstName(response.first_name);
+            }
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {
             throw new Error(response.message || "Unable to fetch user details.");
@@ -73,7 +81,7 @@ function App() {
         >
           <img 
             src="/sofisto-img.png" 
-            alt="SchoolOS AI" 
+            alt="Schools OS AI" 
             className="w-16 h-16 md:w-20 md:h-20 object-contain"
           />
           <p className="text-[rgba(61,40,23,0.78)] text-sm md:text-base font-medium">
@@ -99,12 +107,14 @@ function App() {
               <MainLayout
                 userId={userId}
                 loginId={loginId}
+                firstName={firstName}
                 roles={roles}
                 autoAuthError={autoAuthError}
-                onUserFetched={(id, r, fetchedLoginId) => {
+                onUserFetched={(id, r, fetchedLoginId, fetchedFirstName) => {
                   setUserId(id);
                   setRoles(r);
                   setLoginId(fetchedLoginId);
+                  setFirstName(fetchedFirstName || "");
                   setAutoAuthError(null);
                 }}
               />
@@ -121,15 +131,22 @@ function App() {
 const MainLayout = ({
   userId,
   loginId,
+  firstName,
   roles,
   autoAuthError,
   onUserFetched,
 }: {
   userId: string | null;
   loginId: string;
+  firstName: string;
   roles: string;
   autoAuthError: string | null;
-  onUserFetched: (id: string, r: string, loginId: string) => void;
+  onUserFetched: (
+    id: string,
+    r: string,
+    loginId: string,
+    firstName?: string,
+  ) => void;
 }) => {
   return (
     <>
@@ -144,6 +161,7 @@ const MainLayout = ({
           userId={userId}
           roles={roles}
           loginId={loginId}
+          firstName={firstName}
         />
       )}
     </>

@@ -29,6 +29,7 @@ interface UserFetchResponse {
   session_id?: string;
   login_id?: string;
   user_type?: string;
+  first_name?: string;
   message?: string;
 }
 

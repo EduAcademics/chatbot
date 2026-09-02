@@ -17,10 +17,12 @@ const AudioStreamerChatBot = ({
   userId,
   roles,
   loginId,
+  firstName,
 }: {
   userId: string;
   roles: string;
   loginId: string;
+  firstName?: string;
 }) => {
   const api = useChatbot({ userId, roles, loginId });
   // const api = useChatbot({ userId, roles, email });
@@ -64,7 +66,7 @@ const AudioStreamerChatBot = ({
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
             <HomeView
-              userName={loginId}
+              userName={firstName || loginId}
               roles={roles}
               onNavigate={(next) => setScreen(next)}
               onSelectPrompt={handleSelectPrompt}

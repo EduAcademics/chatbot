@@ -34,10 +34,10 @@ export default function HomeView({
         transition={{ duration: 0.35 }}
       >
         <h1 className="home-greeting">
-          {displayName ? `Hi ${displayName},` : "Hi, I'm SchoolOS AI"}
+          {displayName ? `Hi ${displayName},` : "Hi, I'm Schools OS AI"}
         </h1>
         <p className="home-subtitle">
-          Ask any questions you have — your SchoolOS AI buddy is always ready to
+          Ask any questions you have — your Schools OS AI buddy is always ready to
           help.
         </p>
       </motion.div>

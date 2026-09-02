@@ -4,7 +4,12 @@ import { FiCheck } from "react-icons/fi";
 import { userAPI } from "../services/api";
 
 interface Props {
-  onUserFetched: (userId: string, roles: string, loginId: string) => void;
+  onUserFetched: (
+    userId: string,
+    roles: string,
+    loginId: string,
+    firstName?: string,
+  ) => void;
   initialLoginId?: string;
   initialError?: string;
 }
@@ -41,7 +46,12 @@ const UserInfoBox = ({
     try {
       const data = await userAPI.fetch({ login_id: loginId.trim() });
       if (data.status === "success" && data.user_id) {
-        onUserFetched(data.user_id, data.user_roles || "", loginId.trim());
+        onUserFetched(
+          data.user_id,
+          data.user_roles || "",
+          loginId.trim(),
+          data.first_name,
+        );
       } else {
         setError(data.message || "User not found");
       }
