@@ -28,14 +28,18 @@ function App() {
       const tokenFromQuery = params.get("token");
       const loginIdFromQuery = params.get("login_id");
       const firstNameFromQuery = params.get("first_name");
+      const storedFirstName = sessionStorage.getItem(
+        `chatbot_first_name:${loginIdFromQuery || ""}`,
+      );
 
       if (tokenFromQuery && loginIdFromQuery) {
         setIsAutoFetching(true);
         setAutoAuthError(null);
         localStorage.setItem("token", tokenFromQuery);
         setLoginId(loginIdFromQuery);
-        if (firstNameFromQuery) {
-          setFirstName(firstNameFromQuery);
+        const initialFirstName = firstNameFromQuery || storedFirstName || "";
+        if (initialFirstName) {
+          setFirstName(initialFirstName);
         }
 
         try {
@@ -47,6 +51,15 @@ function App() {
             setRoles(response.user_roles || "");
             if (response.first_name) {
               setFirstName(response.first_name);
+              sessionStorage.setItem(
+                `chatbot_first_name:${loginIdFromQuery}`,
+                response.first_name,
+              );
+            } else if (firstNameFromQuery) {
+              sessionStorage.setItem(
+                `chatbot_first_name:${loginIdFromQuery}`,
+                firstNameFromQuery,
+              );
             }
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {

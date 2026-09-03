@@ -66,7 +66,7 @@ const AudioStreamerChatBot = ({
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
             <HomeView
-              userName={firstName || loginId}
+              userName={api.firstName || firstName || loginId}
               roles={roles}
               onNavigate={(next) => setScreen(next)}
               onSelectPrompt={handleSelectPrompt}

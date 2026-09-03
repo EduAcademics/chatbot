@@ -116,6 +116,7 @@ export interface UseChatbotReturn {
   hoverTimeoutRef: RefObject<ReturnType<typeof setTimeout> | null>;
   getErpContext: () => { academic_session: string; branch_token: string };
   sessionId: string;
+  firstName: string;
   userId: string;
   roles: string;
   activeFlowRef: RefObject<FlowType>;
@@ -342,6 +343,7 @@ export function useChatbot({
       localStorage.getItem("sessionId") ||
       `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
   );
+  const [resolvedFirstName, setResolvedFirstName] = useState<string>("");
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]); // <-- add for editable attendance
   const attendanceDataRef = useRef<AttendanceRecord[]>([]); // Ref to access current attendanceData in closures
   const [attendanceStep, setAttendanceStep] = useState<
@@ -597,6 +599,9 @@ export function useChatbot({
         const data = await userAPI.fetch({ login_id: loginId });
         if (data.status === "success" && data.session_id) {
           setSessionId(data.session_id);
+        }
+        if (data.status === "success" && data.first_name) {
+          setResolvedFirstName(data.first_name);
         }
       } catch (err) {
         // ignore
@@ -4256,6 +4261,7 @@ export function useChatbot({
     hoverTimeoutRef,
     getErpContext,
     sessionId,
+    firstName: resolvedFirstName,
     userId,
     roles,
     activeFlowRef,
