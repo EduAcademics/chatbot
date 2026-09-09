@@ -288,6 +288,9 @@
   box-shadow: 0 6px 20px rgba(245, 130, 31, 0.15);
   transform: translateY(-1px);
 }
+.chatbot-msg-bubble.bot:has(.hybrid-action-panel) {
+  max-width: min(95vw, 900px);
+}
 
 @keyframes spin {
   0% {

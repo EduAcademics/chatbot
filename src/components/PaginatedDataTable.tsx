@@ -35,11 +35,19 @@ function mergeRowSpan(
   return span;
 }
 
+interface TableSelectionProps {
+  selectedIds: Set<string>;
+  onToggleRow: (rowId: string) => void;
+  onToggleAll: (rowIds: string[], checked: boolean) => void;
+  getRowId: (row: Record<string, unknown>, globalIndex: number) => string;
+  disabled?: boolean;
+}
+
 interface PaginatedDataTableProps {
   tableData: TableData;
   downloadFilename?: string;
-  
   showDownload?: boolean;
+  selection?: TableSelectionProps;
 }
 
 const ragRowClass: Record<string, string> = {
@@ -53,6 +61,7 @@ export default function PaginatedDataTable({
   tableData,
   downloadFilename = "query-results.csv",
   showDownload = true,
+  selection,
 }: PaginatedDataTableProps) {
   const { rows, table_meta } = tableData;
   const { columns, page_size, total, row_status_key, merge_column } = table_meta;
@@ -76,7 +85,30 @@ export default function PaginatedDataTable({
     ? Math.min((safePage + 1) * page_size, total)
     : total;
 
-  if (!columns.length || !rows.length) {
+  const displayColumns = useMemo(
+    () => columns.filter((col) => col !== "_hybrid_row_id"),
+    [columns],
+  );
+
+  const pageRowIds = useMemo(
+    () =>
+      pageRows.map((row, rowIdx) => {
+        const globalIndex = usePagination ? safePage * page_size + rowIdx : rowIdx;
+        return selection?.getRowId(row, globalIndex) ?? String(globalIndex);
+      }),
+    [pageRows, safePage, page_size, usePagination, selection],
+  );
+
+  const pageAllSelected =
+    Boolean(selection) &&
+    pageRowIds.length > 0 &&
+    pageRowIds.every((id) => selection!.selectedIds.has(id));
+
+  const pageSomeSelected =
+    Boolean(selection) &&
+    pageRowIds.some((id) => selection!.selectedIds.has(id));
+
+  if (!displayColumns.length || !rows.length) {
     return null;
   }
 
@@ -111,7 +143,7 @@ export default function PaginatedDataTable({
               <button
                 type="button"
                 className="paginated-table-btn paginated-table-btn-primary"
-                onClick={() => downloadTableCsv(rows, columns, downloadFilename)}
+                onClick={() => downloadTableCsv(rows, displayColumns, downloadFilename)}
               >
                 Download CSV
               </button>
@@ -128,7 +160,26 @@ export default function PaginatedDataTable({
         <table>
           <thead>
             <tr>
-              {columns.map((col) => (
+              {selection ? (
+                <th className="hybrid-select-col">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on page"
+                    checked={pageAllSelected}
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate =
+                          !pageAllSelected && pageSomeSelected;
+                      }
+                    }}
+                    disabled={selection.disabled}
+                    onChange={(e) =>
+                      selection.onToggleAll(pageRowIds, e.target.checked)
+                    }
+                  />
+                </th>
+              ) : null}
+              {displayColumns.map((col) => (
                 <th key={col}>{formatColumnHeader(col)}</th>
               ))}
             </tr>
@@ -139,9 +190,22 @@ export default function PaginatedDataTable({
                 ? String(row[row_status_key] ?? "").toLowerCase()
                 : "";
               const rowClass = row_status_key ? ragRowClass[status] || "" : "";
+              const rowId = pageRowIds[rowIdx];
+              const isSelected = selection?.selectedIds.has(rowId) ?? false;
               return (
                 <tr key={`${safePage}-${rowIdx}`} className={rowClass}>
-                  {columns.map((col) => {
+                  {selection ? (
+                    <td className="hybrid-select-col">
+                      <input
+                        type="checkbox"
+                        aria-label="Select row"
+                        checked={isSelected}
+                        disabled={selection.disabled}
+                        onChange={() => selection.onToggleRow(rowId)}
+                      />
+                    </td>
+                  ) : null}
+                  {displayColumns.map((col) => {
                     if (mergeEnabled && col === merge_column) {
                       const span = mergeRowSpan(pageRows, rowIdx, merge_column);
                       if (span === 0) {

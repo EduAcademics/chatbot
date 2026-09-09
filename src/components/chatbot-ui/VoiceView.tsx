@@ -39,6 +39,9 @@ interface VoiceViewProps {
   >;
   correctionBoxRef: React.RefObject<HTMLDivElement | null>;
   onOpenPreview: (url: string, filename: string) => void;
+  userId?: string;
+  getErpContext?: () => { academic_session: string; branch_token: string };
+  setChatHistory?: React.Dispatch<React.SetStateAction<any[]>>;
 }
 
 export default function VoiceView({
@@ -61,6 +64,9 @@ export default function VoiceView({
   setFeedbackComment,
   correctionBoxRef,
   onOpenPreview,
+  userId,
+  getErpContext,
+  setChatHistory,
 }: VoiceViewProps) {
   const ptt = usePttButtonHandlers({
     handlePttDown,
@@ -143,6 +149,9 @@ export default function VoiceView({
                   setFeedbackComment={setFeedbackComment}
                   correctionBoxRef={correctionBoxRef}
                   onOpenPreview={onOpenPreview}
+                  userId={userId}
+                  getErpContext={getErpContext}
+                  setChatHistory={setChatHistory}
                 />
               ),
             )}

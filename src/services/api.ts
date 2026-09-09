@@ -72,8 +72,34 @@ interface QueryHandlerResponse {
     action_options?: import("../components/types").ActionOption[];
     recommendations?: import("../components/types").Recommendation[];
     interactive_ui?: import("../types/managerBriefTypes").ManagerBriefPayload;  // 3rd-july ko add kiya
+    hybrid_session_id?: string;
+    hybrid_action_available?: boolean;
+    action_type?: string;
+    hybrid_catalog_id?: string;
+    hybrid_row_count?: number;
   };
   message?: string;
+}
+
+export interface HybridSendRequest {
+  hybrid_session_id: string;
+  user_id: string;
+  selected_student_ids: string[];
+  bearer_token?: string;
+  academic_session?: string;
+  branch_token?: string;
+}
+
+export interface HybridSendResponse {
+  status: string;
+  message?: string;
+  data?: {
+    answer?: string;
+    hybrid_session_id?: string;
+    action_type?: string;
+    catalog_id?: string;
+    sent_count?: number;
+  };
 }
 
 interface ChatRequest {
@@ -1078,6 +1104,29 @@ export const aiAPI = {
     }
 
     return await parseJsonResponse(response);
+  },
+
+  hybridSend: async (
+    request: HybridSendRequest,
+  ): Promise<HybridSendResponse> => {
+    const headers = getAIHeaders() as Record<string, string>;
+    if (request.bearer_token) {
+      headers["Authorization"] = `Bearer ${request.bearer_token}`;
+    }
+    if (request.academic_session) {
+      headers["x-academic-session"] = request.academic_session;
+    }
+    if (request.branch_token) {
+      headers["x-branch-token"] = request.branch_token;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/v1/ai/hybrid-send`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(request),
+    });
+
+    return await parseJsonResponse<HybridSendResponse>(response);
   },
 };
 

@@ -521,7 +521,7 @@ export function useChatbot({
   const getErpContext = () => {
     const academic_session =
       localStorage.getItem("academic_session") || "2025-26";
-    const branch_token = localStorage.getItem("branch_token") || "qa";
+    const branch_token = localStorage.getItem("branch_token") || "dpsindp";
     return { academic_session, branch_token };
   };
 
@@ -1379,10 +1379,10 @@ export function useChatbot({
     clarification_question?: string;
   }> => {
     try {
-      const response = await fetch(`${API_BASE_URL}/v1/ai/classify-query`, {
+      const response = await fetch(`${API_BASE_URL}/v1/ai/classify-query`, { //fetch(...) ->Browser sends HTTP request to backend
         method: "POST",
         headers: getAIHeaders(),
-        body: JSON.stringify({
+        body: JSON.stringify({ 
           query: message,
           user_id: userId,
           user_roles: roles ? roles.split(",").map(r => r.trim()) : [],
@@ -2413,10 +2413,10 @@ export function useChatbot({
       // Keep the current step - don't reset
     }
 
-    if (targetFlow === "query" || targetFlow === "faq") {  // the code checcks if the intent is query or faq and then calls the query handler API
-      // Query handler API
+    if (targetFlow === "query" || targetFlow === "faq" || targetFlow === "hybrid") {
+      // Query handler API (hybrid uses same graph path; catalog matched at classify)
       try {
-        const data = await aiAPI.queryHandler({    // this is where suitcase is built using model.py structure and sent to backend server(supriyo). the code combines the ID, Question and label into one package 
+        const data = await aiAPI.queryHandler({  // body,  the full JSON from frontend (user_id, query, flow, validation_status, etc.) as one Python object. frontend sends this to backend.
           user_id: userId,
           user_roles: roles,
           query: userMessage,
@@ -2446,6 +2446,11 @@ export function useChatbot({
               action_options: data.data?.action_options ?? undefined,
               recommendations: data.data?.recommendations ?? undefined,
               interactive_ui: data.data?.interactive_ui ?? undefined,  // 3rd-july ko add kiya
+              hybrid_session_id: data.data?.hybrid_session_id,
+              hybrid_action_available: data.data?.hybrid_action_available,
+              action_type: data.data?.action_type,
+              hybrid_catalog_id: data.data?.hybrid_catalog_id,
+              hybrid_row_count: data.data?.hybrid_row_count,
             
             },
           ]);

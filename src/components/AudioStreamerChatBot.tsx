@@ -101,6 +101,9 @@ const AudioStreamerChatBot = ({
               setFeedbackComment={api.setFeedbackComment}
               correctionBoxRef={api.correctionBoxRef}
               onOpenPreview={handleOpenPreview}
+              userId={api.userId}
+              getErpContext={api.getErpContext}
+              setChatHistory={api.setChatHistory}
             />
             </motion.div>
           )}

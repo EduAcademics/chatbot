@@ -4,6 +4,7 @@ export type FlowType =
   | "none"
   | "query"
   | "faq"
+  | "hybrid"
   | "attendance"
   | "voice_attendance"
   | "full_voice_attendance"
@@ -133,6 +134,12 @@ export interface ChatMessage {
   interactive_ui?: import("../types/managerBriefTypes").ManagerBriefPayload;  // 3rd-july ko add kiya
   uuid_question?: string;
   board_pack_status?: "draft" | "approved" | "rejected";
+  hybrid_session_id?: string;
+  hybrid_action_available?: boolean;
+  action_type?: string;
+  hybrid_catalog_id?: string;
+  hybrid_row_count?: number;
+  hybrid_sent?: boolean;
 }
 
 export interface ClassInfo {

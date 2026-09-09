@@ -3,6 +3,7 @@ import MemoizedAnswer from "../MemoizedAnswer";
 import KpiCardRow from "../KpiCardRow";
 import FindingsList from "../FindingsList";
 import PaginatedDataTable from "../PaginatedDataTable";
+import HybridActionPanel from "../HybridActionPanel";
 import VisualizationRenderer from "../VisualizationRenderer";
 import ManagerBriefDashboard from "../ManagerBriefDashboard";
 import { resolveManagerBrief } from "../../utils/resolveManagerBrief";
@@ -33,6 +34,9 @@ export interface VoiceResponseCardProps {
   >;
   correctionBoxRef: React.RefObject<HTMLDivElement | null>;
   onOpenPreview: (url: string, filename: string) => void;
+  userId?: string;
+  getErpContext?: () => { academic_session: string; branch_token: string };
+  setChatHistory?: React.Dispatch<React.SetStateAction<any[]>>;
 }
 
 export default function VoiceResponseCard({
@@ -48,6 +52,9 @@ export default function VoiceResponseCard({
   setFeedbackComment,
   correctionBoxRef,
   onOpenPreview,
+  userId,
+  getErpContext,
+  setChatHistory,
 }: VoiceResponseCardProps) {
   const answerText = msg.answer || msg.text || "";
   const managerBrief = resolveManagerBrief(msg);
@@ -75,14 +82,46 @@ export default function VoiceResponseCard({
               onOpenPreview={onOpenPreview}
             />
             {msg.findings?.length ? <FindingsList items={msg.findings} /> : null}
-            {msg.table_data?.rows?.length ? (
+            {msg.hybrid_action_available &&
+            msg.hybrid_session_id &&
+            msg.table_data?.rows?.length &&
+            userId &&
+            getErpContext &&
+            setChatHistory ? (
+              <HybridActionPanel
+                tableData={msg.table_data}
+                hybridSessionId={msg.hybrid_session_id}
+                actionType={msg.action_type}
+                userId={userId}
+                getErpContext={getErpContext}
+                sent={msg.hybrid_sent}
+                onSent={(answer) => {
+                  setChatHistory((prev) => {
+                    const next = [...prev];
+                    next[idx] = { ...next[idx], hybrid_sent: true };
+                    return [
+                      ...next,
+                      { type: "bot", answer, activeTab: "answer" as const },
+                    ];
+                  });
+                }}
+                onError={(message) => {
+                  setChatHistory((prev) => [
+                    ...prev,
+                    { type: "bot", answer: message, activeTab: "answer" as const },
+                  ]);
+                }}
+              />
+            ) : msg.table_data?.rows?.length ? (
               <PaginatedDataTable
                 tableData={msg.table_data}
                 downloadFilename="query-results.csv"
                 showDownload={!msg.catalog_id?.trim()}
               />
             ) : null}
-            {msg.visualization?.show_chart && msg.visualization ? (
+            {msg.visualization?.show_chart &&
+            msg.visualization &&
+            !msg.hybrid_action_available ? (
               <VisualizationRenderer visualization={msg.visualization} />
             ) : null}
           </>

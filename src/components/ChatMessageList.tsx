@@ -13,6 +13,7 @@ import ManagerBriefDashboard from "./ManagerBriefDashboard";
 import { resolveManagerBrief } from "../utils/resolveManagerBrief";
 import VisualizationRenderer from "./VisualizationRenderer";
 import ActionEngine from "./ActionEngine";
+import HybridActionPanel from "./HybridActionPanel";
 import { MarksEntryTable } from "./MarksEntryTable";
 import { HealthCardTable } from "./HealthCardTable";
 import { HealthCardSelector } from "./HealthCardSelector";
@@ -28,6 +29,59 @@ const formatStudentLeaveType = (leaveType: string): string => {
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 };
+
+function renderQueryTableBlock(
+  msg: any,
+  messageIdx: number,
+  options: {
+    downloadFilename: string;
+    userId: string;
+    getErpContext: () => { academic_session: string; branch_token: string };
+    setChatHistory: React.Dispatch<React.SetStateAction<any[]>>;
+    key?: string | number;
+  },
+) {
+  if (!msg.table_data?.rows?.length) return null;
+
+  if (msg.hybrid_action_available && msg.hybrid_session_id) {
+    return (
+      <HybridActionPanel
+        key={options.key}
+        tableData={msg.table_data}
+        hybridSessionId={msg.hybrid_session_id}
+        actionType={msg.action_type}
+        userId={options.userId}
+        getErpContext={options.getErpContext}
+        sent={msg.hybrid_sent}
+        onSent={(answer) => {
+          options.setChatHistory((prev) => {
+            const next = [...prev];
+            next[messageIdx] = { ...next[messageIdx], hybrid_sent: true };
+            return [
+              ...next,
+              { type: "bot", answer, activeTab: "answer" as const },
+            ];
+          });
+        }}
+        onError={(message) => {
+          options.setChatHistory((prev) => [
+            ...prev,
+            { type: "bot", answer: message, activeTab: "answer" as const },
+          ]);
+        }}
+      />
+    );
+  }
+
+  return (
+    <PaginatedDataTable
+      key={options.key}
+      tableData={msg.table_data}
+      downloadFilename={options.downloadFilename}
+      showDownload={!msg.catalog_id?.trim()}
+    />
+  );
+}
 
 export interface ChatMessageListProps {
   chatBoxRef: React.RefObject<HTMLDivElement | null>;
@@ -1980,17 +2034,17 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                           />
                                         ) : null;
                                       case "RagTable":
-                                        return msg.table_data?.rows?.length ? (
-                                          <PaginatedDataTable
-                                            key={bIdx}
-                                            tableData={msg.table_data}
-                                            downloadFilename="advisory-results.csv"
-                                            showDownload={!msg.catalog_id?.trim()}
-                                          />
-                                        ) : null;
+                                        return renderQueryTableBlock(msg, idx, {
+                                          key: bIdx,
+                                          downloadFilename: "advisory-results.csv",
+                                          userId,
+                                          getErpContext,
+                                          setChatHistory,
+                                        });
                                       case "TrendChart":
                                         return msg.visualization?.show_chart &&
-                                          msg.visualization ? (
+                                          msg.visualization &&
+                                          !msg.hybrid_action_available ? (
                                           <VisualizationRenderer
                                             key={bIdx}
                                             visualization={msg.visualization}
@@ -2022,20 +2076,20 @@ export default function ChatMessageList(props: ChatMessageListProps) {
                                 {msg.findings?.length ? (
                                   <FindingsList items={msg.findings} />
                                 ) : null}
-                                {msg.table_data?.rows?.length ? (
-                                  <PaginatedDataTable
-                                    tableData={msg.table_data}
-                                    downloadFilename="query-results.csv"
-                                    showDownload={!msg.catalog_id?.trim()}
-                                  />
-                                ) : null}
+                                {renderQueryTableBlock(msg, idx, {
+                                  downloadFilename: "query-results.csv",
+                                  userId,
+                                  getErpContext,
+                                  setChatHistory,
+                                })}
                               </>
                             )}
                             {/* Legacy chart placement: only when NOT layout-driven
                                 (the L4 layout renders its own TrendChart block). */}
                             {!msg.layout?.length &&
                             msg.visualization?.show_chart &&
-                            msg.visualization ? (
+                            msg.visualization &&
+                            !msg.hybrid_action_available ? (
                               <VisualizationRenderer
                                 visualization={msg.visualization}
                               />
